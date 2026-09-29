@@ -76,7 +76,7 @@ The Editor supports **create mode only**. Missing:
 | 5.2 | ~~Heartbeat on each re-run, with automatic expiry after 30 minutes~~ **Done (Phase 3):** `acquire_lock` / `heartbeat`, TTL from `ONE_PAGER_APP_LOCK_TTL_SECONDS` |
 | 5.3 | Release the lock on submit, cancel or manual release (the **Release my lock** button in Preview). **Manual release done (Phase 3):** `locking.release_lock`; submit and cancel call it in Phase 5 |
 | 5.4 | ~~Log an event when an expired lock is overridden~~ **Done (Phase 3)** |
-| 5.5 | Lock icon and holder initials in the **Registry** table |
+| 5.5 | ~~Lock icon and holder initials in the **Registry** table~~ **Done (Phase 3)** |
 
 ## 6. Review & comments (Backend §13, UI §4.3–4.4)
 
@@ -128,7 +128,7 @@ There is no `git_integration.py`.
 | 11.1 | **Use case** filter. `RegistryFilter` has no use case field. |
 | 11.2 | Clicking a metric card filters the table by that status |
 | 11.3 | Sortable columns |
-| 11.4 | Lock indicator in the table (same item as 5.5) |
+| 11.4 | ~~Lock indicator in the table (same item as 5.5)~~ **Done (Phase 3)** |
 
 ## 12. Preview gaps (UI §4.4)
 
@@ -199,7 +199,7 @@ Edit, workflow actions and page visibility all check roles, so roles come first.
 | 12 | 1.10 Segregation-of-duties check (as a permission function) | A pure function that Approve and Reject (1.3, 1.4) will call |
 | 13 | 4.5 Role badge in the sidebar, 4.4 role-based page visibility | Applied to existing pages now. New pages (Review, Admin, Help) use the same helper when they are added |
 
-### Phase 3: Locking
+### Phase 3: Locking — ✅ done
 
 Locking must exist before users can edit existing records, or two editors can overwrite each other.
 
@@ -207,7 +207,7 @@ Locking must exist before users can edit existing records, or two editors can ov
 |---|---|---|
 | 14 | ~~5.1 Acquire lock, 5.2 heartbeat and 30-minute expiry, 5.4 log expired-lock override~~ **Done** | Core of `locking.py` |
 | 15 | ~~5.3 Manual release (**Release my lock** in Preview)~~ **Done** | Release on submit and cancel is wired up in Phase 5 |
-| 16 | 5.5 / 11.4 Lock icon and holder initials in the Registry | Reads the same lock data |
+| 16 | ~~5.5 / 11.4 Lock icon and holder initials in the Registry~~ **Done** | Reads the same lock data |
 
 ### Phase 4: Editing existing One Pagers
 

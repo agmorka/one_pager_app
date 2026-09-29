@@ -447,6 +447,13 @@ class MockDataAccess(DataAccess):
         lock = self._locks.get(one_pager_id)
         return copy.copy(lock) if lock else None
 
+    def get_locks(self, one_pager_ids: list[str]) -> list[LockInfo]:
+        return [
+            copy.copy(self._locks[op_id])
+            for op_id in one_pager_ids
+            if op_id in self._locks
+        ]
+
     def write_lock(self, lock: LockInfo, *, now: datetime) -> bool:
         current = self._locks.get(lock.one_pager_id)
         if current is not None and not (

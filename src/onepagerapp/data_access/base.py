@@ -199,6 +199,15 @@ class DataAccess(ABC):
         ...
 
     @abstractmethod
+    def get_locks(self, one_pager_ids: list[str]) -> list[LockInfo]:
+        """Return the lock rows (expired or not) of the given One Pagers.
+
+        One query for a whole Registry page. One Pagers without a lock row are
+        simply absent from the result.
+        """
+        ...
+
+    @abstractmethod
     def write_lock(self, lock: LockInfo, *, now: datetime) -> bool:
         """Insert or replace the lock row of ``lock.one_pager_id``, conditionally.
 

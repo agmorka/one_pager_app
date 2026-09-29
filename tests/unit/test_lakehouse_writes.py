@@ -304,3 +304,36 @@ def test__delete_lock__only_the_holders_row() -> None:
     assert "locked_by_initials = :locked_by_initials" in statement
     _assert_not_interpolated(statement)
     assert params == {"one_pager_id": "OP-0001", "locked_by_initials": NASTY}
+
+
+@pytest.mark.unit
+def test__get_locks__one_parameterized_in_query() -> None:
+    columns = [
+        "one_pager_id",
+        "locked_by_initials",
+        "locked_by_name",
+        "session_id",
+        "acquired_at",
+        "last_heartbeat",
+        "expires_at",
+    ]
+    ts = "2026-09-29T10:00:00.000Z"
+    conn = _FakeConnection(
+        [_response(columns, [["OP-0001", "AB", "Alice", "s1", ts, ts, ts]])]
+    )
+
+    locks = _access(conn).get_locks(["OP-0001", NASTY])
+
+    statement, params = conn.calls[0]
+    assert "FROM cat.sch.locks WHERE one_pager_id IN (:id_0, :id_1)" in statement
+    _assert_not_interpolated(statement)
+    assert params == {"id_0": "OP-0001", "id_1": NASTY}
+    assert [lock.locked_by_initials for lock in locks] == ["AB"]
+    assert locks[0].expires_at == NOW
+
+
+@pytest.mark.unit
+def test__get_locks__empty_page_runs_no_query() -> None:
+    conn = _FakeConnection()
+    assert _access(conn).get_locks([]) == []
+    assert conn.calls == []

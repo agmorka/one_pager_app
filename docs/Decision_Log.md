@@ -363,5 +363,6 @@ Deleting `change_log` rows is permitted only in this compensation path, for an O
 - The TTL is `ONE_PAGER_APP_LOCK_TTL_SECONDS` (default 1800 = 30 minutes, Requirements §10), so integration tests can use a few seconds (Testing_Strategy §4).
 - An expired lock row stays in the table until it is overwritten or released; readers treat it as "not locked" (`locking.active_lock`).
 - **Release my lock** (Preview) calls `locking.release_lock`: only the holder (`locked_by_initials == user.initials`) may release, from any session; anyone else gets `PermissionDeniedError` and a `permission_denied` event. It is the only Preview action enabled in Phase 3. Lock times are shown in UTC.
+- The Registry reads the locks of the rows on the current page with one query (`DataAccess.get_locks`, filtered to active locks by `locking.get_active_locks`), never cached, and shows them in a **Lock** column as `🔒` plus the holder's initials. If the locks cannot be read, the table still renders with `?` in that column.
 
 **Why:** Delta does not enforce the `locks` primary key, so a read-then-insert would let two editors both believe they hold the lock. A guarded MERGE plus a read-back gives the same guarantee as the ID allocation's compare-and-set (`id_generator.next_id`) without a separate lock service.

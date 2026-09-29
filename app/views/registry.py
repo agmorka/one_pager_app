@@ -23,7 +23,8 @@ from adapters.theme import (
     get_dp_status_colors,
     get_op_status_colors,
 )
-from onepagerapp.models import RegistryFilter
+from onepagerapp.locking import get_active_locks
+from onepagerapp.models import LockInfo, RegistryFilter
 from onepagerapp.permissions import can_create_one_pager
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,9 @@ FILTER_DEFAULTS: dict[str, str] = {
 }
 
 # Table columns to display
-TABLE_COLUMNS = ["ID", "Product", "Domain", "DP Type", "Owner", "OP Status", "DP Status"]
+TABLE_COLUMNS = ["ID", "Product", "Domain", "DP Type", "Owner", "OP Status", "DP Status", "Lock"]
+
+LOCKS_UNAVAILABLE = "?"
 
 
 # ============================================================================
@@ -222,19 +225,44 @@ def _navigate_to_preview(one_pager_id: str) -> None:
 
 # Column layout ratios shared by the header and every data row so cells align.
 # Extra trailing column reserved for the per-row "View" action button.
-_ROW_COLUMN_RATIOS = [1.2, 2.2, 1.4, 1.3, 1.6, 1.3, 1.3, 1.0]
+_ROW_COLUMN_RATIOS = [1.2, 2.2, 1.4, 1.3, 1.6, 1.3, 1.3, 0.9, 1.0]
 
 # Prefix used for row-button keys so the CSS below can target only these buttons
 _ROW_KEY_PREFIX = "opview-"
 
 
-def _render_interactive_table(registry_page) -> None:
+def lock_cell(lock: LockInfo | None) -> str:
+    """Lock column text: icon plus the holder's initials (UI_Design.md §4.1, §7)."""
+    return f"🔒 {lock.locked_by_initials}" if lock else ""
+
+
+def _load_locks(data_access, registry_page) -> dict[str, LockInfo] | None:
+    """Active locks of the rows on this page, read fresh (never cached).
+
+    Returns None when the locks cannot be read; the table still renders.
+    """
+    try:
+        return get_active_locks(
+            data_access, [row.one_pager_id for row in registry_page.rows]
+        )
+    except Exception:
+        logger.exception("Failed to fetch locks for the registry page")
+        return None
+
+
+def _render_interactive_table(registry_page, locks: dict[str, LockInfo] | None) -> None:
     """Render registry data as a table with a "View" button on each row.
 
     Args:
         registry_page: Page object with rows and metadata.
+        locks: Active locks by One Pager ID, or None if they could not be read.
     """
-    st.caption("Click the View button on a row to open the One Pager in the Preview page.")
+    st.caption(
+        "Click the View button on a row to open the One Pager in the Preview page. "
+        "🔒 marks a One Pager that is being edited, with the editor's initials."
+    )
+    if locks is None:
+        st.caption("Lock status is unavailable right now.")
 
     # Header row
     header_cols = st.columns(_ROW_COLUMN_RATIOS)
@@ -252,6 +280,7 @@ def _render_interactive_table(registry_page) -> None:
             row.owner_name,
             row.one_pager_status,
             row.data_product_status,
+            lock_cell(locks.get(row.one_pager_id)) if locks is not None else LOCKS_UNAVAILABLE,
         ]
         row_cols = st.columns(_ROW_COLUMN_RATIOS)
         for col, value in zip(row_cols[:-1], values, strict=False):
@@ -295,17 +324,20 @@ def _render_pagination(current_page: int, total_pages: int) -> None:
 # Page State Renderers
 # ============================================================================
 
-def _render_page_state_populated(registry_page, total_pages: int, current_page: int) -> None:
+def _render_page_state_populated(
+    registry_page, total_pages: int, current_page: int, locks: dict[str, LockInfo] | None
+) -> None:
     """Render populated page state with interactive table and pagination.
     
     Args:
         registry_page: Page object with rows and metadata.
         total_pages: Total number of pages.
         current_page: Current page number.
+        locks: Active locks by One Pager ID, or None if unavailable.
     """
     st.markdown(f"**Showing {len(registry_page.rows)} of {registry_page.total_rows} One Pagers**")
     
-    _render_interactive_table(registry_page)
+    _render_interactive_table(registry_page, locks)
     
     if total_pages > 1:
         _render_pagination(current_page, total_pages)
@@ -455,7 +487,9 @@ try:
     
     # Render appropriate page state
     if registry_page.rows:
-        _render_page_state_populated(registry_page, total_pages, current_page)
+        _render_page_state_populated(
+            registry_page, total_pages, current_page, _load_locks(data_access, registry_page)
+        )
     elif not has_active_filter and registry_page.total_rows == 0:
         _render_page_state_empty_no_filters()
     elif has_active_filter and registry_page.total_rows == 0:

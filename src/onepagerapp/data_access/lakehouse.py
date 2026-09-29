@@ -515,43 +515,44 @@ class LakehouseAccess(DataAccess):
 
     def get_lock(self, one_pager_id: str) -> LockInfo | None:
         """Check if a One Pager is currently locked for editing."""
-        fqn = f"{self._fqn_prefix}.locks"
-        
-        query = (
-            f"SELECT "
-            f"one_pager_id, locked_by_initials, locked_by_name, session_id, "
-            f"acquired_at, last_heartbeat, expires_at "
-            f"FROM {fqn} "
-            f"WHERE one_pager_id = :one_pager_id"
-        )
-        
         try:
-            response = self._connection.execute_statement(
-                query, parameters={"one_pager_id": one_pager_id}
-            )
-            
-            schema = response.manifest.schema if response.manifest else None
-            columns = [col.name for col in (schema.columns if schema else None) or []]
-            rows = (response.result.data_array if response.result else None) or []
-            
-            if not rows:
-                return None
-            
-            row = rows[0]
-            row_dict = dict(zip(columns, row, strict=False))
-            
-            return LockInfo(
-                one_pager_id=row_dict["one_pager_id"],
-                locked_by_initials=row_dict["locked_by_initials"],
-                locked_by_name=row_dict["locked_by_name"],
-                session_id=row_dict["session_id"],
-                acquired_at=self._parse_timestamp(row_dict["acquired_at"]),
-                last_heartbeat=self._parse_timestamp(row_dict["last_heartbeat"]),
-                expires_at=self._parse_timestamp(row_dict["expires_at"]),
-            )
+            locks = self._select_locks([one_pager_id])
         except Exception as e:
             logger.error(f"Failed to fetch lock for {one_pager_id}: {e}")
             raise RuntimeError(f"Failed to fetch lock: {e}") from e
+        return locks[0] if locks else None
+
+    def get_locks(self, one_pager_ids: list[str]) -> list[LockInfo]:
+        """Fetch the lock rows of a page of One Pagers in one query."""
+        if not one_pager_ids:
+            return []
+        try:
+            return self._select_locks(one_pager_ids)
+        except Exception as e:
+            logger.error(f"Failed to fetch locks: {e}")
+            raise RuntimeError(f"Failed to fetch locks: {e}") from e
+
+    def _select_locks(self, one_pager_ids: list[str]) -> list[LockInfo]:
+        fqn = f"{self._fqn_prefix}.locks"
+        markers = ", ".join(f":id_{i}" for i in range(len(one_pager_ids)))
+        response = self._connection.execute_statement(
+            "SELECT one_pager_id, locked_by_initials, locked_by_name, session_id, "  # noqa: S608
+            f"acquired_at, last_heartbeat, expires_at FROM {fqn} "
+            f"WHERE one_pager_id IN ({markers})",
+            parameters={f"id_{i}": op_id for i, op_id in enumerate(one_pager_ids)},
+        )
+        return [
+            LockInfo(
+                one_pager_id=str(row["one_pager_id"]),
+                locked_by_initials=str(row["locked_by_initials"]),
+                locked_by_name=str(row["locked_by_name"]),
+                session_id=str(row["session_id"]),
+                acquired_at=self._parse_timestamp(row["acquired_at"]),
+                last_heartbeat=self._parse_timestamp(row["last_heartbeat"]),
+                expires_at=self._parse_timestamp(row["expires_at"]),
+            )
+            for row in self._response_rows(response)
+        ]
 
     def write_lock(self, lock: LockInfo, *, now: datetime) -> bool:
         """Upsert the lock row with one MERGE, guarded by the takeover rules.

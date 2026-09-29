@@ -17,6 +17,7 @@ from onepagerapp.locking import (
     acquire_lock,
     active_lock,
     get_active_lock,
+    get_active_locks,
     heartbeat,
     is_expired,
     release_lock,
@@ -328,3 +329,17 @@ def test__release_lock_action_state__only_for_the_holder() -> None:
         "Only the lock holder can release this lock"
     )
     assert not state("AB", False, None).enabled
+
+
+@pytest.mark.unit
+def test__get_active_locks__one_read_for_many_ids(
+    mock_data_access: MockDataAccess,
+) -> None:
+    _acquire(mock_data_access)
+    acquire_lock(mock_data_access, "OP-0002", MAJA, "s9", ttl=TTL, now=T0 - 2 * TTL)
+
+    locks = get_active_locks(mock_data_access, ["OP-0001", "OP-0002", "OP-9999"], T0)
+
+    assert list(locks) == ["OP-0001"]
+    assert locks["OP-0001"].locked_by_initials == "AB"
+    assert get_active_locks(mock_data_access, [], T0) == {}

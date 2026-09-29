@@ -106,6 +106,18 @@ def get_active_lock(
     return active_lock(data_access.get_lock(one_pager_id), now)
 
 
+def get_active_locks(
+    data_access: DataAccess, one_pager_ids: list[str], now: datetime | None = None
+) -> dict[str, LockInfo]:
+    """Active locks of several One Pagers (Registry page), keyed by One Pager ID."""
+    now = now or utc_now()
+    return {
+        lock.one_pager_id: lock
+        for lock in data_access.get_locks(one_pager_ids)
+        if not is_expired(lock, now)
+    }
+
+
 def is_held_by(
     lock: LockInfo, user: CurrentUser, session_id: str | None = None
 ) -> bool:
