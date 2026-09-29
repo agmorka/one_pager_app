@@ -49,6 +49,21 @@ class AppConfig(BaseModel):
             "30 minutes in every environment; tests override it."
         ),
     )
+    ONE_PAGER_APP_APPROVERS: str = Field(
+        "",
+        description=(
+            "Comma-separated initials of the users who act as Approvers. "
+            "Interim stand-in for the Approver UC group until group names are "
+            "decided (Architecture.md §4)."
+        ),
+    )
+    ONE_PAGER_APP_ADMINS: str = Field(
+        "",
+        description=(
+            "Comma-separated initials of the users who act as Admins. Interim "
+            "stand-in for the Admin UC group (Architecture.md §4)."
+        ),
+    )
     CLOUD_ROLE_NAME: str = "OnePagerApp"
 
     @classmethod
@@ -63,6 +78,16 @@ class AppConfig(BaseModel):
     def lock_ttl(self) -> timedelta:
         """How long an edit lock lives after its last heartbeat."""
         return timedelta(seconds=self.ONE_PAGER_APP_LOCK_TTL_SECONDS)
+
+    @property
+    def approver_initials(self) -> frozenset[str]:
+        """Initials configured in ONE_PAGER_APP_APPROVERS (upper case)."""
+        return _initials_list(self.ONE_PAGER_APP_APPROVERS)
+
+    @property
+    def admin_initials(self) -> frozenset[str]:
+        """Initials configured in ONE_PAGER_APP_ADMINS (upper case)."""
+        return _initials_list(self.ONE_PAGER_APP_ADMINS)
 
     @property
     def is_mock(self) -> bool:
@@ -89,3 +114,9 @@ class AppConfig(BaseModel):
     @property
     def uses_databricks(self) -> bool:
         return self.APP_MODE in (AppMode.DATABRICKS, AppMode.LOCAL_INTEGRATION)
+
+
+def _initials_list(value: str) -> frozenset[str]:
+    return frozenset(
+        part.strip().upper() for part in value.split(",") if part.strip()
+    )

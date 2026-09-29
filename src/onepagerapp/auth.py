@@ -7,7 +7,9 @@ isolated here so it can be updated if the username format changes.
 
 import re
 
+from onepagerapp.config import AppConfig
 from onepagerapp.models import CurrentUser
+from onepagerapp.state_machine import Actor
 
 # Corporate usernames look like "<initials>ADM@BECOC001.onmicrosoft.com"
 # (Requirements_and_Scope.md §2), e.g. "MJOADM@..." -> "MJO".
@@ -75,3 +77,22 @@ def resolve_current_user(username: str) -> CurrentUser:
         initials=initials_from_username(username),
         display_name=display_name_from_username(username),
     )
+
+
+def resolve_roles(user: CurrentUser | None, config: AppConfig) -> frozenset[Actor]:
+    """Group roles (Approver, Admin) of the user.
+
+    Architecture.md §4 backs these roles with Unity Catalog groups whose names
+    are not decided yet (Phase 2, item 4.1). Until then the members are
+    configured by initials in ``ONE_PAGER_APP_APPROVERS`` and
+    ``ONE_PAGER_APP_ADMINS``; switching to the group lookup only changes this
+    function. Owner/SME is per record and never returned here.
+    """
+    if not (user and user.initials):
+        return frozenset()
+    roles: set[Actor] = set()
+    if user.initials in config.approver_initials:
+        roles.add(Actor.APPROVER)
+    if user.initials in config.admin_initials:
+        roles.add(Actor.ADMIN)
+    return frozenset(roles)

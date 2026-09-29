@@ -22,14 +22,14 @@ Features the docs themselves mark as future work (Version History / version comp
 |---|---|---|
 | 1.1 | ~~Generic `TRANSITIONS` state machine (a single source of truth for allowed transitions)~~ **Done (Phase 5):** `state_machine.TRANSITIONS`, executed by `workflow.apply_transitions` (one conditional status update, one change-log insert, rollback on failure) | Backend §2 |
 | 1.2 | ~~**Submit for Review**: atomic `Draft`/`Draft Update` → `Ready for Review` → `In Review`, with strict validation and rollback~~ **Done (Phase 5):** `workflow.submit_for_review`, the Editor's **Submit for Review** (disabled while there are unsaved changes); releases the lock | Req §6, Backend §2 |
-| 1.3 | **Approve** (`In Review` → `Approved`): version set to `1.0.0` or next MAJOR, automatic DP status change, two change-log entries | Req §6–7, Backend §8 |
-| 1.4 | **Reject** (`In Review` → `Draft`) with a mandatory comment, stored in `review_comments` | Req §6, Backend §2, §13 |
-| 1.5 | **Update** (`Approved` → `Draft Update`): read the approved YAML and write a working copy, with a confirmation dialog | Req §5, Backend §2, UI §4.4 |
+| 1.3 | ~~**Approve** (`In Review` → `Approved`): version set to `1.0.0` or next MAJOR, automatic DP status change, two change-log entries~~ **Done (Phase 6):** `workflow.approve_one_pager` writes the approved version file, then the status row and both change-log entries; **Approve** in Preview shows the resulting version and DP status first. The Git PR (and `pending_pr`) follows in Phase 8 | Req §6–7, Backend §8 |
+| 1.4 | ~~**Reject** (`In Review` → `Draft`) with a mandatory comment, stored in `review_comments`~~ **Done (Phase 6):** `workflow.reject_one_pager`; the comment is a document-level, unresolved review comment and is appended to the change-log summary; sets `reviewed_at` / `reviewed_by` | Req §6, Backend §2, §13 |
+| 1.5 | ~~**Update** (`Approved` → `Draft Update`): read the approved YAML and write a working copy, with a confirmation dialog~~ **Done (Phase 6):** `workflow.start_update`, **Update** in Preview with the confirmation dialog of UI §4.4. The approved version file (read from the volume) is the working copy; the next Save Draft writes `MAJOR.1.0` beside it. No lock is taken until the Editor opens. A rejected update returns to `Draft Update` (Decision_Log §16) | Req §5, Backend §2, UI §4.4 |
 | 1.6 | ~~**Cancel** (`Draft`/`Ready for Review`/`In Review` → `Cancelled`, which also sets DP to `Cancelled`), by the Owner/SME or an Admin~~ **Done (Phase 5):** `workflow.cancel_one_pager`, **Cancel One Pager** in Preview with a confirmation dialog; releases any active lock | Req §6 |
 | 1.7 | ~~Owner-initiated **DP status transitions**: start development, activate, deprecate (with confirmation)~~ **Done (Phase 5):** `workflow.change_data_product_status`, **Change DP Status** menu in Preview (only valid targets; Deprecate asks for confirmation). Only while the One Pager is `Approved`: in `Draft Update` the DP status is preserved (Req §6) | Req §6, Backend §3 |
-| 1.8 | System-driven DP transitions (`Ready for Development` on first approval, `In Enhancement` on re-approval, `Cancelled` on cancel). **Cancel part done (Phase 5)**; the rules for the approval part are in `TRANSITIONS` and are applied by Approve in Phase 6 | Req §6, Backend §3 |
+| 1.8 | ~~System-driven DP transitions (`Ready for Development` on first approval, `In Enhancement` on re-approval, `Cancelled` on cancel)~~ **Done:** cancel part in Phase 5, approval part in Phase 6 (`workflow.plan_approval`; a DP already `In Enhancement` keeps it) | Req §6, Backend §3 |
 | 1.9 | ~~Enforcement of valid OP/DP status combinations~~ **Done (Phase 5):** `state_machine.VALID_COMBINATIONS`, checked on every transition | Req §6 |
-| 1.10 | Segregation of duties: an Approver cannot approve or reject a One Pager where they are Owner/SME | Req §6, Arch §4 |
+| 1.10 | ~~Segregation of duties: an Approver cannot approve or reject a One Pager where they are Owner/SME~~ **Done (Phase 6):** checked by the review decisions from the `TRANSITIONS` guard (`segregation_of_duties`), logged as a permission denial | Req §6, Arch §4 |
 
 ## 2. Editing existing One Pagers (Req §5, UI §4.2)
 
@@ -39,7 +39,7 @@ The Editor has create mode and, from Phase 4, edit mode. Missing:
 |---|---|
 | 2.1 | ~~Edit mode for an existing One Pager (open from Preview → Edit, pre-filled form)~~ **Done (Phase 4):** `editing.open_for_edit`, `adapters/edit_mode.py`; acquires the lock on open and on every re-run (heartbeat) |
 | 2.2 | ~~**Save Draft** with lenient validation, a required change summary, a MINOR version bump, a new YAML version file and a change-log entry (Backend §7)~~ **Done (Phase 4):** `editing.save_draft`; the caller's session must hold the edit lock; the status row update is conditional on the version the editor started from |
-| 2.3 | Editor tabs other than Basics: ~~**Use Cases** (link existing / create new inline / unlink), **Business Requirements** (with automatic `BR-###` IDs), **Data Sources**, **Data Product Preview** (data element grid), **Classification** (with retention requirements), **Governance** (business concepts, CDE quality, CDE lineage), **Scope & Questions** (out of scope, open questions, assumptions)~~ **Done (Phase 4):** `app/adapters/edit_tabs.py`. Still missing: **Review** (validation checklist, resolve comments, submit) — Phase 6 |
+| 2.3 | Editor tabs other than Basics: ~~**Use Cases** (link existing / create new inline / unlink), **Business Requirements** (with automatic `BR-###` IDs), **Data Sources**, **Data Product Preview** (data element grid), **Classification** (with retention requirements), **Governance** (business concepts, CDE quality, CDE lineage), **Scope & Questions** (out of scope, open questions, assumptions)~~ **Done (Phase 4):** `app/adapters/edit_tabs.py`. ~~**Review** (validation checklist, resolve comments, submit)~~ **Done (Phase 6):** `edit_mode.render_review_tab` — checklist per tab (each issue opens its tab), unresolved comments with **Mark resolved**, and **Submit for Review** (enabled when strict validation passes and nothing is unsaved) |
 | 2.4 | ~~Repeating-items pattern: add, edit and remove for array sections~~ **Done (Phase 4):** `app/adapters/repeating.py` (summary table, inline add/edit form, remove with confirmation) |
 | 2.5 | ~~Validation error badges on tabs, plus a clickable validation summary~~ **Done (Phase 4):** badges show the strict-tier issues per tab (`editing.submission_issues`); every summary entry opens its tab. The badges sit in a line under the tab bar, because changing the tab labels would reset the selected tab |
 | 2.6 | ~~Unsaved-changes guard on sidebar navigation~~ **Done (Phase 4):** Streamlit cannot block sidebar navigation, so the guard runs on the page the user lands on: unsaved changes are kept and a dialog offers **Return to the Editor** / **Discard changes**; a clean edit session is closed and its lock released. **Close editor** asks first when there are unsaved changes |
@@ -60,7 +60,7 @@ The Editor has create mode and, from Phase 4, edit mode. Missing:
 
 | # | Feature |
 |---|---|
-| 4.1 | Coarse role resolution from **Unity Catalog group membership** (Owner/SME, Approver, Admin, Viewer). Today every authenticated user may create One Pagers and manage Use Cases. |
+| 4.1 | Coarse role resolution from **Unity Catalog group membership** (Owner/SME, Approver, Admin, Viewer). Today every authenticated user may create One Pagers and manage Use Cases. **Interim (Phase 6):** `auth.resolve_roles` gives Approver/Admin from the initials in `ONE_PAGER_APP_APPROVERS` / `ONE_PAGER_APP_ADMINS`; switching to UC groups only changes that function |
 | 4.2 | ~~Per-record check: `check_can_edit` against `one_pager_authorized_users`~~ **Done (Phase 4, step 17):** `permissions.check_can_edit` / `edit_denied_reason` (Owner/SME and status `Draft` / `Draft Update`); the Owner/SME UC group check still waits for 4.1 |
 | 4.3 | ~~Real `get_action_states`. Today every action is hard-coded as disabled.~~ **Done (Phase 5):** derived from `TRANSITIONS` guards; actions whose service is not built yet stay disabled ("coming soon"). Approver/Admin roles wait for 4.1 |
 | 4.4 | Pages hidden or shown by role (Review for Approvers only, Admin for Admins only, Editor for Owner/SME only) |
@@ -82,10 +82,10 @@ The Editor has create mode and, from Phase 4, edit mode. Missing:
 
 | # | Feature |
 |---|---|
-| 6.1 | **Review page** (`3_Review.py`): an Approver queue of `In Review` items, sorted oldest first |
-| 6.2 | Approver adds section-level review comments in Preview |
-| 6.3 | Owner marks comments as resolved (`resolved_by`, `resolved_at`) |
-| 6.4 | "Review mode" in Preview, with a Reject dialog |
+| 6.1 | ~~**Review page** (`3_Review.py`): an Approver queue of `In Review` items, sorted oldest first~~ **Done (Phase 6):** `app/views/review.py`, `review.get_review_queue`; in the navigation for Approvers only; **Review** opens Preview in review mode |
+| 6.2 | ~~Approver adds section-level review comments in Preview~~ **Done (Phase 6):** `review.add_review_comment`, **Add Comment** in Preview (section + text) while `In Review`, same segregation of duties as Approve/Reject |
+| 6.3 | ~~Owner marks comments as resolved (`resolved_by`, `resolved_at`)~~ **Done (Phase 6):** `review.resolve_review_comment`, **Mark resolved** per unresolved comment in Preview for the Owner/SMEs while `Draft` / `Draft Update` |
+| 6.4 | ~~"Review mode" in Preview, with a Reject dialog~~ **Done (Phase 6):** opened from the Review queue; banner with **Back to Review queue**; **Reject** asks for a mandatory reason |
 
 ## 7. Git integration (Req §13, Arch §6, Backend §8)
 
@@ -135,7 +135,7 @@ There is no `git_integration.py`.
 | # | Feature |
 |---|---|
 | 12.1 | ~~Content sections that are not rendered: **Governance artifacts**, **Out of Scope**, **Open Questions** and **Assumptions**. `OnePagerDocument` does not model these fields either. Use Case IDs (`UC-###`) and BR IDs are not shown.~~ **Done (Phase 1):** modelled in `OnePagerDocument` (v2 schema) and rendered in Preview |
-| 12.2 | Role- and status-dependent actions: Edit, Update, Change DP Status dropdown, Approve, Reject, Cancel, Add Comment, Resolve, Release lock, Export PDF. **Partly done (Phase 5):** the Preview action bar only shows the actions that apply to the user's role and the statuses; Edit and Release lock work |
+| 12.2 | Role- and status-dependent actions: Edit, Update, Change DP Status dropdown, Approve, Reject, Cancel, Add Comment, Resolve, Release lock, Export PDF. **Partly done (Phase 5):** the Preview action bar only shows the actions that apply to the user's role and the statuses; Edit and Release lock work. **Phase 6:** every action works except Export PDF (Phase 9) |
 | 12.3 | ~~Error states show raw exception text (`st.error(f"... {e}")`). The docs require a friendly message and a Retry button, with no internals shown.~~ **Done (Phase 0)** |
 | 12.4 | ~~Opening Preview without an ID silently defaults to `OP-0001`~~ **Done (Phase 0):** Preview asks the user to pick a One Pager from the Registry |
 
@@ -232,16 +232,16 @@ Locking must exist before users can edit existing records, or two editors can ov
 | 28 | ~~1.6 Cancel, with 1.8 (cancel part) DP → `Cancelled`~~ **Done** | Simple transition that also exercises the system DP transitions |
 | 29 | ~~1.7 Owner-initiated DP transitions (start development, activate, deprecate)~~ **Done** | Uses the same state machine. Only reachable after Approve, but can be unit-tested now |
 
-### Phase 6: Review and approval (approver side)
+### Phase 6: Review and approval (approver side) — ✅ done
 
 | Order | Item | Why now |
 |---|---|---|
-| 30 | 6.1 Review page (Approver queue) | Needs `In Review` items from Submit (1.2) and the Approver role (4.1) |
-| 31 | 6.4 Review mode in Preview, 1.4 Reject with a mandatory comment | Reject writes the first `review_comments` rows |
-| 32 | 1.3 Approve (version `1.0.0` / next MAJOR, two change-log entries), 1.8 (approval part) DP → `Ready for Development` / `In Enhancement` | Uses segregation of duties (1.10) |
-| 33 | 6.2 Section-level review comments, 6.3 Owner resolves comments | Builds on the comment storage from Reject |
-| 34 | 2.3 Editor Review tab (checklist, resolve comments, submit) | Needs Submit, comments and the strict tier |
-| 35 | 1.5 Update (`Approved` → `Draft Update`) | Needs approved records. Reads the approved YAML from the volume for now. Phase 8 switches it to Git |
+| 30 | ~~6.1 Review page (Approver queue)~~ **Done** | Needs `In Review` items from Submit (1.2) and the Approver role (4.1, interim config-based roles) |
+| 31 | ~~6.4 Review mode in Preview, 1.4 Reject with a mandatory comment~~ **Done** | Reject writes the first `review_comments` rows |
+| 32 | ~~1.3 Approve (version `1.0.0` / next MAJOR, two change-log entries), 1.8 (approval part) DP → `Ready for Development` / `In Enhancement`~~ **Done** | Uses segregation of duties (1.10) |
+| 33 | ~~6.2 Section-level review comments, 6.3 Owner resolves comments~~ **Done** | Builds on the comment storage from Reject |
+| 34 | ~~2.3 Editor Review tab (checklist, resolve comments, submit)~~ **Done** | Needs Submit, comments and the strict tier |
+| 35 | ~~1.5 Update (`Approved` → `Draft Update`)~~ **Done** | Needs approved records. Reads the approved YAML from the volume for now. Phase 8 switches it to Git |
 
 At the end of Phase 6 the full lifecycle works end to end, without Git.
 

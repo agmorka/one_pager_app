@@ -46,6 +46,7 @@ def test__op_transitions_match_backend_design() -> None:
         ("Ready for Review", "In Review"): "owner_submit_for_review",
         ("In Review", "Approved"): "approver_approve",
         ("In Review", "Draft"): "approver_reject",
+        ("In Review", "Draft Update"): "approver_reject",  # Decision_Log §16
         ("Approved", "Draft Update"): "owner_update",
         ("Draft", "Cancelled"): "cancel",
         ("Ready for Review", "Cancelled"): "cancel",
@@ -104,6 +105,9 @@ def test__get_rule__unknown_transition() -> None:
     [
         ("Draft", "In Definition", True),
         ("In Review", "In Definition", True),
+        ("In Review", "Active", True),  # review of an update (Decision_Log §16)
+        ("Ready for Review", "In Development", True),
+        ("In Review", "Cancelled", False),
         ("Draft", "Active", False),
         ("Approved", "Ready for Development", True),
         ("Approved", "In Definition", False),
@@ -266,3 +270,12 @@ def test__apply_transitions__change_log_failure_rolls_back(
         apply_transitions(data_access, row, SUBMIT, creator, now=NOW)
 
     assert data_access.get_one_pager_status_row("OP-0003").one_pager_status == "Draft"
+
+
+@pytest.mark.unit
+def test__reject_target__update_cycles_return_to_draft_update() -> None:
+    from onepagerapp.state_machine import reject_target  # noqa: PLC0415
+
+    assert reject_target("In Definition") == "Draft"
+    for dp in ("Ready for Development", "In Development", "Active", "In Enhancement"):
+        assert reject_target(dp) == "Draft Update"

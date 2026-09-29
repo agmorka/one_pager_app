@@ -366,3 +366,18 @@ Deleting `change_log` rows is permitted only in this compensation path, for an O
 - The Registry reads the locks of the rows on the current page with one query (`DataAccess.get_locks`, filtered to active locks by `locking.get_active_locks`), never cached, and shows them in a **Lock** column as `🔒` plus the holder's initials. If the locks cannot be read, the table still renders with `?` in that column.
 
 **Why:** Delta does not enforce the `locks` primary key, so a read-then-insert would let two editors both believe they hold the lock. A guarded MERGE plus a read-back gives the same guarantee as the ID allocation's compare-and-set (`id_generator.next_id`) without a separate lock service.
+
+---
+
+## 16. Data Product Status During the Review of an Update
+
+**Context:** Requirements §6 lets an approved One Pager go `Approved` → `Draft Update` → `Ready for Review` → `In Review` → `Approved` while the Data Product status is preserved, but its valid-combinations table allows only `In Definition` with `Ready for Review` and `In Review`, and a Reject always returns to `Draft` (whose only valid DP status is `In Definition`). Taken literally, an update could never be submitted, and rejecting one would produce an invalid pair. The Cancel guard ("only while the Data Product is `In Definition`") already assumes that `Draft` / `Ready for Review` / `In Review` can carry other DP statuses.
+
+**Decision:**
+
+- `Ready for Review` and `In Review` are valid with `In Definition` (first review) and with every post-approval DP status (review of an update, DP preserved).
+- A Reject returns to `Draft` when the Data Product is `In Definition`, and to **`Draft Update`** otherwise (`approver_reject` `In Review` → `Draft Update`, change-log summary "Update rejected"). `Draft` stays `In Definition` only, so a rejected update is never mistaken for a first draft, and Cancel stays unavailable for it as for any `Draft Update`.
+- Approve tells a first approval from a re-approval by the DP status: `In Definition` → `Ready for Development`, anything else → `In Enhancement` (a DP already `In Enhancement` keeps it).
+
+**Why:** It is the smallest change that makes the documented update cycle work end to end, keeps "Draft Update: DP preserved" true through the whole cycle, and keeps every status pair checked by `VALID_COMBINATIONS`.
+

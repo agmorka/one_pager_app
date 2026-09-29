@@ -61,10 +61,12 @@ POST_APPROVAL_DP_STATUSES = (
 # Requirements_and_Scope.md §6, "Valid status combinations". A first approval
 # always gives Ready for Development and a re-approval In Enhancement; the
 # Owner can move it on from there, and Draft Update keeps whatever it was.
+# The review of an update (Draft Update → Ready for Review → In Review) keeps
+# the preserved DP status too (Decision_Log.md §16).
 VALID_COMBINATIONS: dict[str, tuple[str, ...]] = {
     DRAFT: (IN_DEFINITION,),
-    READY_FOR_REVIEW: (IN_DEFINITION,),
-    IN_REVIEW: (IN_DEFINITION,),
+    READY_FOR_REVIEW: (IN_DEFINITION, *POST_APPROVAL_DP_STATUSES),
+    IN_REVIEW: (IN_DEFINITION, *POST_APPROVAL_DP_STATUSES),
     APPROVED: POST_APPROVAL_DP_STATUSES,
     DRAFT_UPDATE: POST_APPROVAL_DP_STATUSES,
     OP_CANCELLED: (DP_CANCELLED,),
@@ -233,6 +235,21 @@ _RULES: tuple[TransitionRule, ...] = (
         (Actor.APPROVER,),
         "Reject",
         "One Pager rejected",
+        requires_dp_status=(IN_DEFINITION,),
+        segregation_of_duties=True,
+        requires_comment=True,
+        requires_confirmation=True,
+    ),
+    # A rejected update goes back to Draft Update: the DP status stays as it
+    # was before the update (Decision_Log.md §16).
+    _op(
+        "approver_reject",
+        IN_REVIEW,
+        DRAFT_UPDATE,
+        (Actor.APPROVER,),
+        "Reject",
+        "Update rejected",
+        requires_dp_status=POST_APPROVAL_DP_STATUSES,
         segregation_of_duties=True,
         requires_comment=True,
         requires_confirmation=True,
@@ -359,6 +376,15 @@ def transitions_from(
         and rule.from_status == from_status
         and (actor is None or actor in rule.actors)
     ]
+
+
+def reject_target(data_product_status: str) -> str:
+    """Return the One Pager status a Reject goes back to.
+
+    ``Draft``, or ``Draft Update`` when the rejected review was of an update
+    (the Data Product was approved before).
+    """
+    return DRAFT if data_product_status == IN_DEFINITION else DRAFT_UPDATE
 
 
 def is_valid_combination(op_status: str, dp_status: str) -> bool:

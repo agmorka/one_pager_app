@@ -92,3 +92,115 @@ def test__change_dp_status_and_report(
         data_access, "OP-0001", "Deprecated", alice, confirmed=True
     )
     assert "cannot change from In Development to Deprecated" in error
+
+
+@pytest.mark.unit
+def test__reject__requires_a_reason_then_reports_success(
+    actions: ModuleType, data_access: MockDataAccess
+) -> None:
+    from onepagerapp.state_machine import Actor  # noqa: PLC0415
+
+    approver = resolve_current_user("cjo@bec.dk")
+    roles = frozenset({Actor.APPROVER})
+    st.session_state["preview_review_mode"] = "OP-0002"
+
+    error = actions.reject_and_report(data_access, "OP-0002", approver, " ", roles)
+    assert error == "Explain why the One Pager is rejected."
+    assert data_access.get_one_pager_status_row("OP-0002").one_pager_status == (
+        "In Review"
+    )
+
+    error = actions.reject_and_report(
+        data_access, "OP-0002", approver, "Data sources missing", roles
+    )
+    assert error is None
+    assert data_access.get_one_pager_status_row("OP-0002").one_pager_status == "Draft"
+    assert "rejected" in st.session_state["preview_flash"]
+    assert "preview_review_mode" not in st.session_state
+
+
+@pytest.mark.unit
+def test__reject__self_review_is_reported(
+    actions: ModuleType, data_access: MockDataAccess
+) -> None:
+    from onepagerapp.state_machine import Actor  # noqa: PLC0415
+
+    owner = resolve_current_user("bob.smith@company.com")  # Owner of OP-0002
+    error = actions.reject_and_report(
+        data_access, "OP-0002", owner, "No", frozenset({Actor.APPROVER})
+    )
+    assert error == "You cannot review a One Pager on which you are Owner or SME."
+
+
+@pytest.mark.unit
+def test__approve__reports_the_new_version(
+    actions: ModuleType, data_access: MockDataAccess, tmp_path: Path
+) -> None:
+    from onepagerapp.state_machine import Actor  # noqa: PLC0415
+
+    store = OnePagerDocumentStore(FIXTURES_DIR, write_path=tmp_path / "approve")
+    approver = resolve_current_user("cjo@bec.dk")
+    st.session_state["preview_review_mode"] = "OP-0002"
+
+    error = actions.approve_and_report(
+        data_access, store, "OP-0002", approver, frozenset({Actor.APPROVER})
+    )
+
+    assert error is None
+    assert st.session_state["preview_flash"] == (
+        "OP-0002 was approved as v1.0.0. The Data Product is now "
+        "Ready for Development."
+    )
+    assert "preview_review_mode" not in st.session_state
+
+    error = actions.approve_and_report(
+        data_access, store, "OP-0002", approver, frozenset({Actor.APPROVER})
+    )
+    assert error == "The One Pager is Approved, not In Review."
+
+
+@pytest.mark.unit
+def test__add_comment__reports_errors_and_success(
+    actions: ModuleType, data_access: MockDataAccess
+) -> None:
+    from onepagerapp.state_machine import Actor  # noqa: PLC0415
+
+    approver = resolve_current_user("cjo@bec.dk")
+    roles = frozenset({Actor.APPROVER})
+
+    assert (
+        actions.add_comment_and_report(
+            data_access, "OP-0002", approver, "useCases", " ", roles
+        )
+        == "Write a comment."
+    )
+    assert (
+        actions.add_comment_and_report(
+            data_access, "OP-0002", approver, "useCases", "Link UC-001", roles
+        )
+        is None
+    )
+    assert st.session_state["preview_flash"] == "Your review comment was added."
+    [comment] = data_access.get_review_comments("OP-0002")
+
+    owner = resolve_current_user("bob.smith@company.com")
+    error = actions.resolve_comment_and_report(
+        data_access, "OP-0002", comment.id, owner
+    )
+    assert error == (
+        "Comments are resolved while the One Pager is being reworked (Draft)."
+    )
+
+
+@pytest.mark.unit
+def test__update__reports_success_and_errors(
+    actions: ModuleType, data_access: MockDataAccess, alice: CurrentUser
+) -> None:
+    assert actions.update_and_report(data_access, "OP-0001", alice) is None
+    assert "Draft Update" in st.session_state["preview_flash"]
+    assert data_access.get_one_pager_status_row("OP-0001").one_pager_status == (
+        "Draft Update"
+    )
+
+    error = actions.update_and_report(data_access, "OP-0001", alice)
+    assert error == "One Pager status cannot change from Draft Update to Draft Update."

@@ -18,7 +18,6 @@ from onepagerapp.models import AuthorizedUser, CurrentUser, LockInfo
 from onepagerapp.state_machine import (
     APPROVED,
     DP_STATUS_FIELD,
-    DRAFT,
     DRAFT_UPDATE,
     OP_CANCELLED,
     OP_STATUS_FIELD,
@@ -26,6 +25,7 @@ from onepagerapp.state_machine import (
     Actor,
     TransitionRule,
     guard_failure,
+    reject_target,
     transitions_from,
 )
 
@@ -138,6 +138,15 @@ def check_can_edit(
     raise PermissionDeniedError(reason)
 
 
+def can_review(roles: Collection[Actor]) -> bool:
+    """Whether the user may use the Review queue and review One Pagers.
+
+    Approvers only (UI_Design.md §2, "Page visibility by role"). Segregation of
+    duties is checked per One Pager when approving or rejecting.
+    """
+    return Actor.APPROVER in roles
+
+
 def can_release_lock(user: CurrentUser | None, lock: LockInfo | None) -> bool:
     """Check if the user may release a lock: only its holder may (Backend §6)."""
     return bool(user and lock and lock.locked_by_initials == user.initials)
@@ -185,17 +194,22 @@ def can_manage_use_cases(current_user: str | None) -> bool:
 # Actions whose service exists; the others are shown disabled ("coming soon")
 # when they would apply.
 IMPLEMENTED_ACTIONS: frozenset[str] = frozenset(
-    {"edit", "release_lock", "cancel", "change_dp_status"}
+    {
+        "edit",
+        "release_lock",
+        "cancel",
+        "change_dp_status",
+        "reject",
+        "approve",
+        "add_comment",
+        "resolve_comment",
+        "update",
+    }
 )
 
 COMING_SOON = {
-    "update": "Update arrives with the review workflow",
-    "approve": "Approve arrives with the review workflow",
-    "reject": "Reject arrives with the review workflow",
     "cancel": "Cancel coming soon",
     "change_dp_status": "Change DP Status coming soon",
-    "add_comment": "Review comments arrive with the review workflow",
-    "resolve_comment": "Review comments arrive with the review workflow",
     "export_pdf": "Export PDF coming soon",
 }
 
@@ -227,8 +241,8 @@ def get_action_states(  # noqa: PLR0913 - the context of one Preview page
         authorized_initials: Initials of the Owner/SMEs of this One Pager
             (``one_pager_authorized_users``).
         data_product_status: Current Data Product status.
-        roles: Group roles of the user (Approver, Admin). Unity Catalog group
-            resolution is not implemented yet (Phase 2), so callers pass none.
+        roles: Group roles of the user (Approver, Admin), from
+            ``auth.resolve_roles``.
 
     Returns:
         Dictionary mapping action name (e.g. "edit", "approve") to ActionState.
@@ -247,16 +261,16 @@ def get_action_states(  # noqa: PLR0913 - the context of one Preview page
         "edit": _edit_state(
             current_user_initials, one_pager_status, authorized_initials, holder
         ),
-        "update": context.rule_state(OP_STATUS_FIELD, DRAFT_UPDATE),
+        "update": context.rule_state(OP_STATUS_FIELD, DRAFT_UPDATE, "owner_update"),
         "approve": context.rule_state(OP_STATUS_FIELD, APPROVED),
-        "reject": context.rule_state(OP_STATUS_FIELD, DRAFT),
+        "reject": context.rule_state(
+            OP_STATUS_FIELD, reject_target(data_product_status), "approver_reject"
+        ),
         "cancel": context.rule_state(OP_STATUS_FIELD, OP_CANCELLED),
         "change_dp_status": context.dp_change_state(),
         "add_comment": context.rule_state(OP_STATUS_FIELD, APPROVED),
-        "resolve_comment": ActionState(
-            enabled=False,
-            tooltip=COMING_SOON["resolve_comment"],
-            visible=context.owner_or_sme,
+        "resolve_comment": _resolve_comment_state(
+            one_pager_status, owner_or_sme=context.owner_or_sme
         ),
         "release_lock": _release_lock_state(
             current_user_initials, is_locked, lock_holder_initials
@@ -290,11 +304,17 @@ class _ActionContext:
             is_owner_or_sme=self.owner_or_sme,
         )
 
-    def rule_state(self, status_field: str, to_status: str) -> ActionState:
-        """State of the user action that moves ``status_field`` to ``to_status``."""
+    def rule_state(
+        self, status_field: str, to_status: str, action: str | None = None
+    ) -> ActionState:
+        """State of the user action that moves ``status_field`` to ``to_status``.
+
+        ``action`` pins the rule's action name where two actions share a
+        target status (Update and a rejected update both give Draft Update).
+        """
         current = self.op_status if status_field == OP_STATUS_FIELD else self.dp_status
         rule = TRANSITIONS.get((status_field, current, to_status))
-        if rule is None or rule.is_system:
+        if rule is None or rule.is_system or (action and rule.action != action):
             return ActionState(enabled=False, visible=False)
         reason = self._failure(rule)
         if reason:
@@ -338,6 +358,17 @@ def _edit_state(
             enabled=False, tooltip="Another user is editing this One Pager"
         )
     return ActionState(enabled=True)
+
+
+def _resolve_comment_state(one_pager_status: str, *, owner_or_sme: bool) -> ActionState:
+    """Owner/SMEs resolve review comments while they rework the One Pager."""
+    if one_pager_status not in EDITABLE_STATUSES:
+        return ActionState(
+            enabled=False,
+            tooltip="Comments are resolved while the One Pager is in Draft",
+            visible=owner_or_sme,
+        )
+    return ActionState(enabled=owner_or_sme, visible=owner_or_sme)
 
 
 def _release_lock_state(

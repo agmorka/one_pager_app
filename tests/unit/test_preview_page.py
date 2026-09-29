@@ -13,6 +13,7 @@ from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import LockInfo
+from onepagerapp.state_machine import Actor
 from tests.conftest import FIXTURES_DIR
 
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
@@ -256,3 +257,131 @@ def test__preview__expired_lock_is_not_shown(
 
     assert not at.exception
     assert not [w for w in at.warning if "Locked by" in w.value]
+
+
+APPROVER = "cjo@bec.dk"
+
+
+def _review_services(tmp_path: Path, username: str = APPROVER) -> dict:
+    services = _services(tmp_path)
+    user = resolve_current_user(username)
+    return {
+        **services,
+        "current_user": user.username,
+        "current_user_info": user,
+        "current_user_roles": frozenset({Actor.APPROVER}),
+        "preview_one_pager_id": "OP-0002",
+        "preview_review_mode": "OP-0002",
+    }
+
+
+@pytest.mark.unit
+def test__preview__review_mode_for_approver(
+    tmp_path: Path, switched: list[str]
+) -> None:
+    at = _app(_review_services(tmp_path)).run()
+
+    assert not at.exception
+    assert any("Review mode" in i.value for i in at.info)
+    keys = {b.key for b in at.button}
+    assert {"preview_reject", "preview_approve"} <= keys
+    assert not at.button(key="preview_reject").disabled
+
+    at.button(key="preview_back_to_queue").click().run()
+    assert switched == ["views/review.py"]
+    assert "preview_review_mode" not in at.session_state
+
+
+@pytest.mark.unit
+def test__preview__no_review_actions_for_owner_or_sme(
+    tmp_path: Path, switched: list[str]
+) -> None:
+    at = _app(_review_services(tmp_path, "dp@bec.dk")).run()  # SME of OP-0002
+
+    assert not at.exception
+    keys = {b.key for b in at.button}
+    assert "preview_reject" not in keys
+    assert "preview_approve" not in keys
+
+
+@pytest.mark.unit
+def test__preview__reject_opens_the_dialog(
+    tmp_path: Path, switched: list[str]
+) -> None:
+    at = _app(_review_services(tmp_path)).run()
+    at.button(key="preview_reject").click().run()
+
+    assert not at.exception
+    assert at.text_area(key="preview_reject_reason")  # the dialog is open
+
+
+@pytest.mark.unit
+def test__preview__approve_opens_the_dialog(
+    tmp_path: Path, switched: list[str]
+) -> None:
+    at = _app(_review_services(tmp_path)).run()
+    assert not at.button(key="preview_approve").disabled
+    at.button(key="preview_approve").click().run()
+
+    assert not at.exception
+    assert any("v1.0.0" in m.value for m in at.markdown)  # the dialog is open
+    assert any("Ready for Development" in m.value for m in at.markdown)
+
+
+@pytest.mark.unit
+def test__preview__add_comment_opens_the_dialog(
+    tmp_path: Path, switched: list[str]
+) -> None:
+    at = _app(_review_services(tmp_path)).run()
+    at.button(key="preview_add_comment").click().run()
+
+    assert not at.exception
+    assert at.selectbox(key="preview_comment_section").value is None  # Whole document
+    assert at.text_area(key="preview_comment_text")
+
+
+@pytest.mark.unit
+def test__preview__owner_resolves_review_comments(
+    tmp_path: Path, switched: list[str]
+) -> None:
+    from onepagerapp.workflow import reject_one_pager  # noqa: PLC0415
+
+    state = _review_services(tmp_path, "bob.smith@company.com")  # Owner
+    data_access = state["data_access"]
+    approver = resolve_current_user(APPROVER)
+    reject_one_pager(
+        data_access, "OP-0002", approver, "Needs work", roles={Actor.APPROVER}
+    )
+    [comment] = data_access.get_review_comments("OP-0002")
+
+    at = _app(state).run()
+    assert not at.exception
+    resolve = at.button(key=f"preview_resolve_{comment.id}")
+    assert not resolve.disabled
+    resolve.click().run()
+
+    assert not at.exception
+    assert data_access.get_review_comments("OP-0002")[0].resolved_by == "BS"
+    assert "The comment was marked as resolved." in [s.value for s in at.success]
+    assert not [b for b in at.button if b.key == f"preview_resolve_{comment.id}"]
+
+
+@pytest.mark.unit
+def test__preview__viewers_cannot_resolve(
+    tmp_path: Path, switched: list[str]
+) -> None:
+    from onepagerapp.workflow import reject_one_pager  # noqa: PLC0415
+
+    state = _review_services(tmp_path, MAJA)  # neither Owner nor SME
+    reject_one_pager(
+        state["data_access"],
+        "OP-0002",
+        resolve_current_user(APPROVER),
+        "Needs work",
+        roles={Actor.APPROVER},
+    )
+    at = _app(state).run()
+
+    assert not at.exception
+    assert not [b for b in at.button if str(b.key).startswith("preview_resolve_")]
+    assert any("Unresolved" in i.value for i in at.info)

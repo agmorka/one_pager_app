@@ -338,6 +338,18 @@ class DataAccess(ABC):
         ...
 
     @abstractmethod
+    def get_one_pager_status_rows(
+        self, one_pager_status: str
+    ) -> list[OnePagerStatusRow]:
+        """Return the ``one_pager_status`` rows with this One Pager status.
+
+        Read fresh (never cached). Sorted by ``last_updated_at``, oldest first
+        (for ``In Review`` that is the submission time: nothing else changes
+        the row while it waits for review).
+        """
+        ...
+
+    @abstractmethod
     def update_authorized_users(self, users: list[AuthorizedUser]) -> None:
         """Update name, email, team and role of existing authorized-user rows.
 
@@ -365,6 +377,43 @@ class DataAccess(ABC):
 
         Returns:
             True if exactly this row was updated, False if it had changed.
+        """
+        ...
+
+    # ========================================================================
+    # Review Comment Methods (Backend_Design.md §13)
+    # ========================================================================
+
+    @abstractmethod
+    def add_review_comment(self, comment: ReviewComment) -> None:
+        """Insert a ``review_comments`` row. ``comment.id`` is ignored (identity)."""
+        ...
+
+    @abstractmethod
+    def resolve_review_comment(
+        self,
+        one_pager_id: str,
+        comment_id: int,
+        *,
+        resolved_by: str,
+        resolved_at: datetime,
+    ) -> bool:
+        """Mark an unresolved comment of a One Pager as resolved, conditionally.
+
+        Returns:
+            True if exactly this comment was updated, False if it does not
+            exist, belongs to another One Pager or was already resolved.
+
+        """
+        ...
+
+    @abstractmethod
+    def delete_review_comment(self, comment: ReviewComment) -> None:
+        """Compensation for a failed Reject ONLY.
+
+        Deletes the row matching ``one_pager_id``, ``reviewer_initials`` and
+        ``created_at`` of a comment whose action did not complete. Comments
+        are otherwise never deleted: they are part of the audit trail.
         """
         ...
 
