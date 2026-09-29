@@ -136,17 +136,17 @@ There is no `git_integration.py`.
 |---|---|
 | 12.1 | Content sections that are not rendered: **Governance artifacts**, **Out of Scope**, **Open Questions** and **Assumptions**. `OnePagerDocument` does not model these fields either. Use Case IDs (`UC-###`) and BR IDs are not shown. |
 | 12.2 | Role- and status-dependent actions: Edit, Update, Change DP Status dropdown, Approve, Reject, Cancel, Add Comment, Resolve, Release lock, Export PDF |
-| 12.3 | Error states show raw exception text (`st.error(f"... {e}")`). The docs require a friendly message and a Retry button, with no internals shown. |
-| 12.4 | Opening Preview without an ID silently defaults to `OP-0001` |
+| 12.3 | ~~Error states show raw exception text (`st.error(f"... {e}")`). The docs require a friendly message and a Retry button, with no internals shown.~~ **Done (Phase 0)** |
+| 12.4 | ~~Opening Preview without an ID silently defaults to `OP-0001`~~ **Done (Phase 0):** Preview asks the user to pick a One Pager from the Registry |
 
 ## 13. App shell, theming & cross-cutting
 
 | # | Feature | Doc ref |
 |---|---|---|
-| 13.1 | **Environment badge** (DEV/INT/UAT/PRD) in the sidebar | UI §2 |
-| 13.2 | BEC theme: `.streamlit/config.toml` is missing, and `apply_theme()` is commented out in `app.py` | UI §3 |
-| 13.3 | Home page has placeholder content only (Registry is meant to be the landing page) | UI §4.1 |
-| 13.4 | Structured security-event logging module (`audit.py`). Only ad-hoc `audit_logger` calls exist in create. | Arch §8, Backend §14 |
+| 13.1 | ~~**Environment badge** (DEV/INT/UAT/PRD) in the sidebar~~ **Done (Phase 0):** `ONE_PAGER_APP_ENVIRONMENT`, or derived from the catalog prefix | UI §2 |
+| 13.2 | ~~BEC theme: `.streamlit/config.toml` is missing, and `apply_theme()` is commented out in `app.py`~~ **Done (Phase 0):** `app/.streamlit/config.toml`, `apply_theme()` enabled, dark blue sidebar | UI §3 |
+| 13.3 | ~~Home page has placeholder content only (Registry is meant to be the landing page)~~ **Done (Phase 0):** Home page removed, Registry is the default page | UI §4.1 |
+| 13.4 | ~~Structured security-event logging module (`audit.py`). Only ad-hoc `audit_logger` calls exist in create.~~ **Done (Phase 0):** `onepagerapp.audit`, used by create | Arch §8, Backend §14 |
 | 13.5 | Caching strategy for the registry and use cases (short TTL, invalidated after writes). Only the reference data is cached. | UI §6 |
 | 13.6 | Accessibility items: keyboard row activation, ARIA labels, errors shown next to their fields | UI §7 |
 | 13.7 | Schema evolution handling (validation pinned to `structureDefinition` for older documents) | Arch open item #5 |
@@ -156,7 +156,7 @@ There is no `git_integration.py`.
 | # | Feature |
 |---|---|
 | 14.1 | ~~CI/CD pipeline (Azure Pipelines: ruff, mypy, pytest, bundle validate, staged deploys + Liquibase) — no pipeline file in the repo~~ **Won't do:** CI/CD and deployment are out of scope for this project |
-| 14.2 | `.env.example` referenced by the docs is missing |
+| 14.2 | ~~`.env.example` referenced by the docs is missing~~ **Done (Phase 0)** |
 | 14.3 | E2E/smoke tests for all pages (`tests/integration/test_app_pages.py`), security tests, and failure-mode tests (Testing_Strategy §5–9) |
 
 ---
@@ -165,7 +165,7 @@ There is no `git_integration.py`.
 
 The phases below order the items above by dependency. Each phase uses only what earlier phases built, so each phase can ship as one or more PRs and be tested on its own. Item numbers refer to the tables above. Unit tests are written in the same phase as the code they cover. Phase 11 adds only the cross-page E2E, security and failure-mode suites. Items marked **Won't do** (14.1, CI/CD and deployment) are left out of the order.
 
-### Phase 0: Foundations and quick wins
+### Phase 0: Foundations and quick wins — ✅ done
 
 These items are small and low risk, and later phases build on them.
 

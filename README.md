@@ -62,26 +62,34 @@ databricks apps run-local --profile dev \
 
 ### Option 2: Run with Streamlit directly
 
+Start Streamlit from the `app/` directory so it picks up the BEC theme in `app/.streamlit/config.toml`.
+
 1. Install dependencies:
    ```bash
    uv sync
    ```
 
-2. Mock mode (no Databricks connection):
+2. Create your local configuration from the template and adjust it if needed (`.env` is git-ignored):
    ```bash
-   APP_MODE=local-mock DATABRICKS_WAREHOUSE_ID=abc123 ONE_PAGER_APP_VOLUME_PATH=/tmp/vol uv run streamlit run app/app.py
+   cp .env.example .env
+   ```
+   The template runs in mock mode against the sample One Pagers in `tests/fixtures/sample_one_pagers`. Every variable is described in `.env.example`.
+
+3. Run the app:
+   ```bash
+   cd app
+   uv run --env-file ../.env streamlit run app.py
    ```
 
-3. Integration mode (connects to real tables in DEV environment):
+4. For integration mode (real tables in the DEV environment), set these values in `.env`:
    ```bash
-   APP_MODE=local-integration \
-     DATABRICKS_CONFIG_PROFILE=dev \
-     DATABRICKS_WAREHOUSE_ID=4efe1f3d3f86e320 \
-     ONE_PAGER_APP_VOLUME_PATH=/Volumes/dev_bia_meta/onepager_app/one_pager_registry \
-     uv run streamlit run app/app.py
+   APP_MODE=local-integration
+   DATABRICKS_CONFIG_PROFILE=dev
+   DATABRICKS_WAREHOUSE_ID=4efe1f3d3f86e320
+   ONE_PAGER_APP_VOLUME_PATH=/Volumes/dev_bia_meta/onepager_app/one_pager_registry
    ```
 
-4. Open your browser and navigate to `http://localhost:8501`.
+5. Open your browser and navigate to `http://localhost:8501`. The app opens on the Registry page, and the sidebar shows the environment badge (`ONE_PAGER_APP_ENVIRONMENT`, or derived from the catalog prefix).
 
 ### Databricks CLI Authentication
 
