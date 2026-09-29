@@ -15,8 +15,8 @@ import logging
 
 import pandas as pd
 import streamlit as st
-
 from adapters.edit_mode import render_edit_mode
+
 from onepagerapp.models import CurrentUser, NewOnePagerInput, PersonRef, ValidationError
 from onepagerapp.permissions import PermissionDeniedError, can_create_one_pager
 from onepagerapp.validation import (

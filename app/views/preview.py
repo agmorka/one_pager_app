@@ -36,7 +36,9 @@ from onepagerapp.permissions import (
     get_status_timeline_stages,
 )
 from adapters.theme import get_op_status_colors, get_dp_status_colors, DEFAULT_BADGE_COLOR
-from adapters.workflow_actions import cancel_and_report
+from adapters.workflow_actions import cancel_and_report, change_dp_status_and_report
+from onepagerapp.state_machine import TransitionRule
+from onepagerapp.workflow import data_product_options
 
 logger = logging.getLogger(__name__)
 
@@ -583,6 +585,48 @@ def confirm_cancel(data_access: DataAccess, one_pager_id: str, user: CurrentUser
         st.rerun()
 
 
+@st.dialog("Change Data Product status")
+def change_dp_status_dialog(
+    data_access: DataAccess,
+    one_pager_id: str,
+    user: CurrentUser,
+    options: list[TransitionRule],
+) -> None:
+    """Menu of the valid DP transitions (UI_Design.md §4.4); asks before
+    destructive ones such as Deprecate."""
+    by_target = {rule.to_status: rule for rule in options}
+    target = st.selectbox(
+        "New status",
+        options=list(by_target),
+        format_func=lambda s: f"{by_target[s].label} → {s}",
+        key="preview_dp_target",
+    )
+    rule = by_target[target]
+    confirmed = True
+    if rule.requires_confirmation:
+        st.warning(f"**{rule.label}** cannot be undone.", icon="⚠️")
+        confirmed = st.checkbox(
+            f"Yes, {rule.label.lower()} this Data Product",
+            key="preview_dp_confirm",
+        )
+    col_apply, col_back = st.columns(2)
+    if col_apply.button(
+        "Change status",
+        type="primary",
+        disabled=not confirmed,
+        use_container_width=True,
+    ):
+        error = change_dp_status_and_report(
+            data_access, one_pager_id, target, user, confirmed=confirmed
+        )
+        if error:
+            st.error(error, icon="⚠️")
+            return
+        st.rerun()
+    if col_back.button("Back", use_container_width=True):
+        st.rerun()
+
+
 def render_action_bar(
     data_access: DataAccess,
     preview_data: PreviewData,
@@ -635,6 +679,17 @@ def render_action_bar(
         open_editor(header.one_pager_id)
     elif clicked == "cancel":
         confirm_cancel(data_access, header.one_pager_id, user)
+    elif clicked == "change_dp_status":
+        row = data_access.get_one_pager_status_row(header.one_pager_id)
+        options = (
+            data_product_options(
+                row, owner_or_sme=user.initials in authorized_initials
+            )
+            if row
+            else []
+        )
+        if options:
+            change_dp_status_dialog(data_access, header.one_pager_id, user, options)
 
 
 # ============================================================================

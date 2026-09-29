@@ -72,3 +72,23 @@ def test__cancel_and_report__permission_error_is_shown(
     stranger = resolve_current_user("xyz@bec.dk")
     error = actions.cancel_and_report(data_access, "OP-0003", stranger, "")
     assert error == "Only the Owner, an SME or an Admin can cancel this One Pager."
+
+
+@pytest.mark.unit
+def test__change_dp_status_and_report(
+    actions: ModuleType, data_access: MockDataAccess, alice: CurrentUser
+) -> None:
+    # OP-0001 is seeded Approved / Ready for Development, owned by Alice.
+    assert (
+        actions.change_dp_status_and_report(
+            data_access, "OP-0001", "In Development", alice, confirmed=True
+        )
+        is None
+    )
+    assert st.session_state["preview_flash"] == (
+        "Data Product status changed to In Development."
+    )
+    error = actions.change_dp_status_and_report(
+        data_access, "OP-0001", "Deprecated", alice, confirmed=True
+    )
+    assert "cannot change from In Development to Deprecated" in error

@@ -2,7 +2,7 @@
 
 import copy
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -406,7 +406,12 @@ class MockDataAccess(DataAccess):
     def get_change_log(self, one_pager_id: str) -> list[ChangeLogEntry]:
         """Fetch the change log for a One Pager (mock data, newest-first)."""
         entries = self._change_logs.get(one_pager_id, [])
-        return sorted(entries, key=lambda e: (e.created_at, e.id), reverse=True)
+        # Seeded entries are naive, new ones UTC-aware: compare both as UTC.
+        return sorted(
+            entries,
+            key=lambda e: (_as_utc(e.created_at), e.id),
+            reverse=True,
+        )
 
     def get_review_comments(self, one_pager_id: str) -> list[ReviewComment]:
         """Fetch review comments for a One Pager (mock data)."""
@@ -699,6 +704,10 @@ class MockDataAccess(DataAccess):
             last_updated_by=user_initials,
             last_updated_at=datetime.now(),
         )
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value
 
 
 # ============================================================================

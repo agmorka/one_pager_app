@@ -15,8 +15,10 @@ from onepagerapp.permissions import PermissionDeniedError
 from onepagerapp.state_machine import InvalidTransitionError
 from onepagerapp.workflow import (
     TRANSITION_FAILED_MESSAGE,
+    ConfirmationRequiredError,
     TransitionError,
     cancel_one_pager,
+    change_data_product_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,4 +38,33 @@ def cancel_and_report(
         logger.exception(f"Failed to cancel {one_pager_id}")
         return TRANSITION_FAILED_MESSAGE
     st.session_state[FLASH_KEY] = f"{one_pager_id} was cancelled."
+    return None
+
+
+def change_dp_status_and_report(
+    data_access: DataAccess,
+    one_pager_id: str,
+    to_status: str,
+    user: CurrentUser,
+    *,
+    confirmed: bool,
+) -> str | None:
+    """Change the Data Product status; return a user-facing error or None."""
+    try:
+        row = change_data_product_status(
+            data_access, one_pager_id, to_status, user, confirmed=confirmed
+        )
+    except (
+        PermissionDeniedError,
+        InvalidTransitionError,
+        ConfirmationRequiredError,
+        TransitionError,
+    ) as e:
+        return str(e)
+    except Exception:
+        logger.exception(f"Failed to change the DP status of {one_pager_id}")
+        return TRANSITION_FAILED_MESSAGE
+    st.session_state[FLASH_KEY] = (
+        f"Data Product status changed to {row.data_product_status}."
+    )
     return None

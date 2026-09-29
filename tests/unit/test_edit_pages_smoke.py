@@ -418,3 +418,40 @@ def test__preview__cancelled_one_pager_is_read_only(
     assert not at.exception
     assert _action_keys(at) == {"preview_export_pdf"}
     assert any("cancelled (read-only)" in c.value for c in at.caption)
+
+
+@pytest.mark.unit
+def test__preview__change_dp_status_opens_menu(
+    services: dict, switched: list[str]
+) -> None:
+    # OP-0001: Approved / Ready for Development, owned by Alice.
+    at = _app("preview.py", {**services, "preview_one_pager_id": "OP-0001"}).run()
+    assert {"preview_update", "preview_change_dp_status"} <= _action_keys(at)
+    assert not at.button(key="preview_change_dp_status").disabled
+    assert at.button(key="preview_update").disabled  # arrives in Phase 6
+
+    at.button(key="preview_change_dp_status").click().run()
+
+    assert not at.exception
+    assert list(at.selectbox(key="preview_dp_target").options) == [
+        "Start development → In Development"
+    ]
+
+
+@pytest.mark.unit
+def test__preview__renders_after_transition_on_seeded_one_pager(
+    services: dict, switched: list[str]
+) -> None:
+    """Seeded change-log rows are naive, new ones UTC-aware; both must sort."""
+    from onepagerapp.workflow import change_data_product_status  # noqa: PLC0415
+
+    change_data_product_status(
+        services["data_access"],
+        "OP-0001",
+        "In Development",
+        services["current_user_info"],
+    )
+    at = _app("preview.py", {**services, "preview_one_pager_id": "OP-0001"}).run()
+
+    assert not at.exception
+    assert any("Development started" in m.value for m in at.markdown)
