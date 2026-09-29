@@ -28,12 +28,12 @@ useCases:
     priority: "Must Have"
 
 businessRequirements:
-  - requirement: "Person records must be updated within 4 hours of source system changes"
-    priority: "Must Have"
+  - id: "BR-001"
+    description: "Person records must be updated within 4 hours of source system changes"
 
 dataSources:
-  - sourceName: "SAP ERP"
-    sourceType: "Enterprise System"
+  - name: "SAP ERP"
+    sourceSystem: "Enterprise System"
     description: "Employee and vendor master data"
 
 dataClassification:

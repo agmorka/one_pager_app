@@ -35,7 +35,7 @@ from onepagerapp.validation import (
     CURRENT_STRUCTURE_DEFINITION,
     normalize_new_one_pager,
     validate_create,
-    validate_schema,
+    validate_lenient,
 )
 
 logger = logging.getLogger(__name__)
@@ -263,7 +263,9 @@ def create_one_pager(
 
     now = now or datetime.now(UTC)
     document = build_initial_document(data, user, now)
-    schema_errors = validate_schema(document_to_dict(document))
+    # A new Draft only has to pass the lenient tier; the strict tier is the
+    # guard on Submit for Review.
+    schema_errors = validate_lenient(document_to_dict(document))
     if schema_errors:
         # The create tier should make this impossible; treat as a bug.
         details = "; ".join(f"{e.field_path}: {e.message}" for e in schema_errors)

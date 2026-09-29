@@ -19,11 +19,12 @@ Per UI_Design.md §4.4, v1 renders action buttons as disabled with "coming soon"
 import logging
 from datetime import datetime
 
+import pandas as pd
 import streamlit as st
 
 from onepagerapp.auth import initials_from_username
 from onepagerapp.data_access.base import DataAccess
-from onepagerapp.models import PreviewData
+from onepagerapp.models import OnePagerDocument, PreviewData
 from onepagerapp.permissions import can_view_one_pager, get_action_states, get_status_timeline_stages
 from adapters.theme import get_op_status_colors, get_dp_status_colors, DEFAULT_BADGE_COLOR
 
@@ -147,97 +148,214 @@ def render_header(preview_data: PreviewData, op_colors: dict, dp_colors: dict) -
         render_status_badge(header.data_product_status, color)
 
 
-def render_content_sections(preview_data: PreviewData) -> None:
+def _table(rows: list[dict], columns: dict[str, str]) -> pd.DataFrame:
+    """Build a display table from document list items.
+
+    Args:
+        rows: List items as stored in the document.
+        columns: Document key → column label, in display order. A key may list
+            fallbacks separated by "|" (first non-empty wins), for v1 documents.
+    """
+    def cell(row: dict, keys: str) -> object:
+        for key in keys.split("|"):
+            value = row.get(key)
+            if value not in (None, "", []):
+                return ", ".join(map(str, value)) if isinstance(value, list) else value
+        return ""
+
+    return pd.DataFrame(
+        [{label: cell(row, keys) for keys, label in columns.items()} for row in rows],
+        columns=list(columns.values()),
+    )
+
+
+def _show_table(rows: list[dict], columns: dict[str, str], empty: str) -> None:
+    if rows:
+        st.dataframe(_table(rows, columns), hide_index=True, use_container_width=True)
+    else:
+        st.write(f"*{empty}*")
+
+
+def _show_list(items: list[str], empty: str) -> None:
+    if items:
+        st.markdown("\n".join(f"- {item}" for item in items))
+    else:
+        st.write(f"*{empty}*")
+
+
+def resolve_use_cases(data_access: DataAccess, doc: OnePagerDocument) -> list[dict]:
+    """Rows for the Use Cases table, resolved from the shared use_cases table.
+
+    v2 documents hold only ``useCaseId`` references (Data_Model.md §5); their
+    content is looked up here. v1 documents hold inline objects, shown as-is.
+    A reference that cannot be resolved still shows its ID.
+    """
+    rows: list[dict] = []
+    for item in doc.use_cases:
+        use_case_id = item.get("useCaseId")
+        if not use_case_id:
+            rows.append(item)
+            continue
+        try:
+            use_case = data_access.get_use_case(use_case_id)
+        except Exception:
+            logger.exception(f"Failed to resolve Use Case {use_case_id}")
+            use_case = None
+        if use_case is None:
+            rows.append({"useCaseId": use_case_id, "persona": "(not available)"})
+            continue
+        rows.append(
+            {
+                "useCaseId": use_case.use_case_id,
+                "persona": use_case.persona,
+                "goal": use_case.goal,
+                "decisionEnabled": use_case.decision_enabled,
+                "priority": use_case.priority,
+                "deprecated": use_case.deprecated,
+            }
+        )
+    return rows
+
+
+USE_CASE_COLUMNS = {
+    "useCaseId": "ID",
+    "persona": "Persona",
+    "goal": "Goal",
+    "decisionEnabled": "Decision Enabled",
+    "priority": "Priority",
+    "deprecated": "Deprecated",
+}
+REQUIREMENT_COLUMNS = {
+    "id": "ID",
+    "requirement|description": "Requirement",
+    "priority": "Priority",
+    "notes": "Notes",
+}
+DATA_SOURCE_COLUMNS = {
+    "name|sourceName": "Name",
+    "sourceSystem|sourceType": "Source System",
+    "epoId": "EPO ID",
+    "dataProvided|description": "Data Provided",
+    "refreshFrequency": "Refresh Frequency",
+}
+DATA_ELEMENT_COLUMNS = {
+    "elementName": "Element",
+    "dataType": "Type",
+    "isPrimaryKey": "PK",
+    "containsPII": "PII",
+    "isCriticalDataElement": "CDE",
+    "cdeCriticalityTiering": "CDE Tier",
+    "description": "Description",
+    "example": "Example",
+    "source": "Source",
+    "useCaseLinks": "Use Cases",
+}
+RETENTION_COLUMNS = {
+    "dataCategory": "Data Category",
+    "retentionPeriod": "Retention Period",
+    "legalBasis": "Legal Basis",
+}
+BUSINESS_CONCEPT_COLUMNS = {"name": "Concept", "definition": "Definition"}
+CDE_QUALITY_COLUMNS = {
+    "elementName": "Element",
+    "dimension": "Dimension",
+    "rule": "Rule",
+    "threshold": "Threshold",
+}
+CDE_LINEAGE_COLUMNS = {
+    "elementName": "Element",
+    "sourceSystem": "Source System",
+    "sourceField": "Source Field",
+    "transformation": "Transformation",
+}
+OPEN_QUESTION_COLUMNS = {
+    "question": "Question",
+    "owner": "Owner",
+    "dueDate": "Due",
+    "status": "Status",
+    "answer": "Answer",
+}
+
+
+def render_content_sections(preview_data: PreviewData, use_case_rows: list[dict]) -> None:
     """Render the One Pager document content as collapsible sections.
-    
-    Sections are displayed in order: Description, Business Problem, Use Cases,
-    Business Requirements, Data Sources, Data Product Preview, Classification.
-    
+
+    Sections follow the editor-tab order (UI_Design.md §4.4): Description,
+    Business Problem, Use Cases, Business Requirements, Data Sources, Data
+    Product Preview, Classification, Governance, Scope & Questions.
+
     Args:
         preview_data: Complete preview data.
+        use_case_rows: Use Case rows from ``resolve_use_cases``.
     """
     doc = preview_data.document
-    
+
     st.subheader("Content")
-    
-    # Description
+
     with st.expander("📝 Description", expanded=True):
         st.write(doc.description or "*No description provided.*")
-    
-    # Business Problem Statement
+
     with st.expander("🎯 Business Problem Statement"):
-        if doc.business_problem_statement:
-            st.write(doc.business_problem_statement)
-        else:
-            st.write("*No business problem statement provided.*")
-    
-    # Use Cases
+        st.write(doc.business_problem_statement or "*No business problem statement provided.*")
+
     with st.expander("💼 Use Cases"):
-        if doc.use_cases:
-            for i, uc in enumerate(doc.use_cases, 1):
-                persona = uc.get("persona", "")
-                goal = uc.get("goal", "")
-                header_txt = " — ".join(t for t in [persona, goal] if t) or f"Use Case {i}"
-                st.markdown(f"**{i}. {header_txt}**")
-                if uc.get("scenario"):
-                    st.write(f"_Scenario:_ {uc['scenario']}")
-                if uc.get("decisionEnabled"):
-                    st.write(f"_Decision enabled:_ {uc['decisionEnabled']}")
-                if uc.get("priority"):
-                    st.caption(f"Priority: {uc['priority']}")
-        else:
-            st.write("*No use cases provided.*")
-    
-    # Business Requirements
+        _show_table(use_case_rows, USE_CASE_COLUMNS, "No use cases provided.")
+
     with st.expander("✅ Business Requirements"):
-        if doc.business_requirements:
-            for i, br in enumerate(doc.business_requirements, 1):
-                text = br.get("requirement", "")
-                priority = br.get("priority")
-                line = f"{i}. {text}"
-                if priority:
-                    line += f" _(Priority: {priority})_"
-                st.write(line)
-        else:
-            st.write("*No business requirements provided.*")
-    
-    # Data Sources
+        _show_table(
+            doc.business_requirements, REQUIREMENT_COLUMNS, "No business requirements provided."
+        )
+
     with st.expander("📊 Data Sources"):
-        if doc.data_sources:
-            for i, ds in enumerate(doc.data_sources, 1):
-                name = ds.get("sourceName", "")
-                source_type = ds.get("sourceType", "")
-                label = f"{name} ({source_type})" if source_type else name
-                st.markdown(f"**{i}. {label}**")
-                if ds.get("description"):
-                    st.write(f"_{ds['description']}_")
-        else:
-            st.write("*No data sources provided.*")
-    
-    # Data Element Preview
+        _show_table(doc.data_sources, DATA_SOURCE_COLUMNS, "No data sources provided.")
+
     with st.expander("🔍 Data Product Preview"):
-        if doc.data_element_preview:
-            for elem in doc.data_element_preview:
-                name = elem.get("elementName", "?")
-                elem_type = elem.get("dataType", "?")
-                cde = "CDE" if elem.get("isCriticalDataElement") else ""
-                desc = elem.get("description", "")
-                st.write(f"**{name}** ({elem_type}) {f'[{cde}]' if cde else ''}")
-                if desc:
-                    st.write(f"_{desc}_")
-        else:
-            st.write("*No data product preview provided.*")
-    
-    # Data Classification & Governance
-    with st.expander("🔐 Classification & Governance"):
-        if doc.data_classification:
-            st.write(f"**Classification Level:** {doc.data_classification.get('classificationLevel', 'N/A')}")
-            st.write(f"**Contains PII:** {doc.data_classification.get('containsPII', False)}")
-            st.write(f"**Contains Sensitive Data:** {doc.data_classification.get('containsSensitiveData', False)}")
-            if doc.data_classification.get("retentionRequirements"):
-                st.write(f"**Retention:** {doc.data_classification['retentionRequirements']}")
+        _show_table(
+            doc.data_product_preview, DATA_ELEMENT_COLUMNS, "No data product preview provided."
+        )
+
+    with st.expander("🔐 Classification"):
+        dc = doc.data_classification
+        if dc:
+            st.write(f"**Classification Level:** {dc.get('classificationLevel') or 'N/A'}")
+            st.write(f"**Contains PII:** {'Yes' if dc.get('containsPII') else 'No'}")
+            st.write(
+                f"**Contains Sensitive Data:** {'Yes' if dc.get('containsSensitiveData') else 'No'}"
+            )
         else:
             st.write("*No classification provided.*")
+        st.markdown("**Retention Requirements**")
+        if dc.get("retentionRequirements"):  # v1: a string inside the classification
+            st.write(dc["retentionRequirements"])
+        else:
+            _show_table(
+                doc.retention_requirements, RETENTION_COLUMNS, "No retention requirements provided."
+            )
+
+    with st.expander("🏛️ Governance"):
+        governance = doc.data_governance_artifacts
+        st.markdown("**Business Concepts**")
+        _show_table(
+            governance.get("businessConcepts", []),
+            BUSINESS_CONCEPT_COLUMNS,
+            "No business concepts provided.",
+        )
+        st.markdown("**CDE Quality**")
+        _show_table(
+            governance.get("cdeQuality", []), CDE_QUALITY_COLUMNS, "No CDE quality rules provided."
+        )
+        st.markdown("**CDE Lineage**")
+        _show_table(
+            governance.get("cdeLineage", []), CDE_LINEAGE_COLUMNS, "No CDE lineage provided."
+        )
+
+    with st.expander("🧭 Scope & Questions"):
+        st.markdown("**Out of Scope**")
+        _show_list(doc.out_of_scope, "Nothing listed as out of scope.")
+        st.markdown("**Open Questions**")
+        _show_table(doc.open_questions, OPEN_QUESTION_COLUMNS, "No open questions.")
+        st.markdown("**Assumptions**")
+        _show_list(doc.assumptions, "No assumptions listed.")
 
 
 def render_change_log(preview_data: PreviewData) -> None:
@@ -487,7 +605,7 @@ render_action_bar(preview_data, initials_from_username(current_user))
 
 st.divider()
 
-render_content_sections(preview_data)
+render_content_sections(preview_data, resolve_use_cases(data_access, preview_data.document))
 
 st.divider()
 

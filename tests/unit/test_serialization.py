@@ -55,3 +55,63 @@ def test__fixtures_still_load() -> None:
     store = OnePagerDocumentStore(FIXTURES_DIR)
     assert store.read("OP-0001", "1.0.0").product_name == "Person Master Data"
     assert store.read("OP-0002", "0.3.0").data_product == "order"
+
+
+@pytest.mark.unit
+def test__v2_sections_round_trip() -> None:
+    path = FIXTURES_DIR / "OP-0001" / "OP-0001_v1.0.0.yml"
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    document = document_from_dict(data)
+
+    assert document.use_case_ids == ["UC-001", "UC-002"]
+    assert document.business_requirements[0]["id"] == "BR-001"
+    assert document.data_product_preview[0]["useCaseLinks"] == ["UC-001", "UC-002"]
+    assert document.retention_requirements[0]["retentionPeriod"].startswith("7 years")
+    assert set(document.data_governance_artifacts) == {
+        "businessConcepts",
+        "cdeQuality",
+        "cdeLineage",
+    }
+    assert document.out_of_scope[0].startswith("Corporate customers")
+    assert document.open_questions[0]["status"] == "Answered"
+    assert document.assumptions == [
+        "SAP ERP remains the system of record for employees"
+    ]
+    assert document_to_dict(document) == data
+
+
+@pytest.mark.unit
+def test__legacy_data_element_key_is_read() -> None:
+    document = document_from_dict(
+        {"dataProductOwner": {}, "dataElementPreview": [{"elementName": "x"}]}
+    )
+    assert document.data_product_preview == [{"elementName": "x"}]
+    assert document_to_dict(document)["dataProductPreview"] == [{"elementName": "x"}]
+
+
+@pytest.mark.unit
+def test__classification_flags_are_not_defaulted() -> None:
+    document = document_from_dict(
+        {"dataProductOwner": {}, "dataClassification": {"classificationLevel": "x"}}
+    )
+    assert document.data_classification == {"classificationLevel": "x"}
+
+
+@pytest.mark.unit
+def test__malformed_sections_load_as_empty() -> None:
+    document = document_from_dict(
+        {
+            "dataProductOwner": {},
+            "useCases": None,
+            "outOfScope": ["keep", "", None],
+            "openQuestions": "not a list",
+            "dataGovernanceArtifacts": {"businessConcepts": None, "other": [1]},
+        }
+    )
+    assert document.use_cases == []
+    assert document.out_of_scope == ["keep"]
+    assert document.open_questions == []
+    assert document.data_governance_artifacts == {"businessConcepts": []}
+    written = document_to_dict(document)
+    assert "useCases" not in written
+    assert "dataGovernanceArtifacts" not in written

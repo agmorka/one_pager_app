@@ -1,5 +1,6 @@
 """AppTest smoke tests for the Preview page states (UI_Design.md §4.4)."""
 
+from dataclasses import replace
 from pathlib import Path
 from typing import NoReturn
 
@@ -95,3 +96,101 @@ def test__preview__load_error_is_friendly_with_retry(
     retry.click().run()
     assert not at.exception
     assert at.error[0].value == "Couldn't load this One Pager. Please retry."
+
+
+def _expander(at: AppTest, label: str):  # noqa: ANN202
+    return next(e for e in at.expander if e.label == label)
+
+
+@pytest.mark.unit
+def test__preview__renders_every_content_section(
+    tmp_path: Path, switched: list[str]
+) -> None:
+    at = _app({**_services(tmp_path), "preview_one_pager_id": "OP-0001"}).run()
+
+    assert not at.exception
+    labels = [e.label for e in at.expander]
+    for label in (
+        "📝 Description",
+        "🎯 Business Problem Statement",
+        "💼 Use Cases",
+        "✅ Business Requirements",
+        "📊 Data Sources",
+        "🔍 Data Product Preview",
+        "🔐 Classification",
+        "🏛️ Governance",
+        "🧭 Scope & Questions",
+    ):
+        assert label in labels
+
+
+@pytest.mark.unit
+def test__preview__use_cases_resolved_with_ids(
+    tmp_path: Path, switched: list[str]
+) -> None:
+    at = _app({**_services(tmp_path), "preview_one_pager_id": "OP-0001"}).run()
+
+    table = _expander(at, "💼 Use Cases").dataframe[0].value
+    assert list(table["ID"]) == ["UC-001", "UC-002"]
+    assert list(table["Persona"]) == ["Analytics Manager", "Compliance Officer"]
+
+
+@pytest.mark.unit
+def test__preview__unknown_use_case_still_shows_its_id(
+    tmp_path: Path, switched: list[str]
+) -> None:
+    services = _services(tmp_path)
+    services["data_access"].get_use_case = lambda _id: None
+    at = _app({**services, "preview_one_pager_id": "OP-0001"}).run()
+
+    table = _expander(at, "💼 Use Cases").dataframe[0].value
+    assert list(table["ID"]) == ["UC-001", "UC-002"]
+    assert set(table["Persona"]) == {"(not available)"}
+
+
+@pytest.mark.unit
+def test__preview__requirement_ids_and_new_sections_shown(
+    tmp_path: Path, switched: list[str]
+) -> None:
+    at = _app({**_services(tmp_path), "preview_one_pager_id": "OP-0001"}).run()
+
+    requirements = _expander(at, "✅ Business Requirements").dataframe[0].value
+    assert list(requirements["ID"]) == ["BR-001", "BR-002"]
+
+    governance = _expander(at, "🏛️ Governance")
+    assert len(governance.dataframe) == 3
+    assert list(governance.dataframe[1].value["Dimension"]) == [
+        "Uniqueness",
+        "Validity",
+    ]
+
+    scope = _expander(at, "🧭 Scope & Questions")
+    markdown = " ".join(m.value for m in scope.markdown)
+    assert "Corporate customers" in markdown
+    assert "SAP ERP remains the system of record" in markdown
+    assert list(scope.dataframe[0].value["Status"]) == ["Answered"]
+
+    retention = _expander(at, "🔐 Classification").dataframe[0].value
+    assert list(retention["Legal Basis"]) == ["Danish Bookkeeping Act"]
+
+
+@pytest.mark.unit
+def test__preview__v1_document_uses_legacy_fields(
+    tmp_path: Path, switched: list[str]
+) -> None:
+    services = _services(tmp_path)
+    rows = services["data_access"]._status_rows
+    rows["OP-0001"] = replace(rows["OP-0001"], version="0.2.0")
+    at = _app({**services, "preview_one_pager_id": "OP-0001"}).run()
+
+    assert not at.exception
+    use_cases = _expander(at, "💼 Use Cases").dataframe[0].value
+    assert list(use_cases["Persona"]) == ["Analytics Manager", "Compliance Officer"]
+    requirements = _expander(at, "✅ Business Requirements").dataframe[0].value
+    assert requirements["Requirement"][0].startswith("Person records must be updated")
+    sources = _expander(at, "📊 Data Sources").dataframe[0].value
+    assert list(sources["Source System"]) == ["Enterprise System", "SaaS Application"]
+    elements = _expander(at, "🔍 Data Product Preview").dataframe[0].value
+    assert "person_id" in list(elements["Element"])
+    classification = _expander(at, "🔐 Classification")
+    assert any("7 years" in m.value for m in classification.markdown)

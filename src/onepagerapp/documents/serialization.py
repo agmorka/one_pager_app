@@ -1,8 +1,13 @@
 """Serialization between One Pager YAML dicts and OnePagerDocument.
 
-Field names follow structure_one_pager_v_1.json (camelCase in YAML,
-snake_case on the model). Structured list items are preserved as dicts so
-content survives a read/write round-trip.
+Field names follow the current schema, structure_one_pager_v_2.json (camelCase
+in YAML, snake_case on the model). Structured list items are preserved as dicts
+so content survives a read/write round-trip.
+
+Older documents load into the same model: list items keep the shape they were
+written with (e.g. v1 inline Use Case objects), and the pre-v2
+``dataElementPreview`` key is read as ``dataProductPreview``. Documents are
+always written with the v2 keys.
 """
 
 from typing import Any
@@ -32,22 +37,27 @@ def document_from_dict(data: dict[str, Any], raw_content: str = "") -> OnePagerD
         owner_email=owner.get("email", "") if isinstance(owner, dict) else "",
         owner_team=owner.get("team") if isinstance(owner, dict) else None,
         business_problem_statement=data.get("businessProblemStatement", "") or "",
-        smes=[dict(s) for s in data.get("smes", []) if isinstance(s, dict)],
-        use_cases=[dict(u) for u in data.get("useCases", []) if isinstance(u, dict)],
-        business_requirements=[
-            dict(b) for b in data.get("businessRequirements", []) if isinstance(b, dict)
-        ],
-        data_sources=[dict(d) for d in data.get("dataSources", []) if isinstance(d, dict)],
-        data_element_preview=[
-            dict(e) for e in data.get("dataElementPreview", []) if isinstance(e, dict)
-        ],
+        smes=_dict_items(data.get("smes")),
+        use_cases=_dict_items(data.get("useCases")),
+        business_requirements=_dict_items(data.get("businessRequirements")),
+        data_sources=_dict_items(data.get("dataSources")),
+        data_product_preview=_dict_items(
+            data.get("dataProductPreview", data.get("dataElementPreview"))
+        ),
         data_classification=(
             _classification_from_dict(dc) if isinstance(dc, dict) and dc else {}
         ),
+        retention_requirements=_dict_items(data.get("retentionRequirements")),
+        data_governance_artifacts=_governance_from_dict(
+            data.get("dataGovernanceArtifacts")
+        ),
+        out_of_scope=_str_items(data.get("outOfScope")),
+        open_questions=_dict_items(data.get("openQuestions")),
+        assumptions=_str_items(data.get("assumptions")),
         created_by=_optional_str(data.get("createdBy")),
         created_at=_optional_str(data.get("createdAt")),
         last_updated=_optional_str(data.get("lastUpdated")),
-        change_log=[dict(c) for c in data.get("changeLog", []) or [] if isinstance(c, dict)],
+        change_log=_dict_items(data.get("changeLog")),
         raw_content=raw_content,
     )
 
@@ -78,29 +88,27 @@ def document_to_dict(document: OnePagerDocument) -> dict[str, Any]:
         "description": document.description,
     }
 
-    if document.business_problem_statement:
-        data["businessProblemStatement"] = document.business_problem_statement
-
-    if document.smes:
-        data["smes"] = document.smes
-    if document.use_cases:
-        data["useCases"] = document.use_cases
-    if document.business_requirements:
-        data["businessRequirements"] = document.business_requirements
-    if document.data_sources:
-        data["dataSources"] = document.data_sources
-    if document.data_classification:
-        data["dataClassification"] = document.data_classification
-    if document.data_element_preview:
-        data["dataElementPreview"] = document.data_element_preview
-    if document.created_by:
-        data["createdBy"] = document.created_by
-    if document.created_at:
-        data["createdAt"] = document.created_at
-    if document.last_updated:
-        data["lastUpdated"] = document.last_updated
-    if document.change_log:
-        data["changeLog"] = document.change_log
+    optional: dict[str, Any] = {
+        "businessProblemStatement": document.business_problem_statement,
+        "smes": document.smes,
+        "useCases": document.use_cases,
+        "businessRequirements": document.business_requirements,
+        "dataSources": document.data_sources,
+        "dataClassification": document.data_classification,
+        "dataProductPreview": document.data_product_preview,
+        "retentionRequirements": document.retention_requirements,
+        "dataGovernanceArtifacts": {
+            k: v for k, v in document.data_governance_artifacts.items() if v
+        },
+        "outOfScope": document.out_of_scope,
+        "openQuestions": document.open_questions,
+        "assumptions": document.assumptions,
+        "createdBy": document.created_by,
+        "createdAt": document.created_at,
+        "lastUpdated": document.last_updated,
+        "changeLog": document.change_log,
+    }
+    data.update({key: value for key, value in optional.items() if value})
 
     return data
 
@@ -128,12 +136,44 @@ def _optional_str(value: Any) -> str | None:
     return str(value)
 
 
-def _classification_from_dict(dc: dict[str, Any]) -> dict[str, Any]:
-    result: dict[str, Any] = {
-        "classificationLevel": dc.get("classificationLevel", ""),
-        "containsPII": bool(dc.get("containsPII", False)),
-        "containsSensitiveData": bool(dc.get("containsSensitiveData", False)),
+def _dict_items(value: object) -> list[dict[str, Any]]:
+    """Copy the dict items of a YAML list; anything else becomes []."""
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, dict)]
+
+
+def _str_items(value: object) -> list[str]:
+    """Non-empty string items of a YAML list; anything else becomes []."""
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if item is not None and str(item).strip()]
+
+
+GOVERNANCE_SECTIONS = ("businessConcepts", "cdeQuality", "cdeLineage")
+
+
+def _governance_from_dict(value: object) -> dict[str, list[dict[str, Any]]]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        key: _dict_items(value.get(key)) for key in GOVERNANCE_SECTIONS if key in value
     }
+
+
+def _classification_from_dict(dc: dict[str, Any]) -> dict[str, Any]:
+    """Copy the classification, keeping only the keys the document sets.
+
+    Missing flags are not defaulted to False, so strict validation can report
+    them as missing. ``retentionRequirements`` inside the classification is the
+    v1 location (a string); v2 keeps retention as a top-level list.
+    """
+    result: dict[str, Any] = {}
+    if dc.get("classificationLevel"):
+        result["classificationLevel"] = dc["classificationLevel"]
+    for flag in ("containsPII", "containsSensitiveData"):
+        if dc.get(flag) is not None:
+            result[flag] = bool(dc[flag])
     if dc.get("retentionRequirements"):
         result["retentionRequirements"] = dc["retentionRequirements"]
     return result
