@@ -53,93 +53,181 @@ What already exists and can be reused:
 | 9 | `jsonschema` is only a transitive dependency (in `uv.lock`, not in `pyproject.toml`) | [pyproject.toml](../pyproject.toml) |
 | 10 | No Editor page, no **[+ New]** button | `app/views/`, [registry.py](../app/views/registry.py) |
 
-## 3. Phase 0 — Decisions (resolve before coding)
+## 3. Phase 0 — Decisions
 
-Each decision below has a recommendation. Record the ones marked **(log)** in [Decision_Log.md](../docs/Decision_Log.md).
+All questions raised while analysing the docs are **decided** below. Each decision states what was chosen, the alternatives considered, and why. Decisions marked **(log)** are copied into [Decision_Log.md](../docs/Decision_Log.md) in step 33, because they refine or deviate from what the docs currently say.
 
-### D1 — v1 scope: create only, Basics section only
-**Recommendation:** This feature delivers **creation** of a Draft with the **Basics** fields. Editing an existing One Pager, the other nine editor tabs, Save Draft (MINOR bumps), locking, and Submit for Review are the **Editor plan** (next feature) and are out of scope here.
-**Why:** Creation is the only path that needs the OP ID, the `id_sequences` table, the authorized-users bootstrap and the "initial draft" change log entry. Keeping it separate ships a usable vertical slice (new One Pagers appear in the registry) and lays the service-layer foundation (`workflow.py`, `validation.py`, `id_generator.py`, `auth.py`) that editing will extend.
+### Decision summary
 
-### D2 — Fields required at creation
-Requirements §5 says the lenient tier needs only `productName` and `description`. But the Delta row and storage layout also need values that cannot be filled in later without a key change:
+| # | Question | Decision |
+|---|---|---|
+| D1 | What does this feature cover? | Create a Draft from the **Basics** fields (+ optional Business Problem Statement). Editing, other tabs, locking, submit → Editor plan |
+| D2 | Which fields are required at creation? | A new **"create" validation tier**: `dataProduct`, `productName`, `description`, `businessDomain`, `dataProductType`, Owner name/initials/email |
+| D3 | Creator vs. Owner — who gets edit rights? | Authorized users come from the **document** (Owner + SMEs); the **creator must be the Owner or an SME** |
+| D4 | `dataProduct` format and uniqueness | `^[a-z][a-z0-9_]{1,62}$`; pre-check + post-insert re-check; lower `OP` number wins a race |
+| D5 | Write order across volume + Delta | YAML → authorized users → change log → `one_pager_status` **last**; compensate on failure |
+| D6 | ID generation | Shared `id_generator.py`, compare-and-swap on `id_sequences`, 5 retries, `OP-{n:04d}` |
+| D7 | Identity and permission check | `auth.py` extracts initials (corporate `…ADM@` pattern first); `can_create_one_pager()` = any authenticated user in v1 |
+| D8 | Where does the create form live? | New `app/views/editor.py` ("Editor" page) in create mode; opened by [+ New] via session state |
+| D9 | `structureDefinition` value and document content | `structure_one_pager_v_1.json` (file name resolved inside `schemas/`); document validated with `jsonschema` before writing |
+| D10 | Change log on creation | One `creation` entry, `0.1.0`, "Initial draft created", `to_status = Draft` |
+| D11 | Input hygiene and field limits | Trim + strip HTML + fixed max lengths; initials `^[A-Z]{2,5}$`; bound SQL parameters |
+| D12 | Mock-mode document writes | `OnePagerDocumentStore` gets an optional `write_path`; mock uses a per-process temp dir, fixtures are read-only |
+| D13 | Serializer vs. schema mismatch for list sections | Not touched by creation; the JSON Schema is the source of truth and the Editor plan aligns serializer + fixtures |
+| D14 | DEV `OP` sequence start | Seed `OP` = 6 in DEV (highest seeded `OP-0006`); mock sequence starts after its highest seeded ID |
+| D15 | UI widget choices | `st.form` for scalar fields, `st.data_editor(num_rows="dynamic")` for SMEs, `st.dialog` for the Cancel confirmation |
+
+### D1 — Scope: create only, Basics section only
+**Decision:** This feature delivers **creation** of a Draft One Pager from the **Basics** fields (`dataProduct`, `productName`, `businessDomain`, `dataProductType`, `description`, `dataProductOwner`, `smes`) plus an **optional** `businessProblemStatement`. Editing an existing One Pager, the other editor tabs, Save Draft (MINOR bumps), locking and Submit for Review belong to the **Editor plan** (next feature).
+**Alternatives considered:** building the full 10-tab Editor at once (too large for one vertical slice, and blocked by the Use Cases and locking work); a separate "New One Pager" page unrelated to the Editor (would be thrown away when the Editor arrives).
+**Why:** Creation is the only path that needs the OP ID, `id_sequences`, the authorized-users bootstrap and the "initial draft" change log entry. Shipping it alone gives a usable slice (new One Pagers appear in the Registry and Preview) and lays the service-layer foundation (`workflow.py`, `validation.py`, `id_generator.py`, `auth.py`) that editing extends. The Business Problem Statement is included because it is a single text area with no dependencies and is the next thing an Owner writes.
+
+### D2 — Fields required at creation **(log)**
+Requirements §5 says the lenient tier requires only `productName` and `description`. The Delta row and storage layout, however, need more values that cannot be supplied later without a key change.
+
+**Decision:** add a named **create tier** to `validation.py` (lenient tier + storage keys). The Delta DDL is **not** loosened.
 
 | Field | Required at create | Reason |
 |---|---|---|
-| `dataProduct` | Yes | Unique key of the Data Product (Data_Model §3), NOT NULL in `one_pager_status`; rename is out of scope (Requirements §16 #2) — so it must be right at creation |
+| `dataProduct` | Yes | Unique key of the Data Product (Data_Model §3), NOT NULL in `one_pager_status`; renaming is out of scope (Requirements §16 #2), so it must be right at creation |
 | `productName` | Yes | Lenient tier |
 | `description` | Yes | Lenient tier |
-| `businessDomain` | Yes | NOT NULL in `one_pager_status`; dropdown from active `ref_business_domains` |
-| `dataProductType` | Yes | NOT NULL; dropdown from active `ref_data_product_types` (schema enum `Foundational`/`Integrated`/`Augmented`) |
-| `dataProductOwner.name/initials/email` | Yes | NOT NULL `owner_*` columns; `initials` is the authorization key |
-| `dataProductOwner.team` | No | Nullable |
-| `smes[]` | No (each SME needs name/initials/email if present) | Schema `smes.items.required` |
-| `businessProblemStatement` | No | Optional here; filled in via the Editor later |
+| `businessDomain` | Yes | NOT NULL column; must be an **active** value of `ref_business_domains` |
+| `dataProductType` | Yes | NOT NULL column; must be an **active** value of `ref_data_product_types` **and** in the schema enum (`Foundational` / `Integrated` / `Augmented`) |
+| `dataProductOwner.name`, `.initials`, `.email` | Yes | NOT NULL `owner_*` columns; schema `dataProductOwner.required`; `initials` is the authorization key |
+| `dataProductOwner.team` | No | Nullable column, optional in schema |
+| `smes[]` | No — but each SME row needs name, initials and email | Schema `smes.items.required` |
+| `businessProblemStatement` | No | Written in the Editor later |
 
-**Recommendation:** implement this as a named **"create" tier** in `validation.py` (lenient tier + the keys above), not by loosening the Delta DDL. **(log)**
+**Why:** the schema's top-level `required` list already contains all of these (except `smes`/`businessProblemStatement`), so a document missing them would not even be schema-valid. Keeping the DDL strict preserves data quality for the Registry filters.
 
-### D3 — Creator vs. Owner
-Requirements §4 stores the **creator** separately from the **Owner**; Data_Model §3 (`one_pager_authorized_users` sync) says "the authenticated user is inserted as `owner`" on creation. These conflict when someone creates a One Pager on behalf of another Owner.
-**Recommendation:** pre-fill the Owner fields with the current user (editable). Write `created_by` = creator's initials. Populate `one_pager_authorized_users` **from the document** (`dataProductOwner` → `owner`, `smes` → `sme`), not from the creator. Require that the creator's initials appear as Owner **or** SME, otherwise block with "Add yourself as an SME to keep edit access" — this prevents creating a Draft nobody present can edit. **(log)**
+### D3 — Creator vs. Owner **(log)**
+Requirements §4 stores the **creator** separately from the **Owner**; Data_Model §3 says "the authenticated user is inserted as `owner`" on creation. These conflict when someone creates a One Pager on behalf of another Owner.
 
-### D4 — `dataProduct` format and uniqueness
-The schema only says "registered unique name". It is used as the unique key and in the Git path (`<data_product>/<OP-ID>.yml`, Architecture §6).
-**Recommendation:** enforce `^[a-z][a-z0-9_]{1,62}$` (matches existing samples `person`, `customer_master`), normalize by trimming, and reject duplicates with a pre-check (`data_product_exists()`). Because Delta does not enforce `UNIQUE`, re-check after insert (count rows for the `data_product`); if > 1, roll back the newer row and report "already exists". **(log)** — confirm the naming rule with the Data Product Center team.
+**Decision:**
+1. The Owner fields are **pre-filled with the current user** (initials from D7, name/email from the login) and are editable.
+2. `one_pager_status.created_by` = creator's initials; YAML `createdBy` = creator's display name.
+3. `one_pager_authorized_users` is populated **from the document**: `dataProductOwner` → role `owner`, each of `smes` → role `sme`. The creator is **not** added automatically.
+4. Validation requires that the **creator's initials appear as the Owner or as an SME**; otherwise the form shows "Add yourself as an SME to keep edit access to this One Pager".
+5. The Owner may not also be listed as an SME, and SME initials must be unique.
 
-### D5 — Write order and failure handling for a multi-store create
-Architecture §7 / Data_Model §5 say "Delta first, then YAML" for **saves**. For **creation**, nothing references the new OP ID until the `one_pager_status` row exists, so a different order makes every partial failure harmless:
+**Alternatives considered:** always insert the creator as `owner` (the Data_Model wording) — makes the Delta table disagree with the YAML Owner and breaks the "YAML is authoritative for owner/SMEs" rule of Data_Model §5; silently add the creator as SME — grants edit rights nobody asked for.
+**Why:** it keeps `one_pager_authorized_users` a pure mirror of the document (Backend_Design §11) and guarantees that the person who created the Draft can continue editing it. Data_Model §3 wording is updated in step 33.
 
-1. Generate `OP-####` (a gap on later failure is harmless — Data_Model §4).
-2. Write `OP-####/OP-####_v0.1.0.yml` to the volume (an orphan file under an unreferenced OP-ID is harmless and detectable — Decision_Log §6 "Disaster recovery").
-3. Insert `one_pager_authorized_users` rows.
+### D4 — `dataProduct` format and uniqueness **(log)**
+**Decision:**
+- Format: `^[a-z][a-z0-9_]{1,62}$` (lowercase letter first, then lowercase letters, digits, underscore; 2–63 chars). Input is trimmed; it is **not** silently lower-cased — the user sees a field error and the rule in the help text.
+- Pre-check with `data_product_exists()` before an ID is consumed → field error "A One Pager for this Data Product already exists (OP-####)" with a link to it.
+- Race protection: after inserting the status row, `count_data_product()`; if > 1, the row with the **higher `one_pager_id`** loses — it is compensated (D5) and the user gets the same "already exists" error.
+
+**Alternatives considered:** kebab-case or free text — `dataProduct` is used as the Git folder name (`<data_product>/<OP-ID>.yml`, Architecture §6) and as a unique key, so it must be path-safe and unambiguous; existing samples (`person`, `customer_master`) are already snake_case. Relying on the Delta `UNIQUE` keyword — Delta does not enforce it (Data_Model §3 note).
+**Why:** deterministic, path-safe, and consistent with existing data; "lower ID wins" is deterministic even if both writers re-check at the same time.
+
+### D5 — Write order and failure handling for a multi-store create **(log)**
+Architecture §7 / Data_Model §5 say "Delta first, then YAML" for **content saves**, where a row already exists. For **creation** nothing references the new OP ID until its `one_pager_status` row exists.
+
+**Decision:** creation uses this order:
+1. Generate `OP-####` (a gap on a later failure is harmless — Data_Model §4).
+2. Write `OP-####/OP-####_v0.1.0.yml` to the volume.
+3. Insert the `one_pager_authorized_users` rows.
 4. Insert the `change_log` `creation` entry.
-5. Insert the `one_pager_status` row **last** — this is what makes the One Pager visible in Registry/Preview.
+5. Insert the `one_pager_status` row **last** — this is what makes the One Pager visible in the Registry and Preview.
 
-On a failure at step 3–5, best-effort delete what steps 3–4 inserted for that OP-ID, log it, return a `CreateError`; the form content stays in `st.session_state` (UI_Design §4.2 "Save error"). The file from step 2 is left in place (never referenced). **(log)** — this is a deliberate, documented deviation from "Delta first" that applies to creation only.
+Failure handling:
+- Step 2 fails → nothing to undo; return `CreateError`.
+- Step 3, 4 or 5 fails → best-effort `DELETE` of the rows steps 3–4 inserted for that OP ID; the YAML file is left in place (an orphan under an unreferenced OP ID is harmless and detectable by the Decision_Log §6 "orphaned files" check).
+- In all cases a structured audit event is logged (OP ID, user initials, failed step — no field values) and the form content stays in `st.session_state` (UI_Design §4.2 "Save error").
+
+Deleting `change_log` rows is allowed **only** in this compensation path, for an OP ID whose `one_pager_status` row was never committed — i.e. for an event that, from the application's point of view, never happened. The append-only rule applies unchanged to every visible One Pager.
+
+**Alternatives considered:** Delta first (status row first) — a failure after it leaves a visible Registry row whose document is missing, so Preview shows "not found" until someone cleans up; a Delta multi-statement transaction — not available through the Statement Execution API used by `DatabricksConnection`.
+**Why:** with the status row last, every partial failure is invisible to users; this is a deliberate, documented exception to "Delta first" that applies to creation only.
 
 ### D6 — ID generation
-**Recommendation:** `id_generator.py` with `next_id(id_type) -> str` over a `DataAccess.next_sequence_value(id_type)` primitive, using the compare-and-swap + re-read + retry (max 5) algorithm from [use-cases-page-implementation-plan.md](use-cases-page-implementation-plan.md) D5. Format `OP-{n:04d}`. If the Use Cases plan lands first, **generalize its `_generate_use_case_id()`** rather than adding a second implementation; `id_sequences.sql` is created by whichever plan lands first.
+**Decision:** `src/onepagerapp/id_generator.py` exposes `next_id(data_access, id_type) -> str` over a `DataAccess.next_sequence_value(id_type) -> int` primitive. `LakehouseAccess` implements it with the compare-and-swap algorithm from [use-cases-page-implementation-plan.md](use-cases-page-implementation-plan.md) D5 (read → `UPDATE … WHERE last_value = :current` → re-read → retry up to 5 times, then raise). Formats: `OP-{n:04d}`, `UC-{n:03d}`, `BR-{n:03d}`.
+Coordination: whichever of this plan and the Use Cases plan is built first creates `id_sequences.sql` and the generator; the other reuses them. If the Use Cases plan already added a private `_generate_use_case_id()`, it is replaced by a call to `next_id(…, "UC")`.
+**Why:** one tested implementation for all three ID types, as Backend_Design §14 intends (`id_generator.py`), and the CAS pattern is already agreed for this codebase.
 
 ### D7 — Identity and permissions in v1
-**Recommendation:**
-- Add `src/onepagerapp/auth.py` with `initials_from_username(username)`: first match the corporate pattern `^([A-Za-z]{2,4})ADM@` → uppercase group; otherwise fall back to the current heuristic. Move `extract_initials` out of `preview.py` to use it. (The Use Cases plan's `initials_from_user` should become an alias of this.)
-- Add `can_create_one_pager(user) -> bool` to `permissions.py`. UC group names are still undecided (Architecture §4), so v1 returns `True` for any authenticated user, consistent with the Use Cases plan D7 — **but** the check is called both by the Registry (to show [+ New]) and by the service (to enforce), so plugging in the group check later is a one-function change.
+**Decision:**
+- New `src/onepagerapp/auth.py`:
+  - `initials_from_username(username)`: if the username matches `^([A-Za-z]{2,5})ADM@` return the group upper-cased (`MJOADM@BECOC001.onmicrosoft.com` → `MJO`, Architecture §4); otherwise fall back to the existing heuristic (`alice.brown@…` → `AB`).
+  - `resolve_current_user(username) -> CurrentUser(username, initials, display_name)`; `display_name` is derived from the username (no directory lookup in v1).
+  - `extract_initials` is removed from `preview.py`, which calls `auth.initials_from_username` instead; the Use Cases plan's `initials_from_user` becomes this function.
+- `permissions.py` gets `can_create_one_pager(user) -> bool` and `PermissionDeniedError`. **v1 returns `True` for any authenticated user.** The same function is called by the Registry (show/hide [+ New]) and by `workflow.create_one_pager` (enforcement), so adding the Owner/SME UC-group check later is a one-function change.
+
+**Alternatives considered:** blocking creation until UC group names are decided — would block the feature on an unrelated provisioning task (Architecture §4 lists group names as undecided).
+**Why:** consistent with the Use Cases plan D7 and the current permission stub; server-side enforcement point exists from day one.
 
 ### D8 — Page placement and navigation
 UI_Design §4.1 says [+ New] "opens the Editor with a blank document"; §2 says the Editor is "hidden unless editing".
-**Recommendation:** create `app/views/editor.py` now, with **create mode only** (the Editor plan adds edit mode). Streamlit 1.38 cannot hide a single page in `st.navigation`, and `st.switch_page` requires the page to be registered, so register it as **"Editor"**; when opened directly without a create/edit intent in session state it shows "Start from the Registry ([+ New]) or from a One Pager's [Edit] action" with a link to the Registry.
-Intent is passed like Registry → Preview: `st.session_state["editor_mode"] = "create"` then `st.switch_page("views/editor.py")`.
+**Decision:** create `app/views/editor.py` now, with **create mode only** (the Editor plan adds edit mode to the same file). Register it in `st.navigation` as **"Editor"**. [+ New] sets `st.session_state["editor_mode"] = "create"` and calls `st.switch_page("views/editor.py")` — the same mechanism Registry → Preview already uses. Opened without an `editor_mode` (e.g. from the sidebar), the page shows "Start from the Registry ([+ New]) or from a One Pager's [Edit] action" and a link to the Registry.
+**Why:** Streamlit 1.38 cannot hide a single page in `st.navigation`, and `st.switch_page` only works for registered pages, so the page must be registered; the empty-state message is the closest to "hidden unless editing". The UI_Design note is updated in step 33.
 
-### D9 — Initial document content and schema version
-The created YAML contains: `structureDefinition`, `dataProduct`, `productName`, `businessDomain`, `dataProductType`, `onePagerStatus: Draft`, `dataProductStatus: In Definition`, `version: 0.1.0`, `dataProductOwner`, `smes` (if any), `description`, `businessProblemStatement` (if given), `createdBy` (display name — Data_Model §5), `createdAt`, `lastUpdated`, and a one-item `changeLog` (`0.1.0`, now, creator name, "Initial draft created").
-**Recommendation:** pin `structureDefinition` to a single constant (`CURRENT_STRUCTURE_DEFINITION`) and use the same string in `one_pager_status.structure_definition`. Fixtures use `structure_one_pager_v_1.json` while Data_Model §3 uses `structure_one_pager/structure_one_pager_v_1.json` — pick one. **(log)**
-Validate the generated dict with `jsonschema` against the schema before writing — it must pass all top-level `required` fields.
+### D9 — Initial document content and `structureDefinition` **(log)**
+**Decision:**
+- `structureDefinition` = **`structure_one_pager_v_1.json`**, defined once as `CURRENT_STRUCTURE_DEFINITION` in `validation.py` and written to both the YAML and `one_pager_status.structure_definition`. The validator resolves it as a file name inside `schemas/`.
+- The created YAML contains: `structureDefinition`, `dataProduct`, `productName`, `businessDomain`, `dataProductType`, `onePagerStatus: Draft`, `dataProductStatus: In Definition`, `version: 0.1.0`, `dataProductOwner`, `smes` (only if any), `description`, `businessProblemStatement` (only if given), `createdBy` (creator display name), `createdAt`, `lastUpdated` (same ISO-8601 UTC instant as `createdAt`), and a one-item `changeLog` (`0.1.0`, that instant, creator display name, "Initial draft created").
+- The dict is validated with `jsonschema` (Draft-07) against `schemas/structure_one_pager_v_1.json` before anything is written; a schema error here is a programming error → `CreateError`, logged.
+
+**Alternatives considered:** `structure_one_pager/structure_one_pager_v_1.json` as in Data_Model §3 — there is no `structure_one_pager/` folder anywhere in the repo, while all fixture documents and the actual schema file already use the bare file name.
+**Why:** matches the real repository layout and every existing document, so no fixture changes are needed; Data_Model §3/§6 examples are updated in step 33. Data_Model §6 (validate against the version declared in the document) keeps working: new schema versions are added as new files in `schemas/`.
 
 ### D10 — Change log for creation
-One entry: `event_type = "creation"`, `version = "0.1.0"`, `summary = "Initial draft created"`, `to_status = "Draft"`, `status_field = "one_pager_status"`, `from_status = NULL`. No owner-authored change summary is asked for on creation (the event is system-generated, Requirements §7).
+**Decision:** exactly one entry: `event_type = "creation"`, `version = "0.1.0"`, `summary = "Initial draft created"`, `from_status = NULL`, `to_status = "Draft"`, `status_field = "one_pager_status"`, author = creator. No owner-authored change summary is requested on creation.
+**Why:** Requirements §7 lists "initial creation" as a system-generated entry. The "two entries" rule applies when one action *changes* both statuses; creation *initialises* them, and `In Definition` is implied by `Draft` (Requirements §6 valid combinations), so a second entry would add noise without audit value.
 
-### D11 — Input hygiene
-All free-text fields are trimmed, HTML tags stripped and length-capped before storage (Architecture §8) via `validation.sanitize_text()`; rendered later without `unsafe_allow_html`. Email format validated with a simple pattern (schema `format: email`). All SQL uses bound parameters (fix from gap #1) — never f-strings of user input.
+### D11 — Input hygiene and field limits
+**Decision:** `validation.sanitize_text(value, max_len)` trims, strips HTML tags and rejects (field error, no truncation) values over the limit. Limits:
+
+| Field | Rule |
+|---|---|
+| `dataProduct` | D4 pattern (max 63) |
+| `productName`, owner/SME `name`, `team` | max 200 |
+| `description`, `businessProblemStatement` | max 5 000 |
+| owner/SME `initials` | `^[A-Z]{2,5}$` (input upper-cased) |
+| owner/SME `email` | simple `^[^@\s]+@[^@\s]+\.[^@\s]+$`, max 254 |
+
+All SQL values go through bound parameters (step 5); content is rendered without `unsafe_allow_html`; logs never contain field values (Architecture §8).
+**Why:** Architecture §8 requires sanitising and a maximum length but gives no numbers; these limits comfortably fit real content, and rejecting instead of truncating avoids silently losing text.
+
+### D12 — Mock-mode document writes
+**Decision:** `OnePagerDocumentStore.__init__(base_path, write_path=None)`. When `write_path` is set, `write()` goes there and `read()` / `_latest_file()` look in `write_path` first, then `base_path`. `factory.py` passes `write_path=tempfile.mkdtemp(prefix="onepager-mock-")` in `local-mock` mode only; `databricks` / `local-integration` keep a single path.
+**Alternatives considered:** a new env var for the mock write folder (more configuration for no benefit); a separate `LayeredDocumentStore` class (duplicates path logic).
+**Why:** fixtures under `tests/fixtures/sample_one_pagers/` stay read-only; created documents live as long as the process, which matches the lifetime of the in-memory mock tables.
+
+### D13 — Serializer vs. schema mismatch for list sections **(log)**
+**Decision:** the JSON Schema is the source of truth (Requirements §5). Creation writes none of the mismatched lists (`businessRequirements`, `dataSources`, `dataElementPreview`), so this feature **does not change** their serialization. The Editor plan must align the serializer, `OnePagerDocument` and the fixtures with the schema (`id`/`description`, `name`/`sourceSystem`) before those tabs are built. Logged as a known gap.
+**Why:** keeps this change small and avoids breaking the Preview rendering of existing fixtures; the gap is recorded so it is not forgotten.
+
+### D14 — `OP` sequence start
+**Decision:** the Liquibase seed sets all counters to `0` (Data_Model §3). The DEV seed script [seed_one_pager_status_dev.sql](seed_one_pager_status_dev.sql) additionally runs `UPDATE id_sequences SET last_value = 6 WHERE id_type = 'OP'` (it seeds `OP-0001`…`OP-0006`). `MockDataAccess` initialises its OP counter to the highest seeded mock ID (currently 2).
+**Why:** new IDs must never collide with seeded rows; environments without seed data start at `OP-0001` as specified.
+
+### D15 — UI widget choices
+**Decision:** scalar fields in an `st.form` (no re-run per keystroke); SMEs in `st.data_editor(num_rows="dynamic")` with columns name / initials / email / team, placed outside the form (data editors with dynamic rows work more reliably outside forms); Cancel confirmation via `st.dialog` (available in Streamlit 1.38). Business Domain / Product Type use `st.selectbox` with `index=None` and a "Select…" placeholder so nothing is pre-selected by accident.
+**Why:** standard Streamlit primitives already available in the pinned version; matches UI_Design §5 confirmation-dialog pattern.
 
 ### Explicitly deferred
 
-| Feature | Blocked by / belongs to |
+| Feature | Belongs to |
 |---|---|
-| Other editor tabs (Business Problem, Use Cases, BRs, Sources, …) | Editor plan |
+| Other editor tabs (Use Cases, BRs, Sources, Data Product Preview, Classification, Governance, Scope & Questions, Review) | Editor plan |
 | Save Draft (MINOR bump), change summary field | Editor plan |
 | Locking on enter/exit | Editor plan + `locking.py` |
-| Submit for Review | Editor plan + `workflow.py` transitions + strict validation |
+| Submit for Review, strict validation | Editor plan + `workflow.py` transitions |
 | Linking Use Cases at creation | Use Cases plan + Editor plan (`use_case_references`) |
 | BR-### generation | Editor plan (Business Requirements tab) |
-| UC-group-based role check | Group names not decided (Architecture §4) |
+| UC-group-based role check | Once group names are decided (Architecture §4) |
+| Serializer/schema alignment for list sections | Editor plan (D13) |
 
 ## 4. Phase 1 — Storage
 
 | # | Step | Detail |
 |---|---|---|
-| 1 | Add `id_sequences.sql` (if not already added by the Use Cases plan) | Columns per [Data_Model.md](../docs/Data_Model.md) §3; seed `('OP', 0), ('UC', 0), ('BR', 0)` in the same changeset. If DEV already has seeded `one_pager_status` rows (see [seed_one_pager_status_dev.sql](seed_one_pager_status_dev.sql)), the DEV seed must set `OP` to the highest existing number so new IDs do not collide |
+| 1 | Add `id_sequences.sql` (if not already added by the Use Cases plan) | Columns per [Data_Model.md](../docs/Data_Model.md) §3; seed `('OP', 0), ('UC', 0), ('BR', 0)` in the same changeset. Append `UPDATE … id_sequences SET last_value = 6 WHERE id_type = 'OP'` to [seed_one_pager_status_dev.sql](seed_one_pager_status_dev.sql) (D14) |
 | 2 | Add `one_pager_authorized_users.sql` | Columns per Data_Model §3; composite logical PK (`one_pager_id`, `user_initials`) |
-| 3 | Register in [root.changelog.databricks.yaml](../liquibase/bia_meta/onepager_app/root.changelog.databricks.yaml) | After the reference tables, before/alongside the operational tables; `id_sequences` must precede any code that creates IDs |
+| 3 | Register in [root.changelog.databricks.yaml](../liquibase/bia_meta/onepager_app/root.changelog.databricks.yaml) | `id_sequences` after the reference tables; `one_pager_authorized_users` after `one_pager_status` |
 | 4 | DEV seed for authorized users | Add rows for the already-seeded `one_pager_status` records so the table is consistent from day one |
 
 ## 5. Phase 2 — Core Layer (`src/onepagerapp/`, no Streamlit)
@@ -147,15 +235,15 @@ All free-text fields are trimmed, HTML tags stripped and length-capped before st
 | # | Step | Detail |
 |---|---|---|
 | 5 | **Fix parameterized SQL** (prerequisite) | Extend `DatabricksConnection.execute_statement(statement, parameters: list[StatementParameterListItem] \| None = None)` and pass them through to `statement_execution.execute_statement`. The Statement Execution API uses **named** markers (`:one_pager_id`), not `%s` — convert the existing Preview readers too. This fixes Preview in `databricks` mode as a side effect |
-| 6 | Dependencies | Add `jsonschema` explicitly to `pyproject.toml` `dependencies` (pin to the version already in `uv.lock`); `uv lock` |
+| 6 | Dependencies | Add `jsonschema==4.26.0` (the version already in `uv.lock`) to `pyproject.toml` `dependencies`; `uv lock` |
 | 7 | Models in [models.py](../src/onepagerapp/models.py) | `PersonRef(name, initials, email, team=None)`; `NewOnePagerInput(data_product, product_name, business_domain, data_product_type, description, owner: PersonRef, smes: list[PersonRef], business_problem_statement="")`; `CurrentUser(username, initials, display_name)`; `ValidationError(field_path, message)` (Backend_Design §4); `CreateResult(one_pager_id, version)`. Extend `OnePagerDocument` with `created_by`, `created_at`, `last_updated`, `change_log: list[dict]` (all optional/defaulted so existing readers keep working) |
-| 8 | Serialization in [serialization.py](../src/onepagerapp/documents/serialization.py) | Read/write `createdBy`, `createdAt`, `lastUpdated`, `changeLog`; omit `businessProblemStatement` when empty. Align list-item keys with the schema (`businessRequirements: id/description`, `dataSources: name/sourceSystem/description`) **or** record that the schema needs a v1.1 — creation writes none of these lists, so this can be a follow-up, but log it as a known gap |
+| 8 | Serialization in [serialization.py](../src/onepagerapp/documents/serialization.py) | Read/write `createdBy`, `createdAt`, `lastUpdated`, `changeLog`; omit `businessProblemStatement` when empty. List-section keys (`businessRequirements`, `dataSources`, `dataElementPreview`) are **left unchanged** here (D13) |
 | 9 | `auth.py` | `initials_from_username()` per D7; `resolve_current_user(username) -> CurrentUser`. Replace `extract_initials` in [preview.py](../app/views/preview.py) with this |
 | 10 | `validation.py` | `sanitize_text(value, max_len)`; `validate_create(input) -> list[ValidationError]` (D2 fields, D4 pattern, email format, SME required fields, D3 creator ∈ owner/SMEs, no duplicate SME initials, owner not also an SME); `validate_schema(doc_dict) -> list[ValidationError]` using `jsonschema` (Draft-07) against `schemas/structure_one_pager_v_1.json`. Errors are returned, never raised (Backend_Design §4) |
 | 11 | `id_generator.py` | `next_id(data_access, id_type)` → `OP-0001` etc. per D6; formatting table `{"OP": 4, "UC": 3, "BR": 3}` |
 | 12 | `permissions.py` | Add `can_create_one_pager(user: CurrentUser) -> bool` (v1: authenticated) and `PermissionDeniedError` |
 | 13 | Extend the `DataAccess` ABC | `next_sequence_value(id_type) -> int`; `data_product_exists(data_product) -> bool`; `count_data_product(data_product) -> int`; `insert_authorized_users(one_pager_id, users: list[tuple[PersonRef, role]])`; `append_change_log(entry: ChangeLogEntry)`; `insert_one_pager_status(row)`; `delete_one_pager_records(one_pager_id)` (compensation only — deletes status/authorized-users/change-log rows for an OP that never became visible). Document writes stay on `OnePagerDocumentStore.write()` |
-| 14 | Implement in `mock.py` **first** | Refactor the hardcoded registry rows / headers / change logs into **mutable dicts built in `__init__`** so `get_registry`, `get_registry_status_counts`, `get_one_pager_status`, `get_change_log` read from them and the new writes append to them. Mock sequence starts at the highest seeded OP number. Mock document writes go to a **temp directory** layered over the fixtures dir (read: temp first, then fixtures) so fixtures are never modified (gap #7) — e.g. a small `LayeredDocumentStore` or a `write_path` argument on `OnePagerDocumentStore` wired in `factory.py` |
+| 14 | Implement in `mock.py` **first** | Refactor the hardcoded registry rows / headers / change logs into **mutable dicts built in `__init__`** so `get_registry`, `get_registry_status_counts`, `get_one_pager_status`, `get_change_log` read from them and the new writes append to them. Mock OP counter starts at 2 (D14). Add the optional `write_path` to `OnePagerDocumentStore` and pass a temp dir from `factory.py` in `local-mock` mode (D12) so fixtures are never modified (gap #7) |
 | 15 | Implement in `lakehouse.py` | Parameterized `INSERT`s for the three tables; CAS `UPDATE` on `id_sequences` with re-read + retry; `SELECT COUNT(*)` for uniqueness; compensation `DELETE`s scoped by `one_pager_id`. Timestamps via `current_timestamp()` in SQL; the same instant is used for YAML `createdAt` (pass it as a parameter to keep them identical) |
 | 16 | `workflow.py` — `create_one_pager(input, user, data_access, document_store) -> CreateResult \| list[ValidationError]` | Orchestrates: permission check → sanitize → `validate_create` → uniqueness pre-check → `next_id("OP")` → build `OnePagerDocument` (D9) → `validate_schema` → write steps 2–5 of D5 → post-insert uniqueness re-check (D4) → return result. On storage failure: compensate, log a structured audit event (no field values, Architecture §8), raise/return `CreateError` with a user-safe message. Pure Python, no Streamlit; dependencies injected for testability |
 
@@ -168,7 +256,7 @@ All free-text fields are trimmed, HTML tags stripped and length-capped before st
 | 17 | Resolve the current user once | In [app.py](../app/app.py), store `st.session_state.current_user_info = auth.resolve_current_user(username)` next to `current_user`, **before** `pg.run()` so pages can use it on first render (today the user is resolved after the page runs) |
 | 18 | [+ New] on the Registry | Top-right of the header and in the "No One Pagers yet" empty state ([UI_Design.md](../docs/UI_Design.md) §4.1). Shown only if `can_create_one_pager(user)`. On click: clear any previous create draft in session, set `editor_mode = "create"`, `st.switch_page("views/editor.py")` |
 | 19 | Create `app/views/editor.py` (thin view) | Header "New One Pager" + `Draft` badge + `v0.1.0`. **Basics** section: Data Product (text, help text with naming rule), Product Name, Business Domain (select, active ref values), Product Type (select), Description (text area), Owner (name / initials / email / team — pre-filled from current user), SMEs (`st.data_editor` with `num_rows="dynamic"`, columns name/initials/email/team), optional Business Problem Statement. Use schema `description`s as placeholder/help text (UI_Design §4.2 "New (empty form)"). All form values live in `st.session_state["create_form"]` so they survive re-runs and failed saves |
-| 20 | Bottom bar | **[Create Draft]** → `workflow.create_one_pager(...)`; **[Cancel]** → confirmation dialog if any field is filled, then back to the Registry. No change-summary field on creation (D10) |
+| 20 | Bottom bar | **[Create Draft]** → `workflow.create_one_pager(...)`; **[Cancel]** → `st.dialog` confirmation if any field is filled (D15), then back to the Registry. No change-summary field on creation (D10) |
 | 21 | Results | Validation errors: inline `st.error` under each offending field plus a summary list at the bottom (UI_Design §4.2 "Validation errors"). Duplicate `dataProduct`: field-level error "A One Pager for this Data Product already exists" (+ link to it if the ID is known). Storage failure: banner "Create failed — your changes are preserved, please retry." (no raw exception). Success: clear `create_form`, set `preview_one_pager_id = new_id`, `st.toast("Created OP-####")`, `st.switch_page("views/preview.py")` |
 | 22 | Double-submit guard | Disable **[Create Draft]** while the call runs and store the created ID in session; a re-run after success must not create a second One Pager |
 | 23 | Register the page | Add `st.Page("views/editor.py", title="Editor")` to `st.navigation` in [app.py](../app/app.py); direct-visit state per D8 |
@@ -193,7 +281,7 @@ Per [Testing_Strategy.md](../docs/Testing_Strategy.md). Services receive fakes b
 | # | Step | Detail |
 |---|---|---|
 | 32 | Quality gates | `ruff check` + `ruff format` + `mypy` + `pytest tests/unit/` |
-| 33 | Docs | Record D2, D3, D4, D5, D9 in [Decision_Log.md](../docs/Decision_Log.md); note in [UI_Design.md](../docs/UI_Design.md) §4.2 that the Editor's create mode shows Basics only in v1 |
+| 33 | Docs | Add D2, D3, D4, D5, D9, D13 to [Decision_Log.md](../docs/Decision_Log.md) (new §7–§12). Update [Data_Model.md](../docs/Data_Model.md) §3 (`one_pager_authorized_users` populated from Owner/SMEs, not the creator; `structure_definition` example = `structure_one_pager_v_1.json`) and §6; update [UI_Design.md](../docs/UI_Design.md) §2/§4.2 (Editor registered but shows a start message without intent; create mode shows Basics + Business Problem only) |
 | 34 | Bump `VERSION` | In [__version.py](../src/onepagerapp/__version.py) (currently `0.1.5.dev2`). Per [Dev_Notes.md](../docs/Dev_Notes.md), pip skips reinstalling the wheel without a version bump |
 | 35 | Deploy | Bundle deploy → Liquibase migrate (new `id_sequences`, `one_pager_authorized_users`) → set the DEV `OP` sequence past seeded IDs → create a One Pager in DEV and verify Registry, Preview, the three tables and the volume file |
 
@@ -231,7 +319,8 @@ Per [Testing_Strategy.md](../docs/Testing_Strategy.md). Services receive fakes b
 - `src/onepagerapp/documents/serialization.py` (and `store.py` if the layered write path lives there)
 - `src/onepagerapp/models.py`, `src/onepagerapp/permissions.py`
 - `app/app.py`, `app/views/registry.py`, `app/views/preview.py` (use `auth.initials_from_username`)
-- `docs/Decision_Log.md`, `docs/UI_Design.md`, `src/onepagerapp/__version.py`
+- `..dev/seed_one_pager_status_dev.sql` (DEV `OP` sequence, authorized-users seed)
+- `docs/Decision_Log.md`, `docs/Data_Model.md`, `docs/UI_Design.md`, `src/onepagerapp/__version.py`
 
 ## 11. Sequencing Note
 
