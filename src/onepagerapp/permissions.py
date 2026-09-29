@@ -138,6 +138,15 @@ def check_can_edit(
     raise PermissionDeniedError(reason)
 
 
+def can_review(roles: Collection[Actor]) -> bool:
+    """Whether the user may use the Review queue and review One Pagers.
+
+    Approvers only (UI_Design.md §2, "Page visibility by role"). Segregation of
+    duties is checked per One Pager when approving or rejecting.
+    """
+    return Actor.APPROVER in roles
+
+
 def can_release_lock(user: CurrentUser | None, lock: LockInfo | None) -> bool:
     """Check if the user may release a lock: only its holder may (Backend §6)."""
     return bool(user and lock and lock.locked_by_initials == user.initials)

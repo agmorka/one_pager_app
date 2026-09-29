@@ -561,6 +561,16 @@ class MockDataAccess(DataAccess):
         row = self._status_rows.get(one_pager_id)
         return copy.copy(row) if row else None
 
+    def get_one_pager_status_rows(
+        self, one_pager_status: str
+    ) -> list[OnePagerStatusRow]:
+        rows = [
+            copy.copy(row)
+            for row in self._status_rows.values()
+            if row.one_pager_status == one_pager_status
+        ]
+        return sorted(rows, key=lambda r: (_as_utc(r.last_updated_at), r.one_pager_id))
+
     def update_authorized_users(self, users: list[AuthorizedUser]) -> None:
         for user in users:
             rows = self._authorized_users.get(user.one_pager_id, [])

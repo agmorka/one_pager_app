@@ -60,7 +60,7 @@ The Editor has create mode and, from Phase 4, edit mode. Missing:
 
 | # | Feature |
 |---|---|
-| 4.1 | Coarse role resolution from **Unity Catalog group membership** (Owner/SME, Approver, Admin, Viewer). Today every authenticated user may create One Pagers and manage Use Cases. |
+| 4.1 | Coarse role resolution from **Unity Catalog group membership** (Owner/SME, Approver, Admin, Viewer). Today every authenticated user may create One Pagers and manage Use Cases. **Interim (Phase 6):** `auth.resolve_roles` gives Approver/Admin from the initials in `ONE_PAGER_APP_APPROVERS` / `ONE_PAGER_APP_ADMINS`; switching to UC groups only changes that function |
 | 4.2 | ~~Per-record check: `check_can_edit` against `one_pager_authorized_users`~~ **Done (Phase 4, step 17):** `permissions.check_can_edit` / `edit_denied_reason` (Owner/SME and status `Draft` / `Draft Update`); the Owner/SME UC group check still waits for 4.1 |
 | 4.3 | ~~Real `get_action_states`. Today every action is hard-coded as disabled.~~ **Done (Phase 5):** derived from `TRANSITIONS` guards; actions whose service is not built yet stay disabled ("coming soon"). Approver/Admin roles wait for 4.1 |
 | 4.4 | Pages hidden or shown by role (Review for Approvers only, Admin for Admins only, Editor for Owner/SME only) |
@@ -82,7 +82,7 @@ The Editor has create mode and, from Phase 4, edit mode. Missing:
 
 | # | Feature |
 |---|---|
-| 6.1 | **Review page** (`3_Review.py`): an Approver queue of `In Review` items, sorted oldest first |
+| 6.1 | ~~**Review page** (`3_Review.py`): an Approver queue of `In Review` items, sorted oldest first~~ **Done (Phase 6):** `app/views/review.py`, `review.get_review_queue`; in the navigation for Approvers only; **Review** opens Preview in review mode |
 | 6.2 | Approver adds section-level review comments in Preview |
 | 6.3 | Owner marks comments as resolved (`resolved_by`, `resolved_at`) |
 | 6.4 | "Review mode" in Preview, with a Reject dialog |
@@ -236,7 +236,7 @@ Locking must exist before users can edit existing records, or two editors can ov
 
 | Order | Item | Why now |
 |---|---|---|
-| 30 | 6.1 Review page (Approver queue) | Needs `In Review` items from Submit (1.2) and the Approver role (4.1) |
+| 30 | ~~6.1 Review page (Approver queue)~~ **Done** | Needs `In Review` items from Submit (1.2) and the Approver role (4.1, interim config-based roles) |
 | 31 | 6.4 Review mode in Preview, 1.4 Reject with a mandatory comment | Reject writes the first `review_comments` rows |
 | 32 | 1.3 Approve (version `1.0.0` / next MAJOR, two change-log entries), 1.8 (approval part) DP → `Ready for Development` / `In Enhancement` | Uses segregation of duties (1.10) |
 | 33 | 6.2 Section-level review comments, 6.3 Owner resolves comments | Builds on the comment storage from Reject |

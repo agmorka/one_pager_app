@@ -493,3 +493,18 @@ def test__append_change_log_entries__single_insert() -> None:
     assert ":summary_1" in statement
     assert params["summary_0"] == NASTY
     _assert_not_interpolated(statement)
+
+
+@pytest.mark.unit
+def test__get_one_pager_status_rows__filters_by_status_oldest_first() -> None:
+    conn = _FakeConnection(
+        [_response(list(_STATUS_ROW_VALUES), [list(_STATUS_ROW_VALUES.values())])]
+    )
+    rows = _access(conn).get_one_pager_status_rows(NASTY)
+
+    assert [r.one_pager_id for r in rows] == ["OP-0007"]
+    statement, params = conn.calls[0]
+    _assert_not_interpolated(statement)
+    assert "WHERE one_pager_status = :one_pager_status" in statement
+    assert "ORDER BY last_updated_at ASC" in statement
+    assert params == {"one_pager_status": NASTY}

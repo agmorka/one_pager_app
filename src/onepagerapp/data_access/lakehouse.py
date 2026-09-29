@@ -825,6 +825,18 @@ class LakehouseAccess(DataAccess):
         rows = self._response_rows(response)
         return self._row_to_status_row(rows[0]) if rows else None
 
+    def get_one_pager_status_rows(
+        self, one_pager_status: str
+    ) -> list[OnePagerStatusRow]:
+        fqn = f"{self._fqn_prefix}.one_pager_status"
+        response = self._connection.execute_statement(
+            f"SELECT {', '.join(_ONE_PAGER_STATUS_COLUMNS)} FROM {fqn} "  # noqa: S608
+            "WHERE one_pager_status = :one_pager_status "
+            "ORDER BY last_updated_at ASC, one_pager_id ASC",
+            parameters={"one_pager_status": one_pager_status},
+        )
+        return [self._row_to_status_row(r) for r in self._response_rows(response)]
+
     def update_authorized_users(self, users: list[AuthorizedUser]) -> None:
         fqn = f"{self._fqn_prefix}.one_pager_authorized_users"
         for user in users:

@@ -338,6 +338,18 @@ class DataAccess(ABC):
         ...
 
     @abstractmethod
+    def get_one_pager_status_rows(
+        self, one_pager_status: str
+    ) -> list[OnePagerStatusRow]:
+        """Return the ``one_pager_status`` rows with this One Pager status.
+
+        Read fresh (never cached). Sorted by ``last_updated_at``, oldest first
+        (for ``In Review`` that is the submission time: nothing else changes
+        the row while it waits for review).
+        """
+        ...
+
+    @abstractmethod
     def update_authorized_users(self, users: list[AuthorizedUser]) -> None:
         """Update name, email, team and role of existing authorized-user rows.
 
