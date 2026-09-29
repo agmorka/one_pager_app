@@ -12,7 +12,7 @@ Permission enforcement happens on state changes (approve, edit, etc.) in the ser
 from dataclasses import dataclass
 
 from onepagerapp.auth import initials_from_username
-from onepagerapp.models import CurrentUser
+from onepagerapp.models import CurrentUser, LockInfo
 
 
 class PermissionDeniedError(Exception):
@@ -56,6 +56,11 @@ def can_create_one_pager(user: CurrentUser | None) -> bool:
     group check later only changes this function.
     """
     return bool(user and user.username and user.initials)
+
+
+def can_release_lock(user: CurrentUser | None, lock: LockInfo | None) -> bool:
+    """Check if the user may release a lock: only its holder may (Backend §6)."""
+    return bool(user and lock and lock.locked_by_initials == user.initials)
 
 
 def extract_initials(user: str | None) -> str:
@@ -105,7 +110,8 @@ def get_action_states(
 ) -> dict[str, ActionState]:
     """Compute the button state for all actions in the Preview page.
     
-    v1: All state-changing actions return DISABLED.
+    v1: All state-changing actions return DISABLED, except **Release my lock**,
+    which is enabled for the holder of an active lock (Phase 3).
     
     Args:
         current_user_initials: Initials of the logged-in user.
@@ -151,15 +157,26 @@ def get_action_states(
             enabled=False,
             tooltip="Resolve comment coming soon",
         ),
-        "release_lock": ActionState(
-            enabled=False,
-            tooltip="Release lock coming soon",
+        "release_lock": _release_lock_state(
+            current_user_initials, is_locked, lock_holder_initials
         ),
         "export_pdf": ActionState(
             enabled=False,
             tooltip="Export PDF coming soon",
         ),
     }
+
+
+def _release_lock_state(
+    current_user_initials: str, is_locked: bool, lock_holder_initials: str | None  # noqa: FBT001
+) -> ActionState:
+    if not is_locked:
+        return ActionState(enabled=False, tooltip="This One Pager is not locked")
+    if lock_holder_initials != current_user_initials:
+        return ActionState(
+            enabled=False, tooltip="Only the lock holder can release this lock"
+        )
+    return ActionState(enabled=True)
 
 
 def get_status_timeline_stages() -> list[dict]:

@@ -1,7 +1,8 @@
 """Preview page — read-only view of a single One Pager.
 
 Displays the complete One Pager document with header, status timeline, content sections,
-change log, review comments, and lock indicator. All state-changing actions are disabled in v1.
+change log, review comments, and lock indicator. State-changing actions are disabled in v1,
+except **Release my lock** for the holder of an active lock.
 
 The view:
 1. Resolves one_pager_id from session state or the query param; without one it
@@ -17,15 +18,21 @@ Per UI_Design.md §4.4, v1 renders action buttons as disabled with "coming soon"
 """
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pandas as pd
 import streamlit as st
 
-from onepagerapp.auth import initials_from_username
+from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.base import DataAccess
-from onepagerapp.models import OnePagerDocument, PreviewData
-from onepagerapp.permissions import can_view_one_pager, get_action_states, get_status_timeline_stages
+from onepagerapp.locking import active_lock, release_lock
+from onepagerapp.models import CurrentUser, LockInfo, OnePagerDocument, PreviewData
+from onepagerapp.permissions import (
+    PermissionDeniedError,
+    can_view_one_pager,
+    get_action_states,
+    get_status_timeline_stages,
+)
 from adapters.theme import get_op_status_colors, get_dp_status_colors, DEFAULT_BADGE_COLOR
 
 logger = logging.getLogger(__name__)
@@ -449,36 +456,91 @@ def render_review_comments(preview_data: PreviewData) -> None:
                         st.success("✅ Resolved")
 
 
-def render_lock_indicator(preview_data: PreviewData) -> None:
-    """Render the lock status indicator.
-    
-    Shows either "Locked by {name}" (read-only notice) or nothing if not locked.
-    v1: Release lock button is disabled.
-    
-    Args:
-        preview_data: Complete preview data.
-    """
-    if not preview_data.lock:
+def _lock_time(value: datetime, fmt: str) -> str:
+    """Format a lock timestamp in UTC (lock times are stored in UTC)."""
+    if value.tzinfo is not None:
+        value = value.astimezone(UTC)
+    return value.strftime(fmt) + " UTC"
+
+
+def _release_my_lock(data_access: DataAccess, one_pager_id: str, user: CurrentUser) -> None:
+    """Handle **Release my lock**: release, then re-run with a confirmation."""
+    try:
+        released = release_lock(data_access, one_pager_id, user)
+    except PermissionDeniedError:
+        st.error("Only the lock holder can release this lock.")
         return
-    
-    lock = preview_data.lock
-    acquired = lock.acquired_at.strftime("%Y-%m-%d %H:%M")
-    expires = lock.expires_at.strftime("%H:%M")
-    
-    st.warning(
-        f"🔒 **Locked by {lock.locked_by_name}** ({lock.locked_by_initials}) "
-        f"since {acquired} (expires {expires}). Read-only mode.",
+    except Exception:
+        logger.exception(f"Failed to release lock on {one_pager_id}")
+        st.error("Couldn't release the lock. Please retry.", icon="⚠️")
+        return
+    st.session_state["preview_flash"] = (
+        "Your lock was released." if released else "This One Pager is no longer locked."
+    )
+    st.rerun()
+
+
+def render_lock_indicator(
+    data_access: DataAccess,
+    preview_data: PreviewData,
+    lock: LockInfo | None,
+    user: CurrentUser,
+) -> None:
+    """Render the lock status indicator (UI_Design.md §4.4).
+
+    Locked by the current user: a notice with **Release my lock**. Locked by
+    someone else: a read-only notice. Not locked (or the lock expired): nothing.
+
+    Args:
+        data_access: Data access used to release the lock.
+        preview_data: Complete preview data.
+        lock: The active lock, or None.
+        user: The current user.
+    """
+    if lock is None:
+        return
+
+    acquired = _lock_time(lock.acquired_at, "%Y-%m-%d %H:%M")
+    expires = _lock_time(lock.expires_at, "%H:%M")
+    header = preview_data.header
+    action = get_action_states(
+        current_user_initials=user.initials,
+        owner_initials=header.owner_initials,
+        one_pager_status=header.one_pager_status,
+        is_locked=True,
+        lock_holder_initials=lock.locked_by_initials,
+    )["release_lock"]
+
+    if not action.enabled:
+        st.warning(
+            f"🔒 **Locked by {lock.locked_by_name}** ({lock.locked_by_initials}) "
+            f"since {acquired} (expires {expires}). Read-only mode.",
+            icon="🔒",
+        )
+        return
+
+    st.info(
+        f"🔒 **Locked by you** since {acquired} (expires {expires}).",
         icon="🔒",
     )
+    if st.button(
+        "Release my lock",
+        key="preview_release_lock",
+        help="Release your edit lock so others can edit this One Pager",
+    ):
+        _release_my_lock(data_access, header.one_pager_id, user)
 
 
-def render_action_bar(preview_data: PreviewData, current_user_initials: str) -> None:
+def render_action_bar(
+    preview_data: PreviewData, lock: LockInfo | None, current_user_initials: str
+) -> None:
     """Render the action button bar (disabled in v1).
     
     Per UI_Design.md §4.4, all state-changing actions are disabled with "coming soon" tooltips.
     
     Args:
         preview_data: Complete preview data.
+        lock: The active lock, or None.
         current_user_initials: Current user's initials.
     """
     header = preview_data.header
@@ -487,8 +549,8 @@ def render_action_bar(preview_data: PreviewData, current_user_initials: str) -> 
         current_user_initials=current_user_initials,
         owner_initials=header.owner_initials,
         one_pager_status=header.one_pager_status,
-        is_locked=preview_data.lock is not None,
-        lock_holder_initials=preview_data.lock.locked_by_initials if preview_data.lock else None,
+        is_locked=lock is not None,
+        lock_holder_initials=lock.locked_by_initials if lock else None,
     )
     
     st.subheader("Actions")
@@ -541,7 +603,9 @@ if not st.session_state.get("services_initialized"):
     st.stop()
 
 data_access: DataAccess = st.session_state.data_access
-current_user = st.session_state.get("current_user", "unknown")
+current_user_info: CurrentUser = st.session_state.get(
+    "current_user_info"
+) or resolve_current_user(st.session_state.get("current_user", "unknown"))
 
 # Resolve one_pager_id: internal navigation (session_state) takes priority since
 # st.switch_page clears query params; fall back to a query param (deep link).
@@ -601,7 +665,10 @@ render_status_timeline(preview_data.header.one_pager_status)
 
 st.divider()
 
-render_action_bar(preview_data, initials_from_username(current_user))
+# Expired locks count as "not locked" (Backend_Design.md §6).
+lock = active_lock(preview_data.lock)
+
+render_action_bar(preview_data, lock, current_user_info.initials)
 
 st.divider()
 
@@ -617,5 +684,5 @@ render_review_comments(preview_data)
 
 st.divider()
 
-render_lock_indicator(preview_data)
+render_lock_indicator(data_access, preview_data, lock, current_user_info)
 

@@ -74,7 +74,7 @@ The Editor supports **create mode only**. Missing:
 |---|---|
 | 5.1 | ~~Acquire a lock when the editor opens (same user and session, same user in another tab, other user, expired lock)~~ **Done (Phase 3):** `locking.acquire_lock`; the editor calls it from Phase 4 (2.1) |
 | 5.2 | ~~Heartbeat on each re-run, with automatic expiry after 30 minutes~~ **Done (Phase 3):** `acquire_lock` / `heartbeat`, TTL from `ONE_PAGER_APP_LOCK_TTL_SECONDS` |
-| 5.3 | Release the lock on submit, cancel or manual release (the **Release my lock** button in Preview) |
+| 5.3 | Release the lock on submit, cancel or manual release (the **Release my lock** button in Preview). **Manual release done (Phase 3):** `locking.release_lock`; submit and cancel call it in Phase 5 |
 | 5.4 | ~~Log an event when an expired lock is overridden~~ **Done (Phase 3)** |
 | 5.5 | Lock icon and holder initials in the **Registry** table |
 
@@ -205,8 +205,8 @@ Locking must exist before users can edit existing records, or two editors can ov
 
 | Order | Item | Why now |
 |---|---|---|
-| 14 | 5.1 Acquire lock, 5.2 heartbeat and 30-minute expiry, 5.4 log expired-lock override | Core of `locking.py` |
-| 15 | 5.3 Manual release (**Release my lock** in Preview) | Release on submit and cancel is wired up in Phase 5 |
+| 14 | ~~5.1 Acquire lock, 5.2 heartbeat and 30-minute expiry, 5.4 log expired-lock override~~ **Done** | Core of `locking.py` |
+| 15 | ~~5.3 Manual release (**Release my lock** in Preview)~~ **Done** | Release on submit and cancel is wired up in Phase 5 |
 | 16 | 5.5 / 11.4 Lock icon and holder initials in the Registry | Reads the same lock data |
 
 ### Phase 4: Editing existing One Pagers

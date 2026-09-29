@@ -481,6 +481,13 @@ class MockDataAccess(DataAccess):
         )
         return True
 
+    def delete_lock(self, one_pager_id: str, *, locked_by_initials: str) -> bool:
+        current = self._locks.get(one_pager_id)
+        if current is None or current.locked_by_initials != locked_by_initials:
+            return False
+        del self._locks[one_pager_id]
+        return True
+
     # ========================================================================
     # Create One Pager Methods
     # ========================================================================

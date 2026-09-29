@@ -293,3 +293,14 @@ def test__refresh_lock__updates_only_the_holders_session() -> None:
         last_heartbeat=NOW,
         expires_at=NOW,
     )
+
+
+@pytest.mark.unit
+def test__delete_lock__only_the_holders_row() -> None:
+    conn = _FakeConnection([_response(["num_affected_rows"], [["1"]])])
+    assert _access(conn).delete_lock("OP-0001", locked_by_initials=NASTY)
+    statement, params = conn.calls[0]
+    assert statement.startswith("DELETE FROM cat.sch.locks WHERE one_pager_id")
+    assert "locked_by_initials = :locked_by_initials" in statement
+    _assert_not_interpolated(statement)
+    assert params == {"one_pager_id": "OP-0001", "locked_by_initials": NASTY}

@@ -1,6 +1,7 @@
 """AppTest smoke tests for the Preview page states (UI_Design.md §4.4)."""
 
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import NoReturn
 
@@ -11,6 +12,7 @@ from streamlit.testing.v1 import AppTest
 from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
+from onepagerapp.models import LockInfo
 from tests.conftest import FIXTURES_DIR
 
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
@@ -194,3 +196,63 @@ def test__preview__v1_document_uses_legacy_fields(
     assert "person_id" in list(elements["Element"])
     classification = _expander(at, "🔐 Classification")
     assert any("7 years" in m.value for m in classification.markdown)
+
+
+ALICE = "alice.brown@company.com"
+MAJA = "MJOADM@BECOC001.onmicrosoft.com"
+
+
+def _lock_services(tmp_path: Path, holder: str, expires_in: timedelta) -> dict:
+    services = _services(tmp_path)
+    now = datetime.now(UTC)
+    holder_user = resolve_current_user(holder)
+    services["data_access"]._locks["OP-0001"] = LockInfo(
+        one_pager_id="OP-0001",
+        locked_by_initials=holder_user.initials,
+        locked_by_name=holder_user.display_name,
+        session_id="other-session",
+        acquired_at=now - timedelta(minutes=5),
+        last_heartbeat=now - timedelta(minutes=5),
+        expires_at=now + expires_in,
+    )
+    return {**services, "preview_one_pager_id": "OP-0001"}
+
+
+@pytest.mark.unit
+def test__preview__own_lock_can_be_released(
+    tmp_path: Path, switched: list[str]
+) -> None:
+    state = _lock_services(tmp_path, ALICE, timedelta(minutes=25))
+    at = _app(state).run()
+
+    assert not at.exception
+    assert any("Locked by you" in i.value for i in at.info)
+    at.button(key="preview_release_lock").click().run()
+
+    assert not at.exception
+    assert state["data_access"].get_lock("OP-0001") is None
+    assert "Your lock was released." in [s.value for s in at.success]
+    assert not any("Locked by you" in i.value for i in at.info)
+
+
+@pytest.mark.unit
+def test__preview__lock_of_other_user_is_read_only(
+    tmp_path: Path, switched: list[str]
+) -> None:
+    state = _lock_services(tmp_path, MAJA, timedelta(minutes=25))
+    at = _app(state).run()
+
+    assert not at.exception
+    assert any("Locked by MJO** (MJO)" in w.value for w in at.warning)
+    assert not [b for b in at.button if b.key == "preview_release_lock"]
+
+
+@pytest.mark.unit
+def test__preview__expired_lock_is_not_shown(
+    tmp_path: Path, switched: list[str]
+) -> None:
+    state = _lock_services(tmp_path, MAJA, -timedelta(minutes=1))
+    at = _app(state).run()
+
+    assert not at.exception
+    assert not [w for w in at.warning if "Locked by" in w.value]

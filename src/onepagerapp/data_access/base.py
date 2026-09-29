@@ -231,6 +231,17 @@ class DataAccess(ABC):
         """
         ...
 
+    @abstractmethod
+    def delete_lock(self, one_pager_id: str, *, locked_by_initials: str) -> bool:
+        """Delete the lock row of a One Pager if it is held by ``locked_by_initials``.
+
+        Any session of the holder may release it (Backend_Design.md §6).
+
+        Returns:
+            True if a row was deleted, False otherwise.
+        """
+        ...
+
     # ========================================================================
     # Create One Pager Methods
     # ========================================================================

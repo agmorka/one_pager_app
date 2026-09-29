@@ -15,9 +15,15 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import Enum
 
-from onepagerapp.audit import Outcome, log_event, log_lock_override
+from onepagerapp.audit import (
+    Outcome,
+    log_event,
+    log_lock_override,
+    log_permission_denied,
+)
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.models import CurrentUser, LockInfo
+from onepagerapp.permissions import PermissionDeniedError, can_release_lock
 
 logger = logging.getLogger(__name__)
 
@@ -245,3 +251,41 @@ def heartbeat(  # noqa: PLR0913 - every argument is part of the lock identity
         last_heartbeat=now,
         expires_at=now + ttl,
     )
+
+
+def release_lock(
+    data_access: DataAccess,
+    one_pager_id: str,
+    user: CurrentUser,
+) -> bool:
+    """Release the caller's own lock (Preview **Release my lock**, Backend_Design §6).
+
+    Only the lock holder may release a lock (``locked_by_initials ==
+    user.initials``), from any session. Submit and Cancel release the lock
+    through this function too once they exist (Phase 5).
+
+    Returns:
+        True if a lock was released, False if the One Pager was not locked.
+
+    Raises:
+        PermissionDeniedError: If another user holds the lock (logged).
+
+    """
+    lock = data_access.get_lock(one_pager_id)
+    if lock is None:
+        return False
+    if not can_release_lock(user, lock):
+        log_permission_denied(
+            "release_lock", user=user.initials, one_pager_id=one_pager_id
+        )
+        msg = "Only the lock holder can release this lock."
+        raise PermissionDeniedError(msg)
+    released = data_access.delete_lock(one_pager_id, locked_by_initials=user.initials)
+    if released:
+        log_event(
+            "release_lock",
+            Outcome.SUCCESS,
+            user=user.initials,
+            one_pager_id=one_pager_id,
+        )
+    return released

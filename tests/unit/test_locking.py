@@ -19,8 +19,14 @@ from onepagerapp.locking import (
     get_active_lock,
     heartbeat,
     is_expired,
+    release_lock,
 )
 from onepagerapp.models import CurrentUser, LockInfo
+from onepagerapp.permissions import (
+    ActionState,
+    PermissionDeniedError,
+    get_action_states,
+)
 
 OP_ID = "OP-0001"
 T0 = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
@@ -253,3 +259,72 @@ def test__get_active_lock__ignores_expired_rows(
     _acquire(mock_data_access)
     assert get_active_lock(mock_data_access, OP_ID, T0) is not None
     assert get_active_lock(mock_data_access, OP_ID, T0 + 2 * TTL) is None
+
+
+@pytest.mark.unit
+def test__release__holder_releases_from_any_session(
+    mock_data_access: MockDataAccess, caplog: pytest.LogCaptureFixture
+) -> None:
+    _acquire(mock_data_access)
+    caplog.set_level(logging.INFO, logger=AUDIT_LOGGER_NAME)
+    caplog.clear()
+
+    assert release_lock(mock_data_access, OP_ID, ALICE) is True
+
+    assert mock_data_access.get_lock(OP_ID) is None
+    assert _audit(caplog) == [
+        "action=release_lock outcome=success one_pager_id=OP-0001 user=AB"
+    ]
+
+
+@pytest.mark.unit
+def test__release__not_locked_is_a_no_op(mock_data_access: MockDataAccess) -> None:
+    assert release_lock(mock_data_access, OP_ID, ALICE) is False
+
+
+@pytest.mark.unit
+def test__release__other_user_is_denied_and_logged(
+    mock_data_access: MockDataAccess, caplog: pytest.LogCaptureFixture
+) -> None:
+    _acquire(mock_data_access)
+    caplog.set_level(logging.INFO, logger=AUDIT_LOGGER_NAME)
+    caplog.clear()
+
+    with pytest.raises(PermissionDeniedError):
+        release_lock(mock_data_access, OP_ID, MAJA)
+
+    assert mock_data_access.get_lock(OP_ID) is not None
+    assert _audit(caplog) == [
+        "action=release_lock outcome=permission_denied one_pager_id=OP-0001 user=MJO"
+    ]
+
+
+@pytest.mark.unit
+def test__release__lock_can_be_acquired_again_afterwards(
+    mock_data_access: MockDataAccess,
+) -> None:
+    _acquire(mock_data_access)
+    release_lock(mock_data_access, OP_ID, ALICE)
+
+    result = _acquire(mock_data_access, user=MAJA, session_id="s9")
+
+    assert result.status is LockStatus.ACQUIRED
+
+
+@pytest.mark.unit
+def test__release_lock_action_state__only_for_the_holder() -> None:
+    def state(user: str, locked: bool, holder: str | None) -> ActionState:
+        return get_action_states(
+            current_user_initials=user,
+            owner_initials="MJO",
+            one_pager_status="Draft",
+            is_locked=locked,
+            lock_holder_initials=holder,
+        )["release_lock"]
+
+    assert state("AB", True, "AB").enabled
+    assert not state("MJO", True, "AB").enabled
+    assert state("MJO", True, "AB").tooltip == (
+        "Only the lock holder can release this lock"
+    )
+    assert not state("AB", False, None).enabled

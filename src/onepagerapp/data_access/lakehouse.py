@@ -620,6 +620,18 @@ class LakehouseAccess(DataAccess):
         )
         return self._affected_rows(response) == 1
 
+    def delete_lock(self, one_pager_id: str, *, locked_by_initials: str) -> bool:
+        fqn = f"{self._fqn_prefix}.locks"
+        response = self._connection.execute_statement(
+            f"DELETE FROM {fqn} WHERE one_pager_id = :one_pager_id "  # noqa: S608
+            "AND locked_by_initials = :locked_by_initials",
+            parameters={
+                "one_pager_id": one_pager_id,
+                "locked_by_initials": locked_by_initials,
+            },
+        )
+        return self._affected_rows(response) == 1
+
     # ========================================================================
     # Create One Pager Methods
     # ========================================================================
