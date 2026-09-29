@@ -777,6 +777,48 @@ class LakehouseAccess(DataAccess):
             )
 
     # ========================================================================
+    # Edit / Workflow Methods
+    # ========================================================================
+
+    def get_one_pager_status_row(self, one_pager_id: str) -> OnePagerStatusRow | None:
+        fqn = f"{self._fqn_prefix}.one_pager_status"
+        response = self._connection.execute_statement(
+            f"SELECT {', '.join(_ONE_PAGER_STATUS_COLUMNS)} FROM {fqn} "  # noqa: S608
+            "WHERE one_pager_id = :one_pager_id",
+            parameters={"one_pager_id": one_pager_id},
+        )
+        rows = self._response_rows(response)
+        return self._row_to_status_row(rows[0]) if rows else None
+
+    @classmethod
+    def _row_to_status_row(cls, row: dict[str, Any]) -> OnePagerStatusRow:
+        def optional_timestamp(value: object) -> datetime | None:
+            return None if value in (None, "") else cls._parse_timestamp(value)
+
+        return OnePagerStatusRow(
+            one_pager_id=str(row["one_pager_id"]),
+            data_product=str(row["data_product"]),
+            product_name=str(row["product_name"]),
+            business_domain=str(row["business_domain"]),
+            data_product_type=str(row["data_product_type"]),
+            one_pager_status=str(row["one_pager_status"]),
+            data_product_status=str(row["data_product_status"]),
+            version=str(row["version"]),
+            owner_name=str(row["owner_name"]),
+            owner_initials=str(row["owner_initials"]),
+            owner_email=str(row["owner_email"]),
+            owner_team=row.get("owner_team"),
+            created_by=str(row["created_by"]),
+            created_at=cls._parse_timestamp(row["created_at"]),
+            last_updated_at=cls._parse_timestamp(row["last_updated_at"]),
+            last_updated_by=str(row["last_updated_by"]),
+            reviewed_at=optional_timestamp(row.get("reviewed_at")),
+            reviewed_by=row.get("reviewed_by"),
+            structure_definition=str(row["structure_definition"]),
+            pending_pr=cls._parse_bool(row.get("pending_pr")),
+        )
+
+    # ========================================================================
     # Use Cases Page Methods
     # ========================================================================
     # Every user-supplied value is passed as a bound parameter (:name markers);

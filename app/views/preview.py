@@ -28,6 +28,7 @@ from onepagerapp.data_access.base import DataAccess
 from onepagerapp.locking import active_lock, release_lock
 from onepagerapp.models import CurrentUser, LockInfo, OnePagerDocument, PreviewData
 from onepagerapp.permissions import (
+    AUTHORIZED_ROLES,
     PermissionDeniedError,
     can_view_one_pager,
     get_action_states,
@@ -531,17 +532,39 @@ def render_lock_indicator(
         _release_my_lock(data_access, header.one_pager_id, user)
 
 
+def load_authorized_initials(data_access: DataAccess, one_pager_id: str) -> set[str]:
+    """Initials of the Owner/SMEs; empty (edit disabled) if they cannot be read."""
+    try:
+        users = data_access.get_authorized_users(one_pager_id)
+    except Exception:
+        logger.exception(f"Failed to load authorized users of {one_pager_id}")
+        return set()
+    return {u.user_initials for u in users if u.role in AUTHORIZED_ROLES}
+
+
+def open_editor(one_pager_id: str) -> None:
+    """Open the Editor in edit mode for this One Pager."""
+    st.session_state["editor_mode"] = "edit"
+    st.session_state["editor_one_pager_id"] = one_pager_id
+    st.switch_page("views/editor.py")
+
+
 def render_action_bar(
-    preview_data: PreviewData, lock: LockInfo | None, current_user_initials: str
+    preview_data: PreviewData,
+    lock: LockInfo | None,
+    current_user_initials: str,
+    authorized_initials: set[str],
 ) -> None:
-    """Render the action button bar (disabled in v1).
-    
-    Per UI_Design.md §4.4, all state-changing actions are disabled with "coming soon" tooltips.
-    
+    """Render the action button bar.
+
+    Per UI_Design.md §4.4, buttons depend on role and status; actions that
+    are not implemented yet stay disabled with a "coming soon" tooltip.
+
     Args:
         preview_data: Complete preview data.
         lock: The active lock, or None.
         current_user_initials: Current user's initials.
+        authorized_initials: Initials of the Owner/SMEs of this One Pager.
     """
     header = preview_data.header
     
@@ -551,6 +574,7 @@ def render_action_bar(
         one_pager_status=header.one_pager_status,
         is_locked=lock is not None,
         lock_holder_initials=lock.locked_by_initials if lock else None,
+        authorized_initials=authorized_initials,
     )
     
     st.subheader("Actions")
@@ -558,11 +582,13 @@ def render_action_bar(
     col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
-        st.button(
+        if st.button(
             "✏️ Edit",
+            key="preview_edit",
             disabled=not actions["edit"].enabled,
             help=actions["edit"].tooltip if actions["edit"].tooltip else None,
-        )
+        ):
+            open_editor(header.one_pager_id)
     
     with col2:
         st.button(
@@ -668,7 +694,12 @@ st.divider()
 # Expired locks count as "not locked" (Backend_Design.md §6).
 lock = active_lock(preview_data.lock)
 
-render_action_bar(preview_data, lock, current_user_info.initials)
+render_action_bar(
+    preview_data,
+    lock,
+    current_user_info.initials,
+    load_authorized_initials(data_access, one_pager_id),
+)
 
 st.divider()
 

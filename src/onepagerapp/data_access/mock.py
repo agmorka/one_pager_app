@@ -545,6 +545,14 @@ class MockDataAccess(DataAccess):
         self._change_logs.pop(one_pager_id, None)
 
     # ========================================================================
+    # Edit / Workflow Methods
+    # ========================================================================
+
+    def get_one_pager_status_row(self, one_pager_id: str) -> OnePagerStatusRow | None:
+        row = self._status_rows.get(one_pager_id)
+        return copy.copy(row) if row else None
+
+    # ========================================================================
     # Use Cases Page Methods
     # ========================================================================
 

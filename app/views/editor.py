@@ -1,8 +1,9 @@
-"""Editor page — create a new One Pager (create mode).
+"""Editor page — create a new One Pager, or edit an existing one.
 
-Implements the Editor's "New (empty form)" state from UI_Design.md §4.2 for the
-Basics section (New_One_Pager_Plan D1). Edit mode for existing One Pagers is
-added by the Editor plan.
+Create mode (``editor_mode == "create"``) implements the Editor's "New (empty
+form)" state from UI_Design.md §4.2 for the Basics section
+(New_One_Pager_Plan D1). Edit mode (``editor_mode == "edit"``, opened from
+Preview → Edit) lives in ``adapters.edit_mode``.
 
 The view is thin: it collects input, calls ``workflow.create_one_pager`` and
 renders the outcome. Validation, ID generation and storage live in the core
@@ -15,6 +16,7 @@ import logging
 import pandas as pd
 import streamlit as st
 
+from adapters.edit_mode import render_edit_mode
 from onepagerapp.models import CurrentUser, NewOnePagerInput, PersonRef, ValidationError
 from onepagerapp.permissions import PermissionDeniedError, can_create_one_pager
 from onepagerapp.validation import (
@@ -240,6 +242,10 @@ if not st.session_state.get("services_initialized"):
 data_access = st.session_state.data_access
 document_store = st.session_state.document_store
 user: CurrentUser | None = st.session_state.get("current_user_info")
+
+if st.session_state.get("editor_mode") == "edit":
+    render_edit_mode(data_access, user)
+    st.stop()
 
 if st.session_state.get("editor_mode") != "create":
     st.title("Editor")

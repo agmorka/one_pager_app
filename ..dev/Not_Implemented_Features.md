@@ -33,11 +33,11 @@ Features the docs themselves mark as future work (Version History / version comp
 
 ## 2. Editing existing One Pagers (Req §5, UI §4.2)
 
-The Editor supports **create mode only**. Missing:
+The Editor has create mode and, from Phase 4, edit mode. Missing:
 
 | # | Feature |
 |---|---|
-| 2.1 | Edit mode for an existing One Pager (open from Preview → Edit, pre-filled form) |
+| 2.1 | ~~Edit mode for an existing One Pager (open from Preview → Edit, pre-filled form)~~ **Done (Phase 4):** `editing.open_for_edit`, `adapters/edit_mode.py`; acquires the lock on open and on every re-run (heartbeat) |
 | 2.2 | **Save Draft** with lenient validation, a required change summary, a MINOR version bump, a new YAML version file and a change-log entry (Backend §7) |
 | 2.3 | Editor tabs other than Basics: **Use Cases** (link existing / create new inline / unlink), **Business Requirements** (with automatic `BR-###` IDs), **Data Sources**, **Data Product Preview** (data element grid), **Classification** (with retention requirements), **Governance** (business concepts, CDE quality, CDE lineage), **Scope & Questions** (out of scope, open questions, assumptions), and **Review** (validation checklist, resolve comments, submit) |
 | 2.4 | Repeating-items pattern: add, edit and remove for array sections |
@@ -61,7 +61,7 @@ The Editor supports **create mode only**. Missing:
 | # | Feature |
 |---|---|
 | 4.1 | Coarse role resolution from **Unity Catalog group membership** (Owner/SME, Approver, Admin, Viewer). Today every authenticated user may create One Pagers and manage Use Cases. |
-| 4.2 | Per-record check: `check_can_edit` against `one_pager_authorized_users` |
+| 4.2 | ~~Per-record check: `check_can_edit` against `one_pager_authorized_users`~~ **Done (Phase 4, step 17):** `permissions.check_can_edit` / `edit_denied_reason` (Owner/SME and status `Draft` / `Draft Update`); the Owner/SME UC group check still waits for 4.1 |
 | 4.3 | Real `get_action_states`. Today every action is hard-coded as disabled. |
 | 4.4 | Pages hidden or shown by role (Review for Approvers only, Admin for Admins only, Editor for Owner/SME only) |
 | 4.5 | Role badge next to the user in the sidebar |
@@ -213,7 +213,7 @@ Locking must exist before users can edit existing records, or two editors can ov
 
 | Order | Item | Why now |
 |---|---|---|
-| 17 | 2.1 Edit mode (pre-filled Basics) | Uses permissions (4.2) and locking (5.1) |
+| 17 | ~~2.1 Edit mode (pre-filled Basics)~~ **Done** | Uses permissions (4.2) and locking (5.1) |
 | 18 | 2.2 Save Draft (lenient validation, change summary, MINOR bump, new YAML version, change-log entry) | The first write path for existing records. Every tab saves through it |
 | 19 | 2.7 Sync `one_pager_authorized_users` on save | Owner and SME changes on the Basics tab must update who may edit |
 | 20 | 2.4 Repeating-items pattern | A shared component used by most of the remaining tabs |

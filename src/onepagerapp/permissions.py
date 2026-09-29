@@ -1,18 +1,26 @@
-"""Permission and workflow authorization checks (v1 stub).
+"""Permission and workflow authorization checks.
 
-This module defines read-only permission checks and a stub for action button authorization.
-v1 renders all state-changing actions as disabled buttons with "coming soon" tooltips.
-
-Full enforcement will be implemented when the service layer (workflow.py, locking.py) exists.
+Per-record edit access (``check_can_edit``) is checked against the
+``one_pager_authorized_users`` rows of a One Pager (Backend_Design.md §5).
+Coarse roles from Unity Catalog groups are not resolved yet (Phase 2), so
+group checks still allow every authenticated user.
 
 Per Backend_Design.md §5, all authenticated users can view any One Pager.
 Permission enforcement happens on state changes (approve, edit, etc.) in the service layer.
 """
 
+from collections.abc import Collection
 from dataclasses import dataclass
 
+from onepagerapp.audit import log_permission_denied
 from onepagerapp.auth import initials_from_username
-from onepagerapp.models import CurrentUser, LockInfo
+from onepagerapp.models import AuthorizedUser, CurrentUser, LockInfo
+
+# One Pager statuses whose content may be edited (Requirements_and_Scope.md §5).
+EDITABLE_STATUSES = ("Draft", "Draft Update")
+
+# one_pager_authorized_users roles that grant edit access.
+AUTHORIZED_ROLES = ("owner", "sme")
 
 
 class PermissionDeniedError(Exception):
@@ -56,6 +64,60 @@ def can_create_one_pager(user: CurrentUser | None) -> bool:
     group check later only changes this function.
     """
     return bool(user and user.username and user.initials)
+
+
+def is_owner_or_sme(
+    user: CurrentUser | None, authorized_users: list[AuthorizedUser]
+) -> bool:
+    """Whether the user is listed as Owner or SME of a One Pager (Backend §5).
+
+    ``authorized_users`` are the ``one_pager_authorized_users`` rows of that
+    One Pager, the authoritative list of who may edit it.
+    """
+    if not (user and user.initials):
+        return False
+    return any(
+        u.user_initials == user.initials and u.role in AUTHORIZED_ROLES
+        for u in authorized_users
+    )
+
+
+def edit_denied_reason(
+    user: CurrentUser | None,
+    one_pager_status: str,
+    authorized_users: list[AuthorizedUser],
+) -> str | None:
+    """Why the user may not edit a One Pager's content, or None if they may.
+
+    Requirements_and_Scope.md §5: only the Owner and the SMEs of this One
+    Pager may edit it, and only while it is ``Draft`` or ``Draft Update``.
+    """
+    if not is_owner_or_sme(user, authorized_users):
+        return "Only the Owner or an SME of this One Pager can edit it."
+    if one_pager_status not in EDITABLE_STATUSES:
+        return f"A One Pager in status {one_pager_status} cannot be edited."
+    return None
+
+
+def check_can_edit(
+    user: CurrentUser | None,
+    one_pager_id: str,
+    one_pager_status: str,
+    authorized_users: list[AuthorizedUser],
+) -> None:
+    """Enforce ``edit_denied_reason`` in the service layer (logged when denied).
+
+    Raises:
+        PermissionDeniedError: With a user-facing message.
+
+    """
+    reason = edit_denied_reason(user, one_pager_status, authorized_users)
+    if reason is None:
+        return
+    log_permission_denied(
+        "edit_one_pager", user=user.initials if user else None, one_pager_id=one_pager_id
+    )
+    raise PermissionDeniedError(reason)
 
 
 def can_release_lock(user: CurrentUser | None, lock: LockInfo | None) -> bool:
@@ -107,11 +169,15 @@ def get_action_states(
     one_pager_status: str,
     is_locked: bool,
     lock_holder_initials: str | None,
+    *,
+    authorized_initials: Collection[str] = (),
 ) -> dict[str, ActionState]:
     """Compute the button state for all actions in the Preview page.
     
-    v1: All state-changing actions return DISABLED, except **Release my lock**,
-    which is enabled for the holder of an active lock (Phase 3).
+    **Edit** is enabled for the Owner/SMEs of a ``Draft`` / ``Draft Update``
+    One Pager that nobody else has locked (Phase 4). **Release my lock** is
+    enabled for the holder of an active lock (Phase 3). The other actions are
+    still disabled.
     
     Args:
         current_user_initials: Initials of the logged-in user.
@@ -119,15 +185,19 @@ def get_action_states(
         one_pager_status: Current document status (Draft, In Review, Approved, etc.).
         is_locked: Whether the One Pager is currently locked.
         lock_holder_initials: Initials of lock holder if locked, None otherwise.
+        authorized_initials: Initials of the Owner/SMEs of this One Pager
+            (``one_pager_authorized_users``).
         
     Returns:
         Dictionary mapping action name (e.g. "edit", "approve") to ActionState.
     """
     # v1: All actions disabled with "coming soon" message
     return {
-        "edit": ActionState(
-            enabled=False,
-            tooltip="Edit coming soon — requires Editor page and lock acquisition",
+        "edit": _edit_state(
+            current_user_initials,
+            one_pager_status,
+            authorized_initials,
+            lock_holder_initials if is_locked else None,
         ),
         "update": ActionState(
             enabled=False,
@@ -165,6 +235,29 @@ def get_action_states(
             tooltip="Export PDF coming soon",
         ),
     }
+
+
+def _edit_state(
+    current_user_initials: str,
+    one_pager_status: str,
+    authorized_initials: Collection[str],
+    lock_holder_initials: str | None,
+) -> ActionState:
+    if current_user_initials not in authorized_initials:
+        return ActionState(
+            enabled=False,
+            tooltip="Only the Owner or an SME of this One Pager can edit it",
+        )
+    if one_pager_status not in EDITABLE_STATUSES:
+        return ActionState(
+            enabled=False,
+            tooltip=f"A One Pager in status {one_pager_status} cannot be edited",
+        )
+    if lock_holder_initials and lock_holder_initials != current_user_initials:
+        return ActionState(
+            enabled=False, tooltip="Another user is editing this One Pager"
+        )
+    return ActionState(enabled=True)
 
 
 def _release_lock_state(

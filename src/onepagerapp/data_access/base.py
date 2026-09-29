@@ -316,6 +316,19 @@ class DataAccess(ABC):
         ...
 
     # ========================================================================
+    # Edit / Workflow Methods
+    # ========================================================================
+
+    @abstractmethod
+    def get_one_pager_status_row(self, one_pager_id: str) -> OnePagerStatusRow | None:
+        """Return the full ``one_pager_status`` row, or None if it does not exist.
+
+        Read fresh on every call (never cached): the editor and the workflow
+        transitions decide on its status and version.
+        """
+        ...
+
+    # ========================================================================
     # Use Cases Page Methods
     # ========================================================================
 

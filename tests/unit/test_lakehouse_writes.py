@@ -337,3 +337,45 @@ def test__get_locks__empty_page_runs_no_query() -> None:
     conn = _FakeConnection()
     assert _access(conn).get_locks([]) == []
     assert conn.calls == []
+
+
+_STATUS_ROW_VALUES = {
+    "one_pager_id": "OP-0007",
+    "data_product": "p",
+    "product_name": "P",
+    "business_domain": "Customer",
+    "data_product_type": "Foundational",
+    "one_pager_status": "Draft",
+    "data_product_status": "In Definition",
+    "version": "0.2.0",
+    "owner_name": "A",
+    "owner_initials": "AB",
+    "owner_email": "a@b.dk",
+    "owner_team": None,
+    "created_by": "AB",
+    "created_at": "2026-09-29T10:00:00Z",
+    "last_updated_at": "2026-09-29T10:00:00Z",
+    "last_updated_by": "AB",
+    "reviewed_at": None,
+    "reviewed_by": None,
+    "structure_definition": "structure_one_pager_v_2.json",
+    "pending_pr": "false",
+}
+
+
+@pytest.mark.unit
+def test__get_one_pager_status_row__parses_full_row() -> None:
+    conn = _FakeConnection(
+        [_response(list(_STATUS_ROW_VALUES), [list(_STATUS_ROW_VALUES.values())])]
+    )
+    row = _access(conn).get_one_pager_status_row(NASTY)
+
+    assert row.version == "0.2.0"
+    assert row.created_at == NOW
+    assert row.reviewed_at is None
+    assert row.pending_pr is False
+    statement, params = conn.calls[0]
+    _assert_not_interpolated(statement)
+    assert params == {"one_pager_id": NASTY}
+
+    assert _access(_FakeConnection()).get_one_pager_status_row("OP-1") is None
