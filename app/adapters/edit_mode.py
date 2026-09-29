@@ -17,6 +17,16 @@ from datetime import UTC, timedelta
 import pandas as pd
 import streamlit as st
 
+from adapters.edit_tabs import (
+    bound,
+    render_classification_tab,
+    render_data_product_tab,
+    render_data_sources_tab,
+    render_governance_tab,
+    render_requirements_tab,
+    render_scope_tab,
+    render_use_cases_tab,
+)
 from adapters.session import current_session_id
 from onepagerapp.data_access.base import DataAccess, NotFoundError
 from onepagerapp.documents import OnePagerDocumentStore
@@ -67,17 +77,6 @@ def clear_edit_state() -> None:
     """Forget the working copy and every edit-mode widget value."""
     for key in [k for k in st.session_state if str(k).startswith(PREFIX)]:
         del st.session_state[key]
-
-
-def bound(key: str, value: object) -> str:
-    """Seed a widget's session-state value from the document once; return the key.
-
-    Widgets of tabs that are not rendered lose their state, so a tab that is
-    shown again is seeded from the working copy.
-    """
-    if key not in st.session_state:
-        st.session_state[key] = value
-    return key
 
 
 def _cell(value: object) -> str:
@@ -237,6 +236,13 @@ TabRenderer = Callable[[OnePagerDocument, DataAccess], None]
 TABS: dict[str, TabRenderer] = {
     "Basics": render_basics_tab,
     "Business Problem": render_problem_tab,
+    "Use Cases": render_use_cases_tab,
+    "Business Requirements": render_requirements_tab,
+    "Data Sources": render_data_sources_tab,
+    "Data Product Preview": render_data_product_tab,
+    "Classification": render_classification_tab,
+    "Governance": render_governance_tab,
+    "Scope & Questions": render_scope_tab,
 }
 
 

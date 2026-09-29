@@ -393,6 +393,21 @@ class DataAccess(ABC):
         ...
 
     @abstractmethod
+    def get_linked_use_case_ids(self, one_pager_id: str) -> list[str]:
+        """List the Use Case IDs a One Pager references (sorted)."""
+        ...
+
+    @abstractmethod
+    def add_use_case_reference(self, one_pager_id: str, use_case_id: str) -> None:
+        """Insert a ``use_case_references`` row (no-op if it already exists)."""
+        ...
+
+    @abstractmethod
+    def remove_use_case_reference(self, one_pager_id: str, use_case_id: str) -> None:
+        """Delete a ``use_case_references`` row (no-op if it does not exist)."""
+        ...
+
+    @abstractmethod
     def create_use_case(self, data: UseCaseInput, user_initials: str) -> str:
         """Create a Use Case and return its newly allocated UC-### ID.
 

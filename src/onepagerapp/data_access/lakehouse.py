@@ -1049,6 +1049,34 @@ class LakehouseAccess(DataAccess):
             raise RuntimeError(msg) from e
         return [str(row["one_pager_id"]) for row in rows]
 
+    def get_linked_use_case_ids(self, one_pager_id: str) -> list[str]:
+        response = self._connection.execute_statement(
+            f"SELECT use_case_id FROM {self._fqn_prefix}.use_case_references "  # noqa: S608
+            "WHERE one_pager_id = :one_pager_id ORDER BY use_case_id",
+            parameters={"one_pager_id": one_pager_id},
+        )
+        return [str(row["use_case_id"]) for row in self._response_rows(response)]
+
+    def add_use_case_reference(self, one_pager_id: str, use_case_id: str) -> None:
+        # MERGE keeps the (one_pager_id, use_case_id) key unique; Delta does
+        # not enforce the primary key.
+        self._connection.execute_statement(
+            f"MERGE INTO {self._fqn_prefix}.use_case_references t "  # noqa: S608
+            "USING (SELECT :one_pager_id AS one_pager_id, "
+            ":use_case_id AS use_case_id) s "
+            "ON t.one_pager_id = s.one_pager_id AND t.use_case_id = s.use_case_id "
+            "WHEN NOT MATCHED THEN INSERT (one_pager_id, use_case_id) "
+            "VALUES (s.one_pager_id, s.use_case_id)",
+            parameters={"one_pager_id": one_pager_id, "use_case_id": use_case_id},
+        )
+
+    def remove_use_case_reference(self, one_pager_id: str, use_case_id: str) -> None:
+        self._connection.execute_statement(
+            f"DELETE FROM {self._fqn_prefix}.use_case_references "  # noqa: S608
+            "WHERE one_pager_id = :one_pager_id AND use_case_id = :use_case_id",
+            parameters={"one_pager_id": one_pager_id, "use_case_id": use_case_id},
+        )
+
     @staticmethod
     def _use_case_parameters(data: UseCaseInput) -> dict[str, SqlParameterValue]:
         return {

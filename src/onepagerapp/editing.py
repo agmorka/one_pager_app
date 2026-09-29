@@ -16,11 +16,13 @@ import copy
 import logging
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
-from onepagerapp.audit import Outcome, log_event
+from onepagerapp.audit import Outcome, log_event, log_permission_denied
 from onepagerapp.data_access.base import DataAccess, NotFoundError
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.documents.serialization import document_to_dict
+from onepagerapp.id_generator import next_id
 from onepagerapp.locking import (
     DEFAULT_LOCK_TTL,
     LockResult,
@@ -36,7 +38,11 @@ from onepagerapp.models import (
     OnePagerStatusRow,
     ValidationError,
 )
-from onepagerapp.permissions import PermissionDeniedError, check_can_edit
+from onepagerapp.permissions import (
+    PermissionDeniedError,
+    check_can_edit,
+    is_owner_or_sme,
+)
 from onepagerapp.validation import (
     normalize_document,
     sanitize_text,
@@ -304,6 +310,49 @@ def _save_failed(user: CurrentUser, one_pager_id: str, step: str) -> None:
     )
 
 
+def _write_version(  # noqa: PLR0913 - the parts of one save
+    data_access: DataAccess,
+    document_store: OnePagerDocumentStore,
+    row: OnePagerStatusRow,
+    saved: OnePagerDocument,
+    user: CurrentUser,
+    now: datetime,
+) -> OnePagerStatusRow:
+    """Write the new version file, then point the status row at it.
+
+    Raises:
+        SaveError: Nothing was changed (an unreferenced file is discarded).
+
+    """
+    one_pager_id, version = row.one_pager_id, saved.version
+    # A file for this version can only be left over from a save that failed
+    # before the status row pointed to it: it is not part of the history.
+    document_store.discard_unreferenced(one_pager_id, version)
+    try:
+        document_store.write(one_pager_id, saved, version)
+    except RuntimeError as e:
+        logger.exception(f"Writing {one_pager_id} v{version} failed")
+        _save_failed(user, one_pager_id, "write_document")
+        raise SaveError(SAVE_FAILED_MESSAGE) from e
+
+    new_row = _saved_status_row(row, saved, user, now)
+    try:
+        updated = data_access.update_one_pager_status(
+            new_row, expected_version=row.version, expected_status=row.one_pager_status
+        )
+    except Exception as e:
+        logger.exception(f"Updating the status row of {one_pager_id} failed")
+        _save_failed(user, one_pager_id, "update_one_pager_status")
+        document_store.discard_unreferenced(one_pager_id, version)
+        raise SaveError(SAVE_FAILED_MESSAGE) from e
+    if not updated:
+        _save_failed(user, one_pager_id, "status_row_changed")
+        document_store.discard_unreferenced(one_pager_id, version)
+        raise SaveError(SAVE_CONFLICT_MESSAGE)
+
+    return new_row
+
+
 def save_draft(  # noqa: PLR0913 - every argument is needed to save
     data_access: DataAccess,
     document_store: OnePagerDocumentStore,
@@ -325,8 +374,9 @@ def save_draft(  # noqa: PLR0913 - every argument is needed to save
     Write order: the new YAML version file first (nothing references it yet),
     then the ``one_pager_status`` row (conditional on the version the editor
     started from — this makes the new version current), then the sync of
-    ``one_pager_authorized_users`` with the Owner/SMEs (Backend_Design §11),
-    then the change-log entry. If a later step fails the earlier ones are put
+    ``use_case_references`` with the linked Use Cases (Backend_Design §9) and
+    of ``one_pager_authorized_users`` with the Owner/SMEs (§11), then the
+    change-log entry. If a later step fails the earlier ones are put
     back, so a failed save changes nothing visible.
 
     Args:
@@ -369,39 +419,26 @@ def save_draft(  # noqa: PLR0913 - every argument is needed to save
         allowed_domains=[*allowed_domains, row.business_domain],
         allowed_types=[*allowed_types, row.data_product_type],
     )
+    linked_before = data_access.get_linked_use_case_ids(one_pager_id)
+    errors += validate_new_use_case_links(
+        data_access, linked_before, document.use_case_ids
+    )
     version = bump_minor(row.version)
     saved = prepare_saved_document(document, row, version, summary, user, now)
     errors += validate_lenient(document_to_dict(saved))
     if errors:
         return SaveResult(errors=errors)
 
-    # A file for this version can only be left over from a save that failed
-    # before the status row pointed to it: it is not part of the history.
-    document_store.discard_unreferenced(one_pager_id, version)
-    try:
-        document_store.write(one_pager_id, saved, version)
-    except RuntimeError as e:
-        logger.exception(f"Writing {one_pager_id} v{version} failed")
-        _save_failed(user, one_pager_id, "write_document")
-        raise SaveError(SAVE_FAILED_MESSAGE) from e
+    new_row = _write_version(data_access, document_store, row, saved, user, now)
 
-    new_row = _saved_status_row(row, saved, user, now)
+    # Use Case links first: linking re-checks that the user is Owner/SME,
+    # which a hand-over in this same save would otherwise revoke.
+    step = "sync_use_case_references"
     try:
-        updated = data_access.update_one_pager_status(
-            new_row, expected_version=row.version, expected_status=row.one_pager_status
+        sync_use_case_references(
+            data_access, one_pager_id, linked_before, saved.use_case_ids, user
         )
-    except Exception as e:
-        logger.exception(f"Updating the status row of {one_pager_id} failed")
-        _save_failed(user, one_pager_id, "update_one_pager_status")
-        document_store.discard_unreferenced(one_pager_id, version)
-        raise SaveError(SAVE_FAILED_MESSAGE) from e
-    if not updated:
-        _save_failed(user, one_pager_id, "status_row_changed")
-        document_store.discard_unreferenced(one_pager_id, version)
-        raise SaveError(SAVE_CONFLICT_MESSAGE)
-
-    step = "sync_authorized_users"
-    try:
+        step = "sync_authorized_users"
         sync_authorized_users(
             data_access,
             authorized_before,
@@ -413,6 +450,7 @@ def save_draft(  # noqa: PLR0913 - every argument is needed to save
         logger.exception(f"Save of {one_pager_id} v{version} failed at {step}")
         _save_failed(user, one_pager_id, step)
         _restore_authorized_users(data_access, one_pager_id, authorized_before, user)
+        _restore_use_case_references(data_access, one_pager_id, linked_before, user)
         if _restore_status_row(data_access, row, new_row, user):
             document_store.discard_unreferenced(one_pager_id, version)
         raise SaveError(SAVE_FAILED_MESSAGE) from e
@@ -446,6 +484,27 @@ def _restore_authorized_users(
             user=user.initials,
             one_pager_id=one_pager_id,
             step="restore_authorized_users",
+        )
+
+
+def _restore_use_case_references(
+    data_access: DataAccess, one_pager_id: str, previous: list[str], user: CurrentUser
+) -> None:
+    """Best-effort: put the Use Case links back as they were before a save."""
+    try:
+        current = set(data_access.get_linked_use_case_ids(one_pager_id))
+        for use_case_id in current - set(previous):
+            data_access.remove_use_case_reference(one_pager_id, use_case_id)
+        for use_case_id in set(previous) - current:
+            data_access.add_use_case_reference(one_pager_id, use_case_id)
+    except Exception:
+        logger.exception(f"Restoring the Use Case links of {one_pager_id} failed")
+        log_event(
+            "save_draft",
+            Outcome.COMPENSATION_FAILED,
+            user=user.initials,
+            one_pager_id=one_pager_id,
+            step="restore_use_case_references",
         )
 
 
@@ -566,3 +625,133 @@ def sync_authorized_users(
         one_pager_id = (current or desired)[0].one_pager_id
         data_access.delete_authorized_users(one_pager_id, diff.deletes)
     return diff
+
+
+# ============================================================================
+# Use Case links (Backend_Design.md §9)
+# ============================================================================
+
+DEPRECATED_LINK_MESSAGE = "{use_case_id} is deprecated and cannot be linked."
+UNKNOWN_LINK_MESSAGE = "{use_case_id} does not exist."
+
+
+def link_denied_reason(data_access: DataAccess, use_case_id: str) -> str | None:
+    """Why a Use Case cannot be linked to a One Pager, or None if it can."""
+    use_case = data_access.get_use_case(use_case_id)
+    if use_case is None:
+        return UNKNOWN_LINK_MESSAGE.format(use_case_id=use_case_id)
+    if use_case.deprecated:
+        return DEPRECATED_LINK_MESSAGE.format(use_case_id=use_case_id)
+    return None
+
+
+def validate_new_use_case_links(
+    data_access: DataAccess, linked_before: list[str], use_case_ids: list[str]
+) -> list[ValidationError]:
+    """Errors for Use Cases the save would newly link that cannot be linked.
+
+    Links that already exist stay valid when their Use Case is deprecated
+    later (it simply cannot be linked to new One Pagers).
+    """
+    errors: list[ValidationError] = []
+    seen: set[str] = set()
+    for use_case_id in use_case_ids:
+        if use_case_id in seen:
+            errors.append(
+                ValidationError("useCases", f"{use_case_id} is linked twice.")
+            )
+        seen.add(use_case_id)
+        if use_case_id in linked_before:
+            continue
+        reason = link_denied_reason(data_access, use_case_id)
+        if reason:
+            errors.append(ValidationError("useCases", reason))
+    return errors
+
+
+def _check_can_link(
+    data_access: DataAccess, one_pager_id: str, user: CurrentUser, action: str
+) -> None:
+    if not is_owner_or_sme(user, data_access.get_authorized_users(one_pager_id)):
+        log_permission_denied(action, user=user.initials, one_pager_id=one_pager_id)
+        msg = "Only the Owner or an SME of this One Pager can change its Use Cases."
+        raise PermissionDeniedError(msg)
+
+
+def link_use_case(
+    data_access: DataAccess, one_pager_id: str, use_case_id: str, user: CurrentUser
+) -> None:
+    """Link a Use Case to a One Pager (insert into ``use_case_references``).
+
+    Raises:
+        PermissionDeniedError: The user is not Owner/SME of the One Pager.
+        ValueError: The Use Case does not exist or is deprecated.
+
+    """
+    _check_can_link(data_access, one_pager_id, user, "link_use_case")
+    reason = link_denied_reason(data_access, use_case_id)
+    if reason:
+        raise ValueError(reason)
+    data_access.add_use_case_reference(one_pager_id, use_case_id)
+    log_event(
+        "link_use_case",
+        Outcome.SUCCESS,
+        user=user.initials,
+        one_pager_id=one_pager_id,
+        use_case_id=use_case_id,
+    )
+
+
+def unlink_use_case(
+    data_access: DataAccess, one_pager_id: str, use_case_id: str, user: CurrentUser
+) -> None:
+    """Unlink a Use Case from a One Pager (delete from ``use_case_references``).
+
+    Raises:
+        PermissionDeniedError: The user is not Owner/SME of the One Pager.
+
+    """
+    _check_can_link(data_access, one_pager_id, user, "unlink_use_case")
+    data_access.remove_use_case_reference(one_pager_id, use_case_id)
+    log_event(
+        "unlink_use_case",
+        Outcome.SUCCESS,
+        user=user.initials,
+        one_pager_id=one_pager_id,
+        use_case_id=use_case_id,
+    )
+
+
+def sync_use_case_references(
+    data_access: DataAccess,
+    one_pager_id: str,
+    linked_before: list[str],
+    use_case_ids: list[str],
+    user: CurrentUser,
+) -> None:
+    """Link the Use Cases a save added and unlink the ones it removed."""
+    for use_case_id in sorted(set(use_case_ids) - set(linked_before)):
+        link_use_case(data_access, one_pager_id, use_case_id, user)
+    for use_case_id in sorted(set(linked_before) - set(use_case_ids)):
+        unlink_use_case(data_access, one_pager_id, use_case_id, user)
+
+
+# ============================================================================
+# Business Requirement IDs
+# ============================================================================
+
+
+def assign_requirement_id(data_access: DataAccess, requirement: dict[str, Any]) -> str:
+    """Give a new Business Requirement its ``BR-###`` ID.
+
+    IDs come from the global ``id_sequences`` counter (Data_Model.md §4), so
+    they are unique across all One Pagers. An ID consumed by a requirement
+    that is never saved leaves a harmless gap.
+
+    Raises:
+        IdGenerationError: The counter could not be advanced.
+        ValueError: The BR-### range is exhausted.
+
+    """
+    requirement["id"] = next_id(data_access, "BR")
+    return str(requirement["id"])

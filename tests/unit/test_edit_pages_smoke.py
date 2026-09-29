@@ -202,3 +202,110 @@ def test__editor__save_without_summary_shows_error(
     assert "Describe what you changed." in at.warning[0].value
     row = services["data_access"].get_one_pager_status_row("OP-0003")
     assert row.version == "0.1.0"
+
+
+TAB_NAMES = [
+    "Basics",
+    "Business Problem",
+    "Use Cases",
+    "Business Requirements",
+    "Data Sources",
+    "Data Product Preview",
+    "Classification",
+    "Governance",
+    "Scope & Questions",
+]
+
+
+def _tab(at: AppTest, name: str) -> AppTest:
+    return at.radio(key="edit_active_tab").set_value(name).run()
+
+
+@pytest.mark.unit
+def test__editor__every_tab_renders(services: dict, switched: list[str]) -> None:
+    at = _editor(services).run()
+    assert list(at.radio(key="edit_active_tab").options) == TAB_NAMES
+    for name in TAB_NAMES:
+        _tab(at, name)
+        assert not at.exception, name
+
+
+@pytest.mark.unit
+def test__editor__add_requirement_gets_br_id(
+    services: dict, switched: list[str]
+) -> None:
+    at = _tab(_editor(services).run(), "Business Requirements")
+    at.button(key="edit_br_add").click().run()
+    at.text_area(key="edit_br_f_requirement").input("Daily refresh")
+    at.selectbox(key="edit_br_f_priority").select("High")
+    at.button(key="edit_br_form_ok").click().run()
+
+    assert not at.exception
+    assert at.session_state["edit_document"].business_requirements == [
+        {"id": "BR-001", "requirement": "Daily refresh", "priority": "High"}
+    ]
+
+
+@pytest.mark.unit
+def test__editor__link_use_case_and_save(services: dict, switched: list[str]) -> None:
+    at = _tab(_editor(services).run(), "Use Cases")
+    at.selectbox(key="edit_uc_pick").select("UC-001")
+    at.button(key="edit_uc_link").click().run()
+    assert at.session_state["edit_document"].use_case_ids == ["UC-001"]
+
+    at.text_input(key="edit_change_summary").input("Linked UC-001").run()
+    _button(at, "Save Draft").click().run()
+
+    assert not at.exception
+    data_access = services["data_access"]
+    assert data_access.get_linked_use_case_ids("OP-0003") == ["UC-001"]
+
+    at.button(key="edit_uc_unlink_UC-001").click().run()
+    assert at.session_state["edit_document"].use_case_ids == []
+
+
+@pytest.mark.unit
+def test__editor__create_use_case_inline(services: dict, switched: list[str]) -> None:
+    at = _tab(_editor(services).run(), "Use Cases")
+    for name in ("persona", "goal", "scenario", "decision_enabled"):
+        at.text_area(key=f"edit_uc_new_{name}").input(f"New {name}")
+    at.selectbox(key="edit_uc_new_priority").select("High")
+    at.button(key="edit_uc_create").click().run()
+
+    assert not at.exception
+    [use_case_id] = at.session_state["edit_document"].use_case_ids
+    assert services["data_access"].get_use_case(use_case_id).persona == "New persona"
+
+
+@pytest.mark.unit
+def test__editor__non_cde_element_drops_cde_fields(
+    services: dict, switched: list[str]
+) -> None:
+    at = _tab(_editor(services).run(), "Data Product Preview")
+    at.button(key="edit_dpp_add").click().run()
+    at.text_input(key="edit_dpp_f_elementName").input("segment")
+    at.text_input(key="edit_dpp_f_dataType").input("STRING")
+    at.text_area(key="edit_dpp_f_description").input("Segment")
+    at.text_input(key="edit_dpp_f_cdeCriticalityTiering").input("Tier 1")
+    at.button(key="edit_dpp_form_ok").click().run()
+
+    [element] = at.session_state["edit_document"].data_product_preview
+    assert element["isCriticalDataElement"] is False
+    assert "cdeCriticalityTiering" not in element
+
+
+@pytest.mark.unit
+def test__editor__classification_updates_document(
+    services: dict, switched: list[str]
+) -> None:
+    at = _tab(_editor(services).run(), "Classification")
+    at.selectbox(key="edit_class_level").select("Internal")
+    at.checkbox(key="edit_class_pii").check().run()
+
+    assert not at.exception
+    assert at.session_state["edit_document"].data_classification == {
+        "classificationLevel": "Internal",
+        "containsPII": True,
+        "containsSensitiveData": False,
+    }
+    assert "Required" in at.info[0].value

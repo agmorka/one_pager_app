@@ -641,6 +641,17 @@ class MockDataAccess(DataAccess):
             op_id for op_id, uc_id in self._use_case_references if uc_id == use_case_id
         )
 
+    def get_linked_use_case_ids(self, one_pager_id: str) -> list[str]:
+        return sorted(
+            uc_id for op_id, uc_id in self._use_case_references if op_id == one_pager_id
+        )
+
+    def add_use_case_reference(self, one_pager_id: str, use_case_id: str) -> None:
+        self._use_case_references.add((one_pager_id, use_case_id))
+
+    def remove_use_case_reference(self, one_pager_id: str, use_case_id: str) -> None:
+        self._use_case_references.discard((one_pager_id, use_case_id))
+
     def create_use_case(self, data: UseCaseInput, user_initials: str) -> str:
         use_case_id = next_id(self, "UC")
         now = datetime.now()

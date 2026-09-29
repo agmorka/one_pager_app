@@ -429,3 +429,21 @@ def test__authorized_users_update_and_delete__bound_parameters() -> None:
     assert params == {"initials_0": "AB", "initials_1": NASTY, "one_pager_id": "OP-0001"}
     for statement, _ in conn.calls:
         _assert_not_interpolated(statement)
+
+
+@pytest.mark.unit
+def test__use_case_reference_writes__bound_parameters() -> None:
+    conn = _FakeConnection([_response(["use_case_id"], [["UC-001"], ["UC-002"]])])
+    access = _access(conn)
+    assert access.get_linked_use_case_ids(NASTY) == ["UC-001", "UC-002"]
+    access.add_use_case_reference(NASTY, "UC-003")
+    access.remove_use_case_reference(NASTY, "UC-001")
+
+    merge, params = conn.calls[1]
+    assert merge.startswith("MERGE INTO cat.sch.use_case_references t")
+    assert "WHEN NOT MATCHED THEN INSERT" in merge
+    assert params == {"one_pager_id": NASTY, "use_case_id": "UC-003"}
+    delete, _ = conn.calls[2]
+    assert delete.startswith("DELETE FROM cat.sch.use_case_references")
+    for statement, _ in conn.calls:
+        _assert_not_interpolated(statement)
