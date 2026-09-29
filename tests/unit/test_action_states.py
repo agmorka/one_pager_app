@@ -90,3 +90,33 @@ def test__edit_enabled_unless_locked_by_other() -> None:
     locked = _states("Draft", "In Definition", holder="DPR")
     assert not locked["edit"].enabled
     assert locked["edit"].visible
+
+
+@pytest.mark.unit
+def test__review_actions_are_enabled_for_approvers() -> None:
+    approver = _states(
+        "In Review", "In Definition", user="APP", roles=(Actor.APPROVER,)
+    )
+    for name in ("approve", "reject", "add_comment"):
+        assert approver[name].visible
+        assert approver[name].enabled, name
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("op", "enabled"),
+    [
+        ("Draft", True),
+        ("Draft Update", True),
+        ("In Review", False),
+        ("Approved", False),
+    ],
+)
+def test__resolve_comment_for_owner_while_reworking(op: str, *, enabled: bool) -> None:
+    owner = _states(op, "In Definition")["resolve_comment"]
+    assert owner.visible
+    assert owner.enabled is enabled
+
+    viewer = _states(op, "In Definition", user="XYZ")["resolve_comment"]
+    assert not viewer.visible
+    assert not viewer.enabled

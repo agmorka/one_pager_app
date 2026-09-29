@@ -565,3 +565,31 @@ def test__get_review_comments__parses_string_booleans() -> None:
 
     assert [c.resolved for c in comments] == [False, True]
     assert comments[1].resolved_at == NOW
+
+
+@pytest.mark.unit
+def test__resolve_review_comment__conditional_update() -> None:
+    conn = _FakeConnection([_response(["num_affected_rows"], [["1"]])])
+    resolved = _access(conn).resolve_review_comment(
+        NASTY, 7, resolved_by="BS", resolved_at=NOW
+    )
+
+    assert resolved is True
+    statement, params = conn.calls[0]
+    _assert_not_interpolated(statement)
+    assert "UPDATE cat.sch.review_comments SET resolved = true" in statement
+    assert "AND resolved = false" in statement
+    assert params == {
+        "id": 7,
+        "one_pager_id": NASTY,
+        "resolved_by": "BS",
+        "resolved_at": NOW,
+    }
+
+    conn = _FakeConnection([_response(["num_affected_rows"], [["0"]])])
+    assert (
+        _access(conn).resolve_review_comment(
+            "OP-1", 7, resolved_by="BS", resolved_at=NOW
+        )
+        is False
+    )

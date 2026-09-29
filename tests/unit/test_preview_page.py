@@ -326,3 +326,62 @@ def test__preview__approve_opens_the_dialog(
     assert not at.exception
     assert any("v1.0.0" in m.value for m in at.markdown)  # the dialog is open
     assert any("Ready for Development" in m.value for m in at.markdown)
+
+
+@pytest.mark.unit
+def test__preview__add_comment_opens_the_dialog(
+    tmp_path: Path, switched: list[str]
+) -> None:
+    at = _app(_review_services(tmp_path)).run()
+    at.button(key="preview_add_comment").click().run()
+
+    assert not at.exception
+    assert at.selectbox(key="preview_comment_section").value is None  # Whole document
+    assert at.text_area(key="preview_comment_text")
+
+
+@pytest.mark.unit
+def test__preview__owner_resolves_review_comments(
+    tmp_path: Path, switched: list[str]
+) -> None:
+    from onepagerapp.workflow import reject_one_pager  # noqa: PLC0415
+
+    state = _review_services(tmp_path, "bob.smith@company.com")  # Owner
+    data_access = state["data_access"]
+    approver = resolve_current_user(APPROVER)
+    reject_one_pager(
+        data_access, "OP-0002", approver, "Needs work", roles={Actor.APPROVER}
+    )
+    [comment] = data_access.get_review_comments("OP-0002")
+
+    at = _app(state).run()
+    assert not at.exception
+    resolve = at.button(key=f"preview_resolve_{comment.id}")
+    assert not resolve.disabled
+    resolve.click().run()
+
+    assert not at.exception
+    assert data_access.get_review_comments("OP-0002")[0].resolved_by == "BS"
+    assert "The comment was marked as resolved." in [s.value for s in at.success]
+    assert not [b for b in at.button if b.key == f"preview_resolve_{comment.id}"]
+
+
+@pytest.mark.unit
+def test__preview__viewers_cannot_resolve(
+    tmp_path: Path, switched: list[str]
+) -> None:
+    from onepagerapp.workflow import reject_one_pager  # noqa: PLC0415
+
+    state = _review_services(tmp_path, MAJA)  # neither Owner nor SME
+    reject_one_pager(
+        state["data_access"],
+        "OP-0002",
+        resolve_current_user(APPROVER),
+        "Needs work",
+        roles={Actor.APPROVER},
+    )
+    at = _app(state).run()
+
+    assert not at.exception
+    assert not [b for b in at.button if str(b.key).startswith("preview_resolve_")]
+    assert any("Unresolved" in i.value for i in at.info)

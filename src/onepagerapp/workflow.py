@@ -50,6 +50,7 @@ from onepagerapp.permissions import (
     check_can_edit,
     is_owner_or_sme,
 )
+from onepagerapp.review import MAX_COMMENT_LENGTH
 from onepagerapp.state_machine import (
     APPROVED,
     DP_CANCELLED,
@@ -858,7 +859,6 @@ def change_data_product_status(  # noqa: PLR0913 - every argument is part of the
 # Review decisions (Backend_Design.md §2, §13)
 # ============================================================================
 
-MAX_COMMENT_LENGTH = 2000
 REJECT_COMMENT_REQUIRED = "Explain why the One Pager is rejected."
 
 

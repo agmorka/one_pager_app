@@ -27,9 +27,16 @@ import streamlit as st
 from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.locking import active_lock, release_lock
-from onepagerapp.models import CurrentUser, LockInfo, OnePagerDocument, PreviewData
+from onepagerapp.models import (
+    CurrentUser,
+    LockInfo,
+    OnePagerDocument,
+    PreviewData,
+    ReviewComment,
+)
 from onepagerapp.permissions import (
     AUTHORIZED_ROLES,
+    ActionState,
     PermissionDeniedError,
     can_view_one_pager,
     get_action_states,
@@ -38,18 +45,17 @@ from onepagerapp.permissions import (
 from adapters.theme import get_op_status_colors, get_dp_status_colors, DEFAULT_BADGE_COLOR
 from adapters.workflow_actions import (
     REVIEW_MODE_KEY,
+    add_comment_and_report,
     approve_and_report,
     cancel_and_report,
     change_dp_status_and_report,
     reject_and_report,
+    resolve_comment_and_report,
 )
+from onepagerapp.review import MAX_COMMENT_LENGTH, SECTION_LABELS, section_label
 from onepagerapp.state_machine import IN_REVIEW, Actor, TransitionRule
 from onepagerapp.documents import OnePagerDocumentStore
-from onepagerapp.workflow import (
-    MAX_COMMENT_LENGTH,
-    data_product_options,
-    plan_approval,
-)
+from onepagerapp.workflow import data_product_options, plan_approval
 
 logger = logging.getLogger(__name__)
 
@@ -423,38 +429,56 @@ def render_change_log(preview_data: PreviewData) -> None:
                     )
 
 
-def render_review_comments(preview_data: PreviewData) -> None:
-    """Render review comments grouped by section.
-    
-    Shows resolved and unresolved comments separately.
-    
+def _resolve(
+    data_access: DataAccess, one_pager_id: str, comment_id: int, user: CurrentUser
+) -> None:
+    """Handle **Mark resolved** on a review comment."""
+    error = resolve_comment_and_report(data_access, one_pager_id, comment_id, user)
+    if error:
+        st.session_state["preview_comment_error"] = error
+    else:
+        st.session_state["preview_flash"] = "The comment was marked as resolved."
+
+
+def render_review_comments(
+    preview_data: PreviewData,
+    data_access: DataAccess | None = None,
+    user: CurrentUser | None = None,
+    resolve: ActionState | None = None,
+) -> None:
+    """Render review comments grouped by section, unresolved first.
+
+    Owner/SMEs get **Mark resolved** on each unresolved comment when
+    ``resolve`` is enabled (Backend_Design.md §13).
+
     Args:
         preview_data: Complete preview data.
+        data_access: Data access used to resolve comments.
+        user: The current user.
+        resolve: State of the resolve action for this user and One Pager.
     """
     st.subheader("Review Comments")
-    
+    error = st.session_state.pop("preview_comment_error", None)
+    if error:
+        st.error(error, icon="⚠️")
+
     if not preview_data.review_comments:
         st.info("No review comments yet.")
         return
-    
-    # Group by section
-    by_section = {}
+
+    unresolved_total = sum(1 for c in preview_data.review_comments if not c.resolved)
+    if unresolved_total:
+        st.caption(f"{unresolved_total} unresolved comment(s).")
+
+    by_section: dict[str, list[ReviewComment]] = {}
     for comment in preview_data.review_comments:
-        section = comment.section or "(Document-level)"
-        if section not in by_section:
-            by_section[section] = []
-        by_section[section].append(comment)
-    
-    # Render by section
-    for section in sorted(by_section.keys()):
-        with st.expander(f"🗨️ {section}"):
-            comments = by_section[section]
-            
-            # Separate resolved and unresolved
-            unresolved = [c for c in comments if not c.resolved]
-            resolved = [c for c in comments if c.resolved]
-            
-            # Unresolved first
+        by_section.setdefault(section_label(comment.section), []).append(comment)
+
+    can_resolve = bool(resolve and resolve.visible and data_access and user)
+    for section, comments in by_section.items():
+        unresolved = [c for c in comments if not c.resolved]
+        resolved = [c for c in comments if c.resolved]
+        with st.expander(f"🗨️ {section} ({len(unresolved)} open)", expanded=bool(unresolved)):
             if unresolved:
                 st.markdown("**Unresolved:**")
                 for comment in unresolved:
@@ -462,9 +486,18 @@ def render_review_comments(preview_data: PreviewData) -> None:
                         st.markdown(f"**{comment.reviewer_name}** ({comment.reviewer_initials})")
                         st.caption(f"v{comment.version} • {comment.created_at.strftime('%Y-%m-%d %H:%M')}")
                         st.write(comment.comment)
-                        st.info("⚠️ Unresolved — awaiting action")
-            
-            # Then resolved
+                        if can_resolve:
+                            st.button(
+                                "✅ Mark resolved",
+                                key=f"preview_resolve_{comment.id}",
+                                disabled=not resolve.enabled,
+                                help=resolve.tooltip or "Mark this comment as addressed",
+                                on_click=_resolve,
+                                args=(data_access, comment.one_pager_id, comment.id, user),
+                            )
+                        else:
+                            st.info("⚠️ Unresolved — awaiting action")
+
             if resolved:
                 st.markdown("**Resolved:**")
                 for comment in resolved:
@@ -664,6 +697,39 @@ def confirm_approve(
         st.rerun()
 
 
+@st.dialog("Add a review comment")
+def add_comment_dialog(
+    data_access: DataAccess,
+    one_pager_id: str,
+    user: CurrentUser,
+    roles: frozenset[Actor],
+) -> None:
+    """Section-level review comment (UI_Design.md §4.4, Approver in review)."""
+    section = st.selectbox(
+        "Section",
+        options=list(SECTION_LABELS),
+        format_func=section_label,
+        key="preview_comment_section",
+    )
+    text = st.text_area(
+        "Comment *",
+        key="preview_comment_text",
+        max_chars=MAX_COMMENT_LENGTH,
+        placeholder="What should the Owner change or clarify?",
+    )
+    col_post, col_back = st.columns(2)
+    if col_post.button("Post", type="primary", use_container_width=True):
+        error = add_comment_and_report(
+            data_access, one_pager_id, user, section, text, roles
+        )
+        if error:
+            st.error(error, icon="⚠️")
+            return
+        st.rerun()
+    if col_back.button("Cancel", key="preview_comment_back", use_container_width=True):
+        st.rerun()
+
+
 def in_review_mode(one_pager_id: str, status: str, roles: frozenset[Actor]) -> bool:
     """Opened from the Review queue by an Approver while it is In Review."""
     return (
@@ -786,6 +852,8 @@ def render_action_bar(
         confirm_cancel(data_access, header.one_pager_id, user)
     elif clicked == "reject":
         confirm_reject(data_access, header.one_pager_id, user, roles)
+    elif clicked == "add_comment":
+        add_comment_dialog(data_access, header.one_pager_id, user, roles)
     elif clicked == "approve":
         confirm_approve(
             data_access,
@@ -888,12 +956,14 @@ st.divider()
 # Expired locks count as "not locked" (Backend_Design.md §6).
 lock = active_lock(preview_data.lock)
 
+authorized_initials = load_authorized_initials(data_access, one_pager_id)
+
 render_action_bar(
     data_access,
     preview_data,
     lock,
     current_user_info,
-    load_authorized_initials(data_access, one_pager_id),
+    authorized_initials,
     current_roles,
 )
 
@@ -907,7 +977,21 @@ render_change_log(preview_data)
 
 st.divider()
 
-render_review_comments(preview_data)
+render_review_comments(
+    preview_data,
+    data_access,
+    current_user_info,
+    get_action_states(
+        current_user_initials=current_user_info.initials,
+        owner_initials=preview_data.header.owner_initials,
+        one_pager_status=preview_data.header.one_pager_status,
+        is_locked=lock is not None,
+        lock_holder_initials=lock.locked_by_initials if lock else None,
+        authorized_initials=authorized_initials,
+        data_product_status=preview_data.header.data_product_status,
+        roles=current_roles,
+    )["resolve_comment"],
+)
 
 st.divider()
 

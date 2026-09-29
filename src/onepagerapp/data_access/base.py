@@ -390,6 +390,24 @@ class DataAccess(ABC):
         ...
 
     @abstractmethod
+    def resolve_review_comment(
+        self,
+        one_pager_id: str,
+        comment_id: int,
+        *,
+        resolved_by: str,
+        resolved_at: datetime,
+    ) -> bool:
+        """Mark an unresolved comment of a One Pager as resolved, conditionally.
+
+        Returns:
+            True if exactly this comment was updated, False if it does not
+            exist, belongs to another One Pager or was already resolved.
+
+        """
+        ...
+
+    @abstractmethod
     def delete_review_comment(self, comment: ReviewComment) -> None:
         """Compensation for a failed Reject ONLY.
 

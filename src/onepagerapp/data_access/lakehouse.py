@@ -953,6 +953,28 @@ class LakehouseAccess(DataAccess):
             },
         )
 
+    def resolve_review_comment(
+        self,
+        one_pager_id: str,
+        comment_id: int,
+        *,
+        resolved_by: str,
+        resolved_at: datetime,
+    ) -> bool:
+        fqn = f"{self._fqn_prefix}.review_comments"
+        response = self._connection.execute_statement(
+            f"UPDATE {fqn} SET resolved = true, resolved_by = :resolved_by, "  # noqa: S608
+            "resolved_at = :resolved_at "
+            "WHERE id = :id AND one_pager_id = :one_pager_id AND resolved = false",
+            parameters={
+                "id": comment_id,
+                "one_pager_id": one_pager_id,
+                "resolved_by": resolved_by,
+                "resolved_at": resolved_at,
+            },
+        )
+        return self._affected_rows(response) == 1
+
     def delete_review_comment(self, comment: ReviewComment) -> None:
         fqn = f"{self._fqn_prefix}.review_comments"
         self._connection.execute_statement(

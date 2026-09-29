@@ -600,6 +600,26 @@ class MockDataAccess(DataAccess):
         self._next_review_comment_id += 1
         self._review_comments.setdefault(comment.one_pager_id, []).append(stored)
 
+    def resolve_review_comment(
+        self,
+        one_pager_id: str,
+        comment_id: int,
+        *,
+        resolved_by: str,
+        resolved_at: datetime,
+    ) -> bool:
+        comments = self._review_comments.get(one_pager_id, [])
+        for i, comment in enumerate(comments):
+            if comment.id == comment_id and not comment.resolved:
+                comments[i] = replace(
+                    comment,
+                    resolved=True,
+                    resolved_by=resolved_by,
+                    resolved_at=resolved_at,
+                )
+                return True
+        return False
+
     def delete_review_comment(self, comment: ReviewComment) -> None:
         self._review_comments[comment.one_pager_id] = [
             c

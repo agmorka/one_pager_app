@@ -14,6 +14,12 @@ from onepagerapp.data_access.base import DataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import CurrentUser
 from onepagerapp.permissions import PermissionDeniedError
+from onepagerapp.review import (
+    COMMENT_FAILED_MESSAGE,
+    CommentError,
+    add_review_comment,
+    resolve_review_comment,
+)
 from onepagerapp.state_machine import Actor, InvalidTransitionError
 from onepagerapp.workflow import (
     TRANSITION_FAILED_MESSAGE,
@@ -125,4 +131,45 @@ def approve_and_report(
         f"{one_pager_id} was approved as v{row.version}. The Data Product is "
         f"now {row.data_product_status}."
     )
+    return None
+
+
+def add_comment_and_report(  # noqa: PLR0913 - the parts of one comment
+    data_access: DataAccess,
+    one_pager_id: str,
+    user: CurrentUser,
+    section: str | None,
+    comment: str,
+    roles: Collection[Actor],
+) -> str | None:
+    """Add an Approver's review comment; return a user-facing error or None."""
+    try:
+        add_review_comment(
+            data_access, one_pager_id, user, section, comment, roles=roles
+        )
+    except (
+        PermissionDeniedError,
+        InvalidTransitionError,
+        ValueError,
+        CommentError,
+    ) as e:
+        return str(e)
+    except Exception:
+        logger.exception(f"Failed to add a review comment to {one_pager_id}")
+        return COMMENT_FAILED_MESSAGE
+    st.session_state[FLASH_KEY] = "Your review comment was added."
+    return None
+
+
+def resolve_comment_and_report(
+    data_access: DataAccess, one_pager_id: str, comment_id: int, user: CurrentUser
+) -> str | None:
+    """Mark a review comment as resolved; return a user-facing error or None."""
+    try:
+        resolve_review_comment(data_access, one_pager_id, comment_id, user)
+    except (PermissionDeniedError, CommentError) as e:
+        return str(e)
+    except Exception:
+        logger.exception(f"Failed to resolve comment {comment_id} of {one_pager_id}")
+        return COMMENT_FAILED_MESSAGE
     return None

@@ -157,3 +157,36 @@ def test__approve__reports_the_new_version(
         data_access, store, "OP-0002", approver, frozenset({Actor.APPROVER})
     )
     assert error == "The One Pager is Approved, not In Review."
+
+
+@pytest.mark.unit
+def test__add_comment__reports_errors_and_success(
+    actions: ModuleType, data_access: MockDataAccess
+) -> None:
+    from onepagerapp.state_machine import Actor  # noqa: PLC0415
+
+    approver = resolve_current_user("cjo@bec.dk")
+    roles = frozenset({Actor.APPROVER})
+
+    assert (
+        actions.add_comment_and_report(
+            data_access, "OP-0002", approver, "useCases", " ", roles
+        )
+        == "Write a comment."
+    )
+    assert (
+        actions.add_comment_and_report(
+            data_access, "OP-0002", approver, "useCases", "Link UC-001", roles
+        )
+        is None
+    )
+    assert st.session_state["preview_flash"] == "Your review comment was added."
+    [comment] = data_access.get_review_comments("OP-0002")
+
+    owner = resolve_current_user("bob.smith@company.com")
+    error = actions.resolve_comment_and_report(
+        data_access, "OP-0002", comment.id, owner
+    )
+    assert error == (
+        "Comments are resolved while the One Pager is being reworked (Draft)."
+    )

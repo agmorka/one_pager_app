@@ -83,8 +83,8 @@ The Editor has create mode and, from Phase 4, edit mode. Missing:
 | # | Feature |
 |---|---|
 | 6.1 | ~~**Review page** (`3_Review.py`): an Approver queue of `In Review` items, sorted oldest first~~ **Done (Phase 6):** `app/views/review.py`, `review.get_review_queue`; in the navigation for Approvers only; **Review** opens Preview in review mode |
-| 6.2 | Approver adds section-level review comments in Preview |
-| 6.3 | Owner marks comments as resolved (`resolved_by`, `resolved_at`) |
+| 6.2 | ~~Approver adds section-level review comments in Preview~~ **Done (Phase 6):** `review.add_review_comment`, **Add Comment** in Preview (section + text) while `In Review`, same segregation of duties as Approve/Reject |
+| 6.3 | ~~Owner marks comments as resolved (`resolved_by`, `resolved_at`)~~ **Done (Phase 6):** `review.resolve_review_comment`, **Mark resolved** per unresolved comment in Preview for the Owner/SMEs while `Draft` / `Draft Update` |
 | 6.4 | ~~"Review mode" in Preview, with a Reject dialog~~ **Done (Phase 6):** opened from the Review queue; banner with **Back to Review queue**; **Reject** asks for a mandatory reason |
 
 ## 7. Git integration (Req §13, Arch §6, Backend §8)
@@ -239,7 +239,7 @@ Locking must exist before users can edit existing records, or two editors can ov
 | 30 | ~~6.1 Review page (Approver queue)~~ **Done** | Needs `In Review` items from Submit (1.2) and the Approver role (4.1, interim config-based roles) |
 | 31 | ~~6.4 Review mode in Preview, 1.4 Reject with a mandatory comment~~ **Done** | Reject writes the first `review_comments` rows |
 | 32 | ~~1.3 Approve (version `1.0.0` / next MAJOR, two change-log entries), 1.8 (approval part) DP → `Ready for Development` / `In Enhancement`~~ **Done** | Uses segregation of duties (1.10) |
-| 33 | 6.2 Section-level review comments, 6.3 Owner resolves comments | Builds on the comment storage from Reject |
+| 33 | ~~6.2 Section-level review comments, 6.3 Owner resolves comments~~ **Done** | Builds on the comment storage from Reject |
 | 34 | 2.3 Editor Review tab (checklist, resolve comments, submit) | Needs Submit, comments and the strict tier |
 | 35 | 1.5 Update (`Approved` → `Draft Update`) | Needs approved records. Reads the approved YAML from the volume for now. Phase 8 switches it to Git |
 
