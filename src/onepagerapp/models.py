@@ -259,9 +259,10 @@ class LockInfo:
 class OnePagerDocument:
     """The complete One Pager document content (from YAML in volume or Git).
 
-    Mirrors the fields of structure_one_pager_v_1.json so the document can be
-    round-tripped (read and written) without loss. In v1, displayed as text
-    (never unsafe_allow_html).
+    Mirrors the fields of the current schema (structure_one_pager_v_2.json) so
+    the document can be round-tripped (read and written) without loss. Older
+    documents (v1) load into the same model; see documents/serialization.py.
+    In v1, displayed as text (never unsafe_allow_html).
 
     Attributes:
         structure_definition: Schema version reference.
@@ -279,11 +280,23 @@ class OnePagerDocument:
         owner_team: Owner team (nullable).
         business_problem_statement: Free-text problem statement.
         smes: List of SME objects (name/initials/email/team).
-        use_cases: List of use case objects (persona/goal/scenario/...).
-        business_requirements: List of requirement objects (requirement/priority).
-        data_sources: List of data source objects (sourceName/sourceType/description).
-        data_element_preview: List of data element objects (elementName/dataType/...).
+        use_cases: Use Case references ({"useCaseId": "UC-###"}); v1 documents
+            hold inline objects (persona/goal/...) instead.
+        business_requirements: Requirement objects (id BR-###/requirement/
+            priority/notes).
+        data_sources: Data source objects (name/sourceSystem/epoId/
+            dataProvided/refreshFrequency).
+        data_product_preview: Data element grid (elementName/dataType/
+            isPrimaryKey/containsPII/isCriticalDataElement/cdeCriticalityTiering/
+            description/example/source/useCaseLinks).
         data_classification: Dict with classificationLevel and sensitivity flags.
+        retention_requirements: Retention objects (dataCategory/retentionPeriod/
+            legalBasis).
+        data_governance_artifacts: Dict with businessConcepts, cdeQuality and
+            cdeLineage lists.
+        out_of_scope: Items explicitly out of scope.
+        open_questions: Question objects (question/owner/dueDate/status/answer).
+        assumptions: Assumptions the One Pager relies on.
         created_by: Display name of the user who created the One Pager.
         created_at: ISO-8601 creation timestamp (as stored in YAML).
         last_updated: ISO-8601 timestamp of the last content change.
@@ -309,13 +322,23 @@ class OnePagerDocument:
     use_cases: list[dict] = field(default_factory=list)
     business_requirements: list[dict] = field(default_factory=list)
     data_sources: list[dict] = field(default_factory=list)
-    data_element_preview: list[dict] = field(default_factory=list)
+    data_product_preview: list[dict] = field(default_factory=list)
     data_classification: dict = field(default_factory=dict)
+    retention_requirements: list[dict] = field(default_factory=list)
+    data_governance_artifacts: dict = field(default_factory=dict)
+    out_of_scope: list[str] = field(default_factory=list)
+    open_questions: list[dict] = field(default_factory=list)
+    assumptions: list[str] = field(default_factory=list)
     created_by: Optional[str] = None
     created_at: Optional[str] = None
     last_updated: Optional[str] = None
     change_log: list[dict] = field(default_factory=list)
     raw_content: str = ""
+
+    @property
+    def use_case_ids(self) -> list[str]:
+        """IDs of the referenced Use Cases, in document order."""
+        return [str(uc["useCaseId"]) for uc in self.use_cases if uc.get("useCaseId")]
 
 
 @dataclass
@@ -494,7 +517,8 @@ class AuthorizedUser:
 # Use Cases Page Models
 # ============================================================================
 
-# Must match useCases.items.priority.enum in schemas/structure_one_pager_v_1.json
+# Must match the priority enum of every schema in schemas/ (useCases.items.priority
+# in v1, definitions.priority in v2).
 PRIORITY_OPTIONS: tuple[str, ...] = ("Must Have", "High", "Medium", "Low")
 
 

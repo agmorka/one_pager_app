@@ -288,7 +288,7 @@ See architecture doc §7 for the full error-handling strategy.
 
 **Business Requirements** (BR-###) use the global `id_sequences` counter for ID generation but their content lives entirely in the YAML — there is no corresponding Delta table, since BRs are per-OP content and are not shared across One Pagers. If a YAML write fails after the BR counter is incremented, the ID is consumed (creating a gap in the sequence); ID gaps are harmless and expected.
 
-> **Note — JSON Schema alignment:** The current `structure_one_pager_v_1.json` still defines `useCases` items as full objects (with `persona`, `goal`, etc.). This represents the *logical/display* view of the data. The *physical* YAML file written by the app will store only `useCaseId` references in this array. A schema `v1.1` update (or a documentation annotation) will be introduced to formalize this distinction before implementation. Until then, validation of the `useCases` section is handled by the application layer rather than raw `jsonschema` validation against the full-object definition.
+> **Note — JSON Schema alignment:** `structure_one_pager_v_1.json` defines `useCases` items as full objects (with `persona`, `goal`, etc.). `structure_one_pager_v_2.json` (the current version) stores only `useCaseId` references, which the app resolves against the `use_cases` table for display. See Decision_Log §14.
 
 ## 6. Schema Evolution
 
@@ -299,7 +299,7 @@ The `structure_definition` field on each One Pager records which schema version 
 - Migration from `v1` to `v2` can be done as a batch operation or lazily (on next edit), depending on the nature of the change.
 - The `schemas/` directory in the app repo holds all supported schema versions; older versions are not removed.
 
-Detailed migration strategy will be defined when a `v2` schema is actually needed. For now, the design accommodates it without requiring changes.
+`structure_one_pager_v_2.json` is the current version (Decision_Log §14). The supported versions are listed in `SUPPORTED_STRUCTURE_DEFINITIONS` in `validation.py`; a document declaring any other value fails validation. v1 documents are migrated lazily, on their next save.
 
 ## 7. Version History *(future scope)*
 

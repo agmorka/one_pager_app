@@ -26,6 +26,7 @@ from onepagerapp.models import (
     UseCaseInput,
     UseCasePage,
 )
+from onepagerapp.validation import CURRENT_STRUCTURE_DEFINITION
 
 
 class MockDataAccess(DataAccess):
@@ -617,7 +618,7 @@ def _seed_status_rows() -> list[OnePagerStatusRow]:
             created_at=datetime(2026, 8, 1, 9, 0),
             last_updated_at=datetime(2026, 9, 20, 14, 30),
             last_updated_by="AB",
-            structure_definition="structure_one_pager_v_1.json",
+            structure_definition=CURRENT_STRUCTURE_DEFINITION,
             reviewed_at=datetime(2026, 9, 20, 14, 30),
             reviewed_by="CJ",
         ),
@@ -638,7 +639,7 @@ def _seed_status_rows() -> list[OnePagerStatusRow]:
             created_at=datetime(2026, 9, 1, 9, 0),
             last_updated_at=datetime(2026, 9, 19, 10, 15),
             last_updated_by="BS",
-            structure_definition="structure_one_pager_v_1.json",
+            structure_definition=CURRENT_STRUCTURE_DEFINITION,
         ),
     ]
 

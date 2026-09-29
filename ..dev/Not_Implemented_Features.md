@@ -50,9 +50,9 @@ The Editor supports **create mode only**. Missing:
 
 | # | Feature |
 |---|---|
-| 3.1 | **Lenient tier** as its own function for saves. Only the create tier exists. |
-| 3.2 | **Strict tier** for submit: every `required` field and `minItems` constraint |
-| 3.3 | Conditional business rules: `retentionRequirements` is required when data is PII, sensitive or not Public; `cdeCriticalityTiering` and `useCaseLinks` must be null unless the element is a CDE |
+| 3.1 | ~~**Lenient tier** as its own function for saves. Only the create tier exists.~~ **Done (Phase 1):** `validate_lenient` |
+| 3.2 | ~~**Strict tier** for submit: every `required` field and `minItems` constraint~~ **Done (Phase 1):** `validate_strict`, against the new v2 schema |
+| 3.3 | **Done (Phase 1):** ~~Conditional business rules: `retentionRequirements` is required when data is PII, sensitive or not Public; `cdeCriticalityTiering` and `useCaseLinks` must be null unless the element is a CDE~~ |
 
 ## 4. Permissions & authorization (Req §2, Backend §5, Arch §4)
 
@@ -134,7 +134,7 @@ There is no `git_integration.py`.
 
 | # | Feature |
 |---|---|
-| 12.1 | Content sections that are not rendered: **Governance artifacts**, **Out of Scope**, **Open Questions** and **Assumptions**. `OnePagerDocument` does not model these fields either. Use Case IDs (`UC-###`) and BR IDs are not shown. |
+| 12.1 | ~~Content sections that are not rendered: **Governance artifacts**, **Out of Scope**, **Open Questions** and **Assumptions**. `OnePagerDocument` does not model these fields either. Use Case IDs (`UC-###`) and BR IDs are not shown.~~ **Done (Phase 1):** modelled in `OnePagerDocument` (v2 schema) and rendered in Preview |
 | 12.2 | Role- and status-dependent actions: Edit, Update, Change DP Status dropdown, Approve, Reject, Cancel, Add Comment, Resolve, Release lock, Export PDF |
 | 12.3 | ~~Error states show raw exception text (`st.error(f"... {e}")`). The docs require a friendly message and a Retry button, with no internals shown.~~ **Done (Phase 0)** |
 | 12.4 | ~~Opening Preview without an ID silently defaults to `OP-0001`~~ **Done (Phase 0):** Preview asks the user to pick a One Pager from the Registry |
@@ -149,7 +149,7 @@ There is no `git_integration.py`.
 | 13.4 | ~~Structured security-event logging module (`audit.py`). Only ad-hoc `audit_logger` calls exist in create.~~ **Done (Phase 0):** `onepagerapp.audit`, used by create | Arch §8, Backend §14 |
 | 13.5 | Caching strategy for the registry and use cases (short TTL, invalidated after writes). Only the reference data is cached. | UI §6 |
 | 13.6 | Accessibility items: keyboard row activation, ARIA labels, errors shown next to their fields | UI §7 |
-| 13.7 | Schema evolution handling (validation pinned to `structureDefinition` for older documents) | Arch open item #5 |
+| 13.7 | ~~Schema evolution handling (validation pinned to `structureDefinition` for older documents)~~ **Done (Phase 1):** `structure_one_pager_v_2.json` added, v1 kept | Arch open item #5 |
 
 ## 14. Tooling / delivery (Project_Structure)
 
@@ -176,7 +176,7 @@ These items are small and low risk, and later phases build on them.
 | 3 | 12.3 Friendly error states with Retry, 12.4 no silent `OP-0001` default | Small Preview fixes, done before Preview gains actions |
 | 4 | 13.2 BEC theme, 13.1 environment badge, 13.3 Registry as landing page | Isolated app-shell changes |
 
-### Phase 1: Document model and validation
+### Phase 1: Document model and validation — ✅ done
 
 Every editor tab, every transition and the PDF export depend on the full document model and the three validation tiers.
 

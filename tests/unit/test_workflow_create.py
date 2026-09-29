@@ -16,7 +16,11 @@ from onepagerapp.models import (
     RegistryFilter,
 )
 from onepagerapp.permissions import PermissionDeniedError
-from onepagerapp.validation import validate_schema
+from onepagerapp.validation import (
+    CURRENT_STRUCTURE_DEFINITION,
+    validate_lenient,
+    validate_strict,
+)
 from onepagerapp.workflow import CreateError, active_reference_values, create_one_pager
 from tests.conftest import FIXTURES_DIR
 
@@ -72,11 +76,13 @@ def test__create__happy_path(
     preview = mock_data_access.get_one_pager("OP-0003")
     assert preview.document.product_name == "Customer Master Data"
 
-    # YAML written to OP-####/OP-####_v0.1.0.yml, schema-valid, fixtures untouched
+    # YAML written to OP-####/OP-####_v0.1.0.yml as a lenient-valid v2 Draft
+    # (not yet submittable), fixtures untouched
     assert document_store.exists("OP-0003", "0.1.0")
     raw = yaml.safe_load(preview.document.raw_content)
-    assert validate_schema(raw) == []
-    assert raw["structureDefinition"] == "structure_one_pager_v_1.json"
+    assert validate_lenient(raw) == []
+    assert validate_strict(raw) != []
+    assert raw["structureDefinition"] == CURRENT_STRUCTURE_DEFINITION
     assert raw["createdBy"] == creator.display_name
     assert raw["changeLog"][0]["summary"] == "Initial draft created"
     assert raw["smes"] == [
@@ -96,7 +102,7 @@ def test__create__status_row_audit_fields(
     row = mock_data_access._status_rows["OP-0003"]
     assert row.created_by == "MJO"
     assert row.created_at == NOW
-    assert row.structure_definition == "structure_one_pager_v_1.json"
+    assert row.structure_definition == CURRENT_STRUCTURE_DEFINITION
     assert row.pending_pr is False
 
 

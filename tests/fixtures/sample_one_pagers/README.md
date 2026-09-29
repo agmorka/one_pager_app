@@ -75,6 +75,12 @@ version, product name, domain, owner, and statuses match on both sides.
 **OP-0001** also retains earlier versions (`v0.1.0`, `v0.2.0`) to demonstrate a complete
 draft-through-approval lifecycle; its current version is `v1.0.0`.
 
+The current versions (OP-0001 `v1.0.0`, OP-0002 `v0.3.0`) are complete
+`structure_one_pager_v_2.json` documents that pass the strict tier; their `useCases`
+match the mock `use_case_references`. The older OP-0001 versions are
+`structure_one_pager_v_1.json` documents, used to test schema-version pinning
+(`v0.1.0` is an early draft and fails the retention rule).
+
 ## Adding More Fixtures
 
 To add a new sample One Pager:
@@ -90,7 +96,7 @@ To add a new sample One Pager:
    tests/fixtures/sample_one_pagers/OP-XXXX/OP-XXXX_v0.2.0.yml
    ```
 
-3. Ensure YAML content matches `schemas/structure_one_pager_v_1.json`.
+3. Ensure YAML content matches the schema it declares in `structureDefinition` (new fixtures: `schemas/structure_one_pager_v_2.json`).
 
 ## Implementation Phases
 

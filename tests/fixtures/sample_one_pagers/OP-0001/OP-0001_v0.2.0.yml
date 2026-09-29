@@ -43,17 +43,17 @@ useCases:
     priority: "Must Have"
 
 businessRequirements:
-  - requirement: "Person records must be updated within 4 hours of source system changes"
-    priority: "Must Have"
-  - requirement: "Person data must be available 99.5% of the time"
-    priority: "Must Have"
+  - id: "BR-001"
+    description: "Person records must be updated within 4 hours of source system changes"
+  - id: "BR-002"
+    description: "Person data must be available 99.5% of the time"
 
 dataSources:
-  - sourceName: "SAP ERP"
-    sourceType: "Enterprise System"
+  - name: "SAP ERP"
+    sourceSystem: "Enterprise System"
     description: "Employee and vendor master data"
-  - sourceName: "Salesforce CRM"
-    sourceType: "SaaS Application"
+  - name: "Salesforce CRM"
+    sourceSystem: "SaaS Application"
     description: "Customer and prospect contact information"
 
 dataClassification:

@@ -325,7 +325,7 @@ Deleting `change_log` rows is permitted only in this compensation path, for an O
 
 ---
 
-## 13. Serializer vs. Schema Mismatch for List Sections (Known Gap)
+## 13. Serializer vs. Schema Mismatch for List Sections (Resolved by §14)
 
 **Context:** `documents/serialization.py` and the fixtures use `businessRequirements: requirement/priority`, `dataSources: sourceName/sourceType` and a `dataElementPreview` list, while `structure_one_pager_v_1.json` defines `businessRequirements: id/description`, `dataSources: name/sourceSystem/description` and no `dataElementPreview`.
 
@@ -333,3 +333,20 @@ Deleting `change_log` rows is permitted only in this compensation path, for an O
 
 **Why:** Keeps the create change small without breaking Preview rendering of existing fixtures, and records the gap so it is not forgotten.
 
+
+---
+
+## 14. Structure Definition v2 and the Validation Tiers
+
+**Context:** `structure_one_pager_v_1.json` had no data element grid, retention list, governance artifacts, out of scope, open questions or assumptions, and no `minItems`, so the strict tier (Requirements §5: "at least one use case, one business requirement, one data source, one data product preview row") had nothing to enforce. Its list shapes also disagreed with the serializer and fixtures (§13).
+
+**Decision:** Add **`structure_one_pager_v_2.json`** and make it `CURRENT_STRUCTURE_DEFINITION`; v1 stays unchanged in `schemas/`.
+
+- v2 follows the editor tabs in UI_Design §4.2: `useCases` holds `{useCaseId: UC-###}` references only (Data_Model §5); `businessRequirements` items are `id` (BR-###) / `requirement` / `priority` / `notes`; `dataSources` items are `name` / `sourceSystem` / `epoId` / `dataProvided` / `refreshFrequency`; `dataProductPreview` is the data element grid; `retentionRequirements` is a top-level list; `dataGovernanceArtifacts` has `businessConcepts`, `cdeQuality` and `cdeLineage`; `outOfScope`, `openQuestions` and `assumptions` are added. `businessProblemStatement` stays a single string.
+- Top-level `required`, `minItems` and `minLength` define the **strict** tier (`validate_strict`), plus the conditional business rules (retention, CDE-only fields) and unique BR IDs within a One Pager (Requirements §14).
+- The **lenient** tier (`validate_lenient`) requires only `productName` and `description`, and validates everything else against the same schema with `required`/`minItems`/`minLength` removed, so shapes and types are still checked. A new One Pager is checked with this tier.
+- Every tier validates against the schema named in the document's own `structureDefinition` (Data_Model §6). Only versions listed in `SUPPORTED_STRUCTURE_DEFINITIONS` are accepted; a document without one uses the current schema.
+- `OnePagerDocument` is v2-shaped. v1 documents load into it unchanged (inline Use Case objects, v1 item keys; `dataElementPreview` is read as `dataProductPreview`), and Preview shows either shape. Documents are always written with v2 keys; migrating a v1 document on its next save is part of Save Draft (Phase 4).
+- Fixtures: OP-0001 v0.1.0/v0.2.0 are v1 documents in the v1 shape; the current versions (OP-0001 v1.0.0, OP-0002 v0.3.0) are complete v2 documents that pass the strict tier.
+
+**Why:** A new file keeps every existing v1 document valid against the schema it was written with, and exercises the schema-evolution design before a real migration is needed. Deriving both tiers from one schema keeps the "schema is the single source of truth" rule (Requirements §5).

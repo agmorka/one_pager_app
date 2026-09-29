@@ -1,4 +1,4 @@
-structureDefinition: "structure_one_pager_v_1.json"
+structureDefinition: "structure_one_pager_v_2.json"
 dataProduct: "order"
 productName: "Order Master Data"
 businessDomain: "Sales"
@@ -30,51 +30,82 @@ businessProblemStatement: |
   single authoritative order dataset with complete lineage from capture to fulfillment.
 
 useCases:
-  - persona: "Finance Director"
-    goal: "Reconcile revenue across channels and time periods"
-    scenario: "Query unified order data by date range, channel, product, and customer"
-    decisionEnabled: "Close accounting books on time with full audit trail"
-    priority: "Must Have"
-  - persona: "Operations Manager"
-    goal: "Track fulfillment status and predict delivery dates"
-    scenario: "See order status, warehouse inventory, and shipping progress in one view"
-    decisionEnabled: "Proactively communicate delivery estimates to customers"
-    priority: "Must Have"
+  - useCaseId: "UC-002"
+  - useCaseId: "UC-003"
+  - useCaseId: "UC-004"
 
 businessRequirements:
-  - requirement: "Orders captured within 15 minutes of transaction"
+  - id: "BR-001"
+    requirement: "Orders captured within 15 minutes of transaction"
     priority: "Must Have"
-  - requirement: "Support 1000+ orders per second throughput"
+  - id: "BR-002"
+    requirement: "Support 1000+ orders per second throughput"
     priority: "High"
 
 dataSources:
-  - sourceName: "Shopify"
-    sourceType: "E-commerce Platform"
-    description: "Online sales orders"
-  - sourceName: "SAP ERP"
-    sourceType: "Enterprise System"
-    description: "B2B and contract orders"
+  - name: "Shopify"
+    sourceSystem: "Shopify"
+    dataProvided: "Online sales orders"
+    refreshFrequency: "Near real time"
+  - name: "SAP ERP"
+    sourceSystem: "SAP ERP"
+    epoId: "EPO-1042"
+    dataProvided: "B2B and contract orders"
+    refreshFrequency: "Hourly"
 
-dataClassification:
-  classificationLevel: "Internal"
-  containsPII: true
-  containsSensitiveData: true
-  retentionRequirements: "Order records retained for 7 years (audit/tax compliance)"
-
-dataElementPreview:
+dataProductPreview:
   - elementName: "order_id"
     dataType: "STRING"
-    description: "Unique order identifier"
+    isPrimaryKey: true
+    containsPII: false
     isCriticalDataElement: true
+    cdeCriticalityTiering: "Tier 1"
+    description: "Unique order identifier"
+    example: "SO-2026-000042"
+    useCaseLinks: ["UC-003", "UC-004"]
   - elementName: "order_date"
     dataType: "TIMESTAMP"
-    description: "When order was placed"
+    containsPII: false
     isCriticalDataElement: false
+    description: "When order was placed"
   - elementName: "customer_id"
     dataType: "STRING"
-    description: "Reference to Person master"
+    containsPII: true
     isCriticalDataElement: true
+    cdeCriticalityTiering: "Tier 2"
+    description: "Reference to Person master"
+    useCaseLinks: ["UC-002"]
   - elementName: "total_amount"
     dataType: "DECIMAL"
-    description: "Total order value"
+    containsPII: false
     isCriticalDataElement: true
+    cdeCriticalityTiering: "Tier 1"
+    description: "Total order value"
+    useCaseLinks: ["UC-003"]
+
+dataClassification:
+  classificationLevel: "Confidential"
+  containsPII: true
+  containsSensitiveData: true
+
+retentionRequirements:
+  - dataCategory: "Order records"
+    retentionPeriod: "7 years"
+    legalBasis: "Audit and tax compliance"
+
+dataGovernanceArtifacts:
+  businessConcepts:
+    - name: "Order"
+      definition: "A customer's confirmed request to buy one or more products."
+
+outOfScope:
+  - "Quotes and abandoned carts"
+
+openQuestions:
+  - question: "Which system owns returns?"
+    owner: "DP"
+    dueDate: "2026-11-15"
+    status: "Open"
+
+assumptions:
+  - "All channels send a unique order ID"

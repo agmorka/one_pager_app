@@ -2,7 +2,12 @@ from dataclasses import replace
 
 import pytest
 
-from onepagerapp.models import CurrentUser, NewOnePagerInput, PersonRef
+from onepagerapp.models import (
+    CurrentUser,
+    NewOnePagerInput,
+    PersonRef,
+    ValidationError,
+)
 from onepagerapp.validation import (
     MAX_NAME_LENGTH,
     MAX_TEXT_LENGTH,
@@ -194,7 +199,6 @@ def test__normalize__uppercases_initials_and_strips_html(
 
 @pytest.mark.unit
 def test__validate_schema__required_fields_enforced() -> None:
-    assert load_schema()["title"] == "One Pager Structure Definition v1"
+    assert load_schema()["title"] == "One Pager Structure Definition v2"
     errors = validate_schema({"productName": "x"})
-    assert errors
-    assert any("dataProduct" in e.message for e in errors)
+    assert ValidationError("dataProduct", "This field is required.") in errors

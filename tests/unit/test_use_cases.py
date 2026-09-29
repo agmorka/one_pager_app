@@ -57,10 +57,12 @@ def test_priority_must_be_a_schema_value() -> None:
 
 @pytest.mark.unit
 def test_priority_options_match_json_schema() -> None:
-    schema_path = Path(__file__).parents[2] / "schemas/structure_one_pager_v_1.json"
-    schema = json.loads(schema_path.read_text(encoding="utf-8"))
-    priority = schema["properties"]["useCases"]["items"]["properties"]["priority"]
-    assert tuple(priority["enum"]) == PRIORITY_OPTIONS
+    schemas = Path(__file__).parents[2] / "schemas"
+    v1 = json.loads((schemas / "structure_one_pager_v_1.json").read_text("utf-8"))
+    v2 = json.loads((schemas / "structure_one_pager_v_2.json").read_text("utf-8"))
+    v1_priority = v1["properties"]["useCases"]["items"]["properties"]["priority"]
+    assert tuple(v1_priority["enum"]) == PRIORITY_OPTIONS
+    assert tuple(v2["definitions"]["priority"]["enum"]) == PRIORITY_OPTIONS
 
 
 @pytest.mark.unit

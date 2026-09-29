@@ -1,4 +1,4 @@
-structureDefinition: "structure_one_pager_v_1.json"
+structureDefinition: "structure_one_pager_v_2.json"
 dataProduct: "person"
 productName: "Person Master Data"
 businessDomain: "Customer"
@@ -31,51 +31,102 @@ businessProblemStatement: |
   can trust, with real-time updates from source systems and a clear data lineage.
 
 useCases:
-  - persona: "Analytics Manager"
-    goal: "Understand customer lifetime value trends"
-    scenario: "Aggregate spending, engagement, and product usage without duplicate records"
-    decisionEnabled: "Identify high-value customer segments for targeted marketing"
-    priority: "Must Have"
-  - persona: "Compliance Officer"
-    goal: "Fulfill GDPR data subject access requests quickly"
-    scenario: "Query Person dataset with unique ID and get all attributes in one place"
-    decisionEnabled: "Respond to GDPR requests within 30 days"
-    priority: "Must Have"
+  - useCaseId: "UC-001"
+  - useCaseId: "UC-002"
 
 businessRequirements:
-  - requirement: "Person records must be updated within 4 hours of source system changes"
+  - id: "BR-001"
+    requirement: "Person records must be updated within 4 hours of source system changes"
     priority: "Must Have"
-  - requirement: "Person data must be available 99.5% of the time"
+  - id: "BR-002"
+    requirement: "Person data must be available 99.5% of the time"
     priority: "Must Have"
+    notes: "Measured monthly, excluding planned maintenance windows"
 
 dataSources:
-  - sourceName: "SAP ERP"
-    sourceType: "Enterprise System"
-    description: "Employee and vendor master data"
-  - sourceName: "Salesforce CRM"
-    sourceType: "SaaS Application"
-    description: "Customer and prospect contact information"
+  - name: "SAP ERP"
+    sourceSystem: "SAP ERP"
+    epoId: "EPO-1042"
+    dataProvided: "Employee and vendor master data"
+    refreshFrequency: "Hourly"
+  - name: "Salesforce CRM"
+    sourceSystem: "Salesforce"
+    epoId: "EPO-2210"
+    dataProvided: "Customer and prospect contact information"
+    refreshFrequency: "Every 15 minutes"
+
+dataProductPreview:
+  - elementName: "person_id"
+    dataType: "STRING"
+    isPrimaryKey: true
+    containsPII: false
+    isCriticalDataElement: true
+    cdeCriticalityTiering: "Tier 1"
+    description: "Unique person identifier"
+    example: "P-000123"
+    source: "SAP ERP"
+    useCaseLinks: ["UC-001", "UC-002"]
+  - elementName: "person_name"
+    dataType: "STRING"
+    containsPII: true
+    isCriticalDataElement: false
+    description: "Full name"
+    source: "SAP ERP"
+  - elementName: "email_address"
+    dataType: "STRING"
+    containsPII: true
+    isCriticalDataElement: false
+    description: "Primary email address"
+    source: "Salesforce CRM"
+  - elementName: "customer_segment"
+    dataType: "STRING"
+    containsPII: false
+    isCriticalDataElement: true
+    cdeCriticalityTiering: "Tier 2"
+    description: "Customer classification (Premium, Standard, Prospect)"
+    example: "Premium"
+    source: "Salesforce CRM"
+    useCaseLinks: ["UC-001"]
 
 dataClassification:
   classificationLevel: "Internal"
   containsPII: true
   containsSensitiveData: false
-  retentionRequirements: "Active person records: 7 years after last interaction"
 
-dataElementPreview:
-  - elementName: "person_id"
-    dataType: "STRING"
-    description: "Unique person identifier"
-    isCriticalDataElement: true
-  - elementName: "person_name"
-    dataType: "STRING"
-    description: "Full name"
-    isCriticalDataElement: false
-  - elementName: "email_address"
-    dataType: "STRING"
-    description: "Primary email address"
-    isCriticalDataElement: false
-  - elementName: "customer_segment"
-    dataType: "STRING"
-    description: "Customer classification (Premium, Standard, Prospect)"
-    isCriticalDataElement: true
+retentionRequirements:
+  - dataCategory: "Active person records"
+    retentionPeriod: "7 years after last interaction"
+    legalBasis: "Danish Bookkeeping Act"
+
+dataGovernanceArtifacts:
+  businessConcepts:
+    - name: "Person"
+      definition: "An individual the organization has a relationship with: employee, customer or prospect."
+  cdeQuality:
+    - elementName: "person_id"
+      dimension: "Uniqueness"
+      rule: "No two active records share a person_id"
+      threshold: "100%"
+    - elementName: "customer_segment"
+      dimension: "Validity"
+      rule: "Value is one of Premium, Standard, Prospect"
+      threshold: "99.9%"
+  cdeLineage:
+    - elementName: "person_id"
+      sourceSystem: "SAP ERP"
+      sourceField: "PERNR"
+      transformation: "Prefixed with P- and zero-padded"
+
+outOfScope:
+  - "Corporate customers (covered by the Organization data product)"
+  - "Historical addresses older than 7 years"
+
+openQuestions:
+  - question: "Should prospects without consent be included?"
+    owner: "CD"
+    dueDate: "2026-10-31"
+    status: "Answered"
+    answer: "No, only prospects with marketing consent."
+
+assumptions:
+  - "SAP ERP remains the system of record for employees"
