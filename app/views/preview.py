@@ -168,11 +168,17 @@ def _table(rows: list[dict], columns: dict[str, str]) -> pd.DataFrame:
         columns: Document key → column label, in display order. A key may list
             fallbacks separated by "|" (first non-empty wins), for v1 documents.
     """
-    def cell(row: dict, keys: str) -> object:
+    # Cells are always strings: a column mixing e.g. booleans with "" for
+    # missing values cannot be serialized to Arrow by st.dataframe.
+    def cell(row: dict, keys: str) -> str:
         for key in keys.split("|"):
             value = row.get(key)
             if value not in (None, "", []):
-                return ", ".join(map(str, value)) if isinstance(value, list) else value
+                if isinstance(value, list):
+                    return ", ".join(map(str, value))
+                if isinstance(value, bool):
+                    return "Yes" if value else "No"
+                return str(value)
         return ""
 
     return pd.DataFrame(
