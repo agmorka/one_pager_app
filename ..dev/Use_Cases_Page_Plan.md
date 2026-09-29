@@ -6,7 +6,7 @@ This document defines the ordered implementation plan for the Use Cases page (`a
 
 It implements the design defined in [UI_Design.md](../docs/UI_Design.md) §4.5, the requirements in [Requirements_and_Scope.md](../docs/Requirements_and_Scope.md) §9 and §14, using the tables defined in [Data_Model.md](../docs/Data_Model.md) §3–§4, the Use Case service rules from [Backend_Design.md](../docs/Backend_Design.md) §5 and §9, the layering rules from [Project_Structure.md](../docs/Project_Structure.md) §2b, and the test coverage expectations from [Testing_Strategy.md](../docs/Testing_Strategy.md).
 
-It follows the same phased structure as [Registry_Page_Plan.md](Registry_Page_Plan.md) and [Preview_Page_Plan.md](Preview_Page_Plan.md). It supersedes the earlier draft [use-cases-page-implementation-plan.md](use-cases-page-implementation-plan.md) — see §10 for what changed and why.
+It follows the same phased structure as [Registry_Page_Plan.md](Registry_Page_Plan.md) and [Preview_Page_Plan.md](Preview_Page_Plan.md). It supersedes the earlier draft `use-cases-page-implementation-plan.md` (removed) — see §10 for what changed and why.
 
 ## 2. Current State vs. Target
 
@@ -116,7 +116,7 @@ Step 5 (parameter binding) is a prerequisite for steps 11–12 and also unblocks
 
 ## 10. Changes vs. the Earlier Draft
 
-[use-cases-page-implementation-plan.md](use-cases-page-implementation-plan.md) got the overall shape right (soft delete, registry-style layout, `st.dialog`), but these points are changed here:
+The earlier draft (`use-cases-page-implementation-plan.md`, since removed) got the overall shape right (soft delete, registry-style layout, `st.dialog`), but these points are changed here:
 
 | Earlier draft | Problem | This plan |
 |---|---|---|
