@@ -155,7 +155,7 @@ There is no `git_integration.py`.
 
 | # | Feature |
 |---|---|
-| 14.1 | CI/CD pipeline (Azure Pipelines: ruff, mypy, pytest, bundle validate, staged deploys + Liquibase) — no pipeline file in the repo |
+| 14.1 | ~~CI/CD pipeline (Azure Pipelines: ruff, mypy, pytest, bundle validate, staged deploys + Liquibase) — no pipeline file in the repo~~ **Won't do:** CI/CD and deployment are out of scope for this project |
 | 14.2 | `.env.example` referenced by the docs is missing |
 | 14.3 | E2E/smoke tests for all pages (`tests/integration/test_app_pages.py`), security tests, and failure-mode tests (Testing_Strategy §5–9) |
 
@@ -163,19 +163,18 @@ There is no `git_integration.py`.
 
 ## Recommended implementation order
 
-The phases below order the items above by dependency. Each phase uses only what earlier phases built, so each phase can ship as one or more PRs and be tested on its own. Item numbers refer to the tables above. Unit tests are written in the same phase as the code they cover. Phase 11 adds only the cross-page E2E, security and failure-mode suites.
+The phases below order the items above by dependency. Each phase uses only what earlier phases built, so each phase can ship as one or more PRs and be tested on its own. Item numbers refer to the tables above. Unit tests are written in the same phase as the code they cover. Phase 11 adds only the cross-page E2E, security and failure-mode suites. Items marked **Won't do** (14.1, CI/CD and deployment) are left out of the order.
 
 ### Phase 0: Foundations and quick wins
 
-These items are small and low risk, and every later PR benefits from them.
+These items are small and low risk, and later phases build on them.
 
 | Order | Item | Why now |
 |---|---|---|
 | 1 | 14.2 `.env.example` | Makes local setup reproducible before more config (Git, roles) is added |
-| 2 | 14.1 CI pipeline (ruff, mypy, pytest, bundle validate) | Gates every later PR. Staged deploys and Liquibase can be added later in this phase or the next |
-| 3 | 13.4 `audit.py` structured security-event logging | Transitions, locks and permission denials in later phases all log through it |
-| 4 | 12.3 Friendly error states with Retry, 12.4 no silent `OP-0001` default | Small Preview fixes, done before Preview gains actions |
-| 5 | 13.2 BEC theme, 13.1 environment badge, 13.3 Registry as landing page | Isolated app-shell changes |
+| 2 | 13.4 `audit.py` structured security-event logging | Transitions, locks and permission denials in later phases all log through it |
+| 3 | 12.3 Friendly error states with Retry, 12.4 no silent `OP-0001` default | Small Preview fixes, done before Preview gains actions |
+| 4 | 13.2 BEC theme, 13.1 environment badge, 13.3 Registry as landing page | Isolated app-shell changes |
 
 ### Phase 1: Document model and validation
 
@@ -183,11 +182,11 @@ Every editor tab, every transition and the PDF export depend on the full documen
 
 | Order | Item | Why now |
 |---|---|---|
-| 6 | 12.1 (model part) Add Governance, Out of Scope, Open Questions and Assumptions to `OnePagerDocument` | The editor tabs, strict validation and export all need these fields |
-| 7 | 3.1 Lenient tier | Needed by Save Draft (2.2) |
-| 8 | 3.2 Strict tier, 3.3 conditional business rules | Needed by Submit (1.2) and by the editor's validation summary (2.5) |
-| 9 | 13.7 Schema evolution (pin validation to `structureDefinition`) | Easiest to design while the validators are being written |
-| 10 | 12.1 (render part) Show the new sections, `UC-###` and `BR-###` IDs in Preview | A read-only check that the model is correct, before the editor can write to these fields |
+| 5 | 12.1 (model part) Add Governance, Out of Scope, Open Questions and Assumptions to `OnePagerDocument` | The editor tabs, strict validation and export all need these fields |
+| 6 | 3.1 Lenient tier | Needed by Save Draft (2.2) |
+| 7 | 3.2 Strict tier, 3.3 conditional business rules | Needed by Submit (1.2) and by the editor's validation summary (2.5) |
+| 8 | 13.7 Schema evolution (pin validation to `structureDefinition`) | Easiest to design while the validators are being written |
+| 9 | 12.1 (render part) Show the new sections, `UC-###` and `BR-###` IDs in Preview | A read-only check that the model is correct, before the editor can write to these fields |
 
 ### Phase 2: Permissions
 
@@ -195,10 +194,10 @@ Edit, workflow actions and page visibility all check roles, so roles come first.
 
 | Order | Item | Why now |
 |---|---|---|
-| 11 | 4.1 Role resolution from Unity Catalog groups | Every later permission check reads this. Needs the group names decided (Arch §4 open item) |
-| 12 | 4.2 `check_can_edit` against `one_pager_authorized_users` | Needed by edit mode (2.1) and lock acquisition (5.1) |
-| 13 | 1.10 Segregation-of-duties check (as a permission function) | A pure function that Approve and Reject (1.3, 1.4) will call |
-| 14 | 4.5 Role badge in the sidebar, 4.4 role-based page visibility | Applied to existing pages now. New pages (Review, Admin, Help) use the same helper when they are added |
+| 10 | 4.1 Role resolution from Unity Catalog groups | Every later permission check reads this. Needs the group names decided (Arch §4 open item) |
+| 11 | 4.2 `check_can_edit` against `one_pager_authorized_users` | Needed by edit mode (2.1) and lock acquisition (5.1) |
+| 12 | 1.10 Segregation-of-duties check (as a permission function) | A pure function that Approve and Reject (1.3, 1.4) will call |
+| 13 | 4.5 Role badge in the sidebar, 4.4 role-based page visibility | Applied to existing pages now. New pages (Review, Admin, Help) use the same helper when they are added |
 
 ### Phase 3: Locking
 
@@ -206,43 +205,43 @@ Locking must exist before users can edit existing records, or two editors can ov
 
 | Order | Item | Why now |
 |---|---|---|
-| 15 | 5.1 Acquire lock, 5.2 heartbeat and 30-minute expiry, 5.4 log expired-lock override | Core of `locking.py` |
-| 16 | 5.3 Manual release (**Release my lock** in Preview) | Release on submit and cancel is wired up in Phase 5 |
-| 17 | 5.5 / 11.4 Lock icon and holder initials in the Registry | Reads the same lock data |
+| 14 | 5.1 Acquire lock, 5.2 heartbeat and 30-minute expiry, 5.4 log expired-lock override | Core of `locking.py` |
+| 15 | 5.3 Manual release (**Release my lock** in Preview) | Release on submit and cancel is wired up in Phase 5 |
+| 16 | 5.5 / 11.4 Lock icon and holder initials in the Registry | Reads the same lock data |
 
 ### Phase 4: Editing existing One Pagers
 
 | Order | Item | Why now |
 |---|---|---|
-| 18 | 2.1 Edit mode (pre-filled Basics) | Uses permissions (4.2) and locking (5.1) |
-| 19 | 2.2 Save Draft (lenient validation, change summary, MINOR bump, new YAML version, change-log entry) | The first write path for existing records. Every tab saves through it |
-| 20 | 2.7 Sync `one_pager_authorized_users` on save | Owner and SME changes on the Basics tab must update who may edit |
-| 21 | 2.4 Repeating-items pattern | A shared component used by most of the remaining tabs |
-| 22 | 2.3 Editor tabs in this order: Business Requirements, Use Cases (with 2.8 `link_use_case` / `unlink_use_case`), Data Sources, Data Product Preview, Classification, Governance, Scope & Questions | Simple arrays first. The Classification and Governance tabs rely on the conditional rules (3.3). The Review tab waits for Phase 6 |
-| 23 | 2.5 Validation badges on tabs and the clickable summary | Needs all tabs and the strict tier |
-| 24 | 2.6 Unsaved-changes guard | UX polish once the editor is complete |
+| 17 | 2.1 Edit mode (pre-filled Basics) | Uses permissions (4.2) and locking (5.1) |
+| 18 | 2.2 Save Draft (lenient validation, change summary, MINOR bump, new YAML version, change-log entry) | The first write path for existing records. Every tab saves through it |
+| 19 | 2.7 Sync `one_pager_authorized_users` on save | Owner and SME changes on the Basics tab must update who may edit |
+| 20 | 2.4 Repeating-items pattern | A shared component used by most of the remaining tabs |
+| 21 | 2.3 Editor tabs in this order: Business Requirements, Use Cases (with 2.8 `link_use_case` / `unlink_use_case`), Data Sources, Data Product Preview, Classification, Governance, Scope & Questions | Simple arrays first. The Classification and Governance tabs rely on the conditional rules (3.3). The Review tab waits for Phase 6 |
+| 22 | 2.5 Validation badges on tabs and the clickable summary | Needs all tabs and the strict tier |
+| 23 | 2.6 Unsaved-changes guard | UX polish once the editor is complete |
 
 ### Phase 5: Workflow state machine (owner side)
 
 | Order | Item | Why now |
 |---|---|---|
-| 25 | 1.1 `TRANSITIONS` state machine, 1.9 valid OP/DP combinations | The single source of truth that every transition below uses |
-| 26 | 9.2 Serialized transitions for the Help page | Trivial once 1.1 exists |
-| 27 | 4.3 Real `get_action_states`, 12.2 action buttons in Preview (Edit first) | Buttons turn on one at a time as each transition lands |
-| 28 | 1.2 Submit for Review (atomic, strict validation, rollback, releases lock) | Needs strict validation (3.2) and locking (5.3) |
-| 29 | 1.6 Cancel, with 1.8 (cancel part) DP → `Cancelled` | Simple transition that also exercises the system DP transitions |
-| 30 | 1.7 Owner-initiated DP transitions (start development, activate, deprecate) | Uses the same state machine. Only reachable after Approve, but can be unit-tested now |
+| 24 | 1.1 `TRANSITIONS` state machine, 1.9 valid OP/DP combinations | The single source of truth that every transition below uses |
+| 25 | 9.2 Serialized transitions for the Help page | Trivial once 1.1 exists |
+| 26 | 4.3 Real `get_action_states`, 12.2 action buttons in Preview (Edit first) | Buttons turn on one at a time as each transition lands |
+| 27 | 1.2 Submit for Review (atomic, strict validation, rollback, releases lock) | Needs strict validation (3.2) and locking (5.3) |
+| 28 | 1.6 Cancel, with 1.8 (cancel part) DP → `Cancelled` | Simple transition that also exercises the system DP transitions |
+| 29 | 1.7 Owner-initiated DP transitions (start development, activate, deprecate) | Uses the same state machine. Only reachable after Approve, but can be unit-tested now |
 
 ### Phase 6: Review and approval (approver side)
 
 | Order | Item | Why now |
 |---|---|---|
-| 31 | 6.1 Review page (Approver queue) | Needs `In Review` items from Submit (1.2) and the Approver role (4.1) |
-| 32 | 6.4 Review mode in Preview, 1.4 Reject with a mandatory comment | Reject writes the first `review_comments` rows |
-| 33 | 1.3 Approve (version `1.0.0` / next MAJOR, two change-log entries), 1.8 (approval part) DP → `Ready for Development` / `In Enhancement` | Uses segregation of duties (1.10) |
-| 34 | 6.2 Section-level review comments, 6.3 Owner resolves comments | Builds on the comment storage from Reject |
-| 35 | 2.3 Editor Review tab (checklist, resolve comments, submit) | Needs Submit, comments and the strict tier |
-| 36 | 1.5 Update (`Approved` → `Draft Update`) | Needs approved records. Reads the approved YAML from the volume for now. Phase 8 switches it to Git |
+| 30 | 6.1 Review page (Approver queue) | Needs `In Review` items from Submit (1.2) and the Approver role (4.1) |
+| 31 | 6.4 Review mode in Preview, 1.4 Reject with a mandatory comment | Reject writes the first `review_comments` rows |
+| 32 | 1.3 Approve (version `1.0.0` / next MAJOR, two change-log entries), 1.8 (approval part) DP → `Ready for Development` / `In Enhancement` | Uses segregation of duties (1.10) |
+| 33 | 6.2 Section-level review comments, 6.3 Owner resolves comments | Builds on the comment storage from Reject |
+| 34 | 2.3 Editor Review tab (checklist, resolve comments, submit) | Needs Submit, comments and the strict tier |
+| 35 | 1.5 Update (`Approved` → `Draft Update`) | Needs approved records. Reads the approved YAML from the volume for now. Phase 8 switches it to Git |
 
 At the end of Phase 6 the full lifecycle works end to end, without Git.
 
@@ -250,8 +249,8 @@ At the end of Phase 6 the full lifecycle works end to end, without Git.
 
 | Order | Item | Why now |
 |---|---|---|
-| 37 | 11.1 Use case filter, 11.2 clickable metric cards, 11.3 sortable columns | Independent Registry improvements |
-| 38 | 13.5 Registry and use case caching with invalidation after writes | Easiest now that every write path is known |
+| 36 | 11.1 Use case filter, 11.2 clickable metric cards, 11.3 sortable columns | Independent Registry improvements |
+| 37 | 13.5 Registry and use case caching with invalidation after writes | Easiest now that every write path is known |
 
 ### Phase 8: Git integration
 
@@ -259,31 +258,31 @@ This phase is left until the lifecycle is stable, because it depends on external
 
 | Order | Item | Why now |
 |---|---|---|
-| 39 | 7.4 Git configuration in `config.py` | Prerequisite for the rest of the phase |
-| 40 | 7.1 Create a PR on approval | Hooks into Approve (1.3) |
-| 41 | 7.2 `pending_pr` flag and retry | Needed once PR creation can fail |
-| 42 | 7.3 Read the approved YAML from Git (for Update and export) | Replaces the volume read in Update (1.5) |
+| 38 | 7.4 Git configuration in `config.py` | Prerequisite for the rest of the phase |
+| 39 | 7.1 Create a PR on approval | Hooks into Approve (1.3) |
+| 40 | 7.2 `pending_pr` flag and retry | Needed once PR creation can fail |
+| 41 | 7.3 Read the approved YAML from Git (for Update and export) | Replaces the volume read in Update (1.5) |
 
 ### Phase 9: PDF export
 
 | Order | Item | Why now |
 |---|---|---|
-| 43 | 8.1 `export.py` (choose `weasyprint` or `fpdf2`), 8.2 enable **Export PDF** | Needs every section modelled (Phase 1). Can move earlier if stakeholders ask for it, because it depends only on Phase 1 |
+| 42 | 8.1 `export.py` (choose `weasyprint` or `fpdf2`), 8.2 enable **Export PDF** | Needs every section modelled (Phase 1). Can move earlier if stakeholders ask for it, because it depends only on Phase 1 |
 
 ### Phase 10: Help and Admin pages
 
 | Order | Item | Why now |
 |---|---|---|
-| 44 | 9.1 Help page | Describes the final lifecycle, using 9.2 |
-| 45 | 10.1 Admin page, 10.3 status definitions, 10.2 reference-data CRUD (including the `ref_source_systems` Liquibase changeset) | `sourceSystem` is free text in the schema today, so the Data Sources tab does not need this table first |
-| 46 | 10.4 Pending PRs table with **Retry PR** | Needs 7.2 |
+| 43 | 9.1 Help page | Describes the final lifecycle, using 9.2 |
+| 44 | 10.1 Admin page, 10.3 status definitions, 10.2 reference-data CRUD (including the `ref_source_systems` Liquibase changeset) | `sourceSystem` is free text in the schema today, so the Data Sources tab does not need this table first |
+| 45 | 10.4 Pending PRs table with **Retry PR** | Needs 7.2 |
 
 ### Phase 11: Hardening
 
 | Order | Item | Why now |
 |---|---|---|
-| 47 | 13.6 Accessibility (keyboard row activation, ARIA labels, inline field errors) | Done once all pages exist, so it is done once |
-| 48 | 14.3 E2E and smoke tests for all pages, security tests, failure-mode tests | Covers the finished page set and all transitions |
+| 46 | 13.6 Accessibility (keyboard row activation, ARIA labels, inline field errors) | Done once all pages exist, so it is done once |
+| 47 | 14.3 E2E and smoke tests for all pages, security tests, failure-mode tests | Covers the finished page set and all transitions |
 
 ### Critical path
 
