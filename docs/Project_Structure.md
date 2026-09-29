@@ -61,6 +61,8 @@ OnePagerApp/
 │           ├── liquibase.properties
 │           └── root.changelog.databricks.yaml
 ├── app/                            # Streamlit application — entry point and UI components
+│   ├── .streamlit/
+│   │   └── config.toml             # BEC theme (UI_Design.md §3); Streamlit is started from app/
 │   ├── app.py                      # Streamlit entry point — bootstraps shared services, global error boundary
 │   ├── app.yml                     # Databricks App configuration (runtime manifest)
 │   ├── adapters/                   # Presentation helpers (theming, etc.)
@@ -68,8 +70,10 @@ OnePagerApp/
 │   │   └── theme.py                # BEC theming constants, status badge colors
 │   ├── assets/                     # Static assets (images, etc.)
 │   └── views/                      # Streamlit page modules
-│       ├── home.py                 # Home/registry view
-│       └── registry.py             # Browse/search/filter all One Pagers
+│       ├── registry.py             # Browse/search/filter all One Pagers (landing page)
+│       ├── preview.py              # Read-only view of one One Pager
+│       ├── editor.py               # Create (and later edit) a One Pager
+│       └── use_cases.py            # Use Case registry
 ├── resources/
 │   └── schemas/                    # JSON Schema files (source of truth for validation)
 │       └── structure_one_pager_v_1.json
@@ -77,6 +81,7 @@ OnePagerApp/
 │   └── onepagerapp/                # Main application package — pure Python, no Streamlit imports
 │       ├── __init__.py
 │       ├── __version.py            # Version constant
+│       ├── audit.py                # Structured security-event logging
 │       ├── config.py               # Configuration and AppConfig model
 │       └── data_access/            # Domain/data access layer — pure Python abstraction
 │           ├── __init__.py
@@ -92,6 +97,7 @@ OnePagerApp/
 │   └── integration/                # Tests requiring a live Databricks connection or Streamlit AppTest
 │       ├── __init__.py
 │       └── test_sample_integration_test.py
+├── .env.example                    # Local configuration template (copy to .env)
 ├── .gitattributes
 ├── .gitignore
 ├── coverage.xml                    # Test coverage report
@@ -121,7 +127,7 @@ OnePagerApp/
 - **Zero Streamlit imports** — this code runs independently of any UI framework
 
 **`app/` — Streamlit application code**
-- Page scripts (`app.py`, `views/home.py`, `views/registry.py`)
+- Page scripts (`app.py`, `views/registry.py`, `views/preview.py`, `views/editor.py`, `views/use_cases.py`)
 - UI components and adapters (`adapters/theme.py`)
 - Streamlit-specific session management
 - Deployment manifest (`app.yml`)

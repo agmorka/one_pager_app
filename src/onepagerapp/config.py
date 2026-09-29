@@ -12,6 +12,13 @@ class AppMode(str, Enum):
     LOCAL_INTEGRATION = "local-integration"
 
 
+class Environment(str, Enum):
+    DEV = "DEV"
+    INT = "INT"
+    UAT = "UAT"
+    PRD = "PRD"
+
+
 class AppConfig(BaseModel):
     """Runtime configuration loaded from environment variables."""
 
@@ -26,6 +33,13 @@ class AppConfig(BaseModel):
         "onepager_app", description="Databricks schema for the One Pager App."
     )
     DATABRICKS_WAREHOUSE_ID: str = ""
+    ONE_PAGER_APP_ENVIRONMENT: str = Field(
+        "",
+        description=(
+            "Deployment environment shown in the sidebar badge (DEV/INT/UAT/PRD). "
+            "When empty it is derived from the catalog prefix."
+        ),
+    )
     CLOUD_ROLE_NAME: str = "OnePagerApp"
 
     @classmethod
@@ -39,6 +53,24 @@ class AppConfig(BaseModel):
     @property
     def is_mock(self) -> bool:
         return self.APP_MODE == AppMode.LOCAL_MOCK
+
+    @property
+    def environment(self) -> Environment:
+        """Environment for the sidebar badge (UI_Design.md §2).
+
+        Uses ONE_PAGER_APP_ENVIRONMENT when it names a known environment,
+        otherwise the catalog prefix (``prd_one_pager`` -> PRD), otherwise DEV.
+        """
+        candidates = (
+            self.ONE_PAGER_APP_ENVIRONMENT,
+            self.ONE_PAGER_APP_DATABRICKS_CATALOG.split("_", 1)[0],
+        )
+        for candidate in candidates:
+            try:
+                return Environment(candidate.strip().upper())
+            except ValueError:
+                continue
+        return Environment.DEV
 
     @property
     def uses_databricks(self) -> bool:

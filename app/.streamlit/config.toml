@@ -1,0 +1,11 @@
+# BEC theme (UI_Design.md §3). Streamlit reads this file from the directory it is
+# started in, which is app/ both for Databricks Apps and for local runs.
+[theme]
+primaryColor = "#0c1c49"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F5F5"
+textColor = "#343333"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false

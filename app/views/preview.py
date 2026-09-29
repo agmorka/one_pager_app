@@ -4,10 +4,12 @@ Displays the complete One Pager document with header, status timeline, content s
 change log, review comments, and lock indicator. All state-changing actions are disabled in v1.
 
 The view:
-1. Resolves one_pager_id from query params (preferred) or a selector (v1 fallback)
+1. Resolves one_pager_id from session state or the query param; without one it
+   points the user to the Registry instead of guessing an ID
 2. Fetches PreviewData from DataAccess layer
 3. Renders regions in order: header, timeline, content, change log, comments, lock
-4. Handles all page states: Loading, Populated, Not found, Error
+4. Handles all page states: Loading, Populated, Not found, Error (friendly
+   banner with Retry, no internals), No selection
 5. Does not cache dynamic data (document, lock, comments) — fresh on every re-run
 
 Per Backend_Design.md §2, read permission is universal (authenticated users only).
@@ -28,9 +30,27 @@ from adapters.theme import get_op_status_colors, get_dp_status_colors, DEFAULT_B
 logger = logging.getLogger(__name__)
 
 
+LOAD_ERROR_MESSAGE = "Couldn't load this One Pager. Please retry."
+
+
 # ============================================================================
 # Helpers: Render Components
 # ============================================================================
+
+
+def render_error_state(message: str, key: str) -> None:
+    """Show a user-friendly error banner with a Retry button, then stop the page.
+
+    No exception text or internals are shown; callers log the details.
+
+    Args:
+        message: Friendly message for the banner.
+        key: Unique widget key for the Retry button.
+    """
+    st.error(message, icon="⚠️")
+    if st.button("Retry", key=key):
+        st.rerun()
+    st.stop()
 
 
 def render_status_badge(status: str, color: str) -> None:
@@ -406,7 +426,7 @@ data_access: DataAccess = st.session_state.data_access
 current_user = st.session_state.get("current_user", "unknown")
 
 # Resolve one_pager_id: internal navigation (session_state) takes priority since
-# st.switch_page clears query params; fall back to a query param (deep link), then default.
+# st.switch_page clears query params; fall back to a query param (deep link).
 selected_id = st.session_state.get("preview_one_pager_id")
 query_one_pager_id = st.query_params.get("one_pager_id")
 if selected_id:
@@ -414,24 +434,26 @@ if selected_id:
 elif query_one_pager_id:
     one_pager_id = query_one_pager_id[0] if isinstance(query_one_pager_id, list) else query_one_pager_id
 else:
-    one_pager_id = "OP-0001"  # Default to OP-0001 for auto-load
+    # No silent default (UI_Design.md §4.4): ask the user to pick a One Pager.
+    st.title("Preview")
+    st.info("No One Pager selected. Open one from the Registry with the **View** button.")
+    if st.button("Go to Registry", key="preview_go_to_registry"):
+        st.switch_page("views/registry.py")
+    st.stop()
 
 # Keep session_state and the URL in sync so refresh/bookmark resolves the same One Pager.
 st.session_state["preview_one_pager_id"] = one_pager_id
 st.query_params["one_pager_id"] = one_pager_id
 
 
-# Fetch preview data
+# Fetch preview data. Errors show a friendly banner with Retry; details go to the
+# log only, never to the user (UI_Design.md §5, Architecture.md §7).
 try:
     with st.spinner("Loading One Pager..."):
         preview_data = data_access.get_one_pager(one_pager_id)
-except RuntimeError as e:
-    st.error(f"❌ Error loading One Pager: {e}")
-    st.stop()
-except Exception as e:
-    logger.exception(f"Unexpected error loading {one_pager_id}")
-    st.error(f"❌ Unexpected error: {e}")
-    st.stop()
+except Exception:
+    logger.exception(f"Failed to load One Pager {one_pager_id}")
+    render_error_state(LOAD_ERROR_MESSAGE, key="preview_retry_load")
 
 # Not found state
 if not preview_data:
@@ -443,10 +465,9 @@ if not preview_data:
 try:
     op_colors = get_op_status_colors(data_access)
     dp_colors = get_dp_status_colors(data_access)
-except RuntimeError as e:
-    logger.error(f"Failed to load status colors: {e}")
-    st.error(f"Failed to load color scheme: {e}")
-    st.stop()
+except Exception:
+    logger.exception("Failed to load status colors")
+    render_error_state(LOAD_ERROR_MESSAGE, key="preview_retry_colors")
 
 # One-time confirmation after a redirect (e.g. "One Pager OP-0003 created").
 flash = st.session_state.pop("preview_flash", None)

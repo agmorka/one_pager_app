@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 
 import pandas as pd
 
+from onepagerapp.audit import Outcome, log_event, log_permission_denied
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.documents.serialization import document_to_dict
@@ -38,7 +39,6 @@ from onepagerapp.validation import (
 )
 
 logger = logging.getLogger(__name__)
-audit_logger = logging.getLogger("onepagerapp.audit")
 
 INITIAL_VERSION = "0.1.0"
 INITIAL_OP_STATUS = "Draft"
@@ -200,9 +200,11 @@ def _compensate(data_access: DataAccess, one_pager_id: str, user: CurrentUser) -
         data_access.delete_one_pager_records(one_pager_id)
     except Exception:
         logger.exception(f"Compensation failed for {one_pager_id}")
-        audit_logger.error(  # noqa: TRY400 - traceback already logged above
-            "action=create_one_pager outcome=compensation_failed "
-            f"one_pager_id={one_pager_id} user={user.initials}"
+        log_event(
+            "create_one_pager",
+            Outcome.COMPENSATION_FAILED,
+            user=user.initials,
+            one_pager_id=one_pager_id,
         )
 
 
@@ -231,10 +233,7 @@ def create_one_pager(
 
     """
     if not can_create_one_pager(user):
-        audit_logger.warning(
-            "action=create_one_pager outcome=permission_denied "
-            f"user={user.initials if user else None}"
-        )
+        log_permission_denied("create_one_pager", user=user.initials if user else None)
         msg = "You are not allowed to create One Pagers."
         raise PermissionDeniedError(msg)
 
@@ -278,9 +277,12 @@ def create_one_pager(
         document_store.write(one_pager_id, document, INITIAL_VERSION)
     except RuntimeError as e:
         logger.exception(f"Writing the document for {one_pager_id} failed")
-        audit_logger.error(  # noqa: TRY400 - traceback already logged above
-            "action=create_one_pager outcome=failed step=write_document "
-            f"one_pager_id={one_pager_id} user={user.initials}"
+        log_event(
+            "create_one_pager",
+            Outcome.FAILED,
+            user=user.initials,
+            one_pager_id=one_pager_id,
+            step="write_document",
         )
         raise CreateError(CREATE_FAILED_MESSAGE) from e
 
@@ -294,9 +296,12 @@ def create_one_pager(
         data_access.insert_one_pager_status(_status_row(one_pager_id, data, user, now))
     except Exception as e:
         logger.exception(f"Create of {one_pager_id} failed at {step}")
-        audit_logger.error(  # noqa: TRY400 - traceback already logged above
-            f"action=create_one_pager outcome=failed step={step} "
-            f"one_pager_id={one_pager_id} user={user.initials}"
+        log_event(
+            "create_one_pager",
+            Outcome.FAILED,
+            user=user.initials,
+            one_pager_id=one_pager_id,
+            step=step,
         )
         _compensate(data_access, one_pager_id, user)
         raise CreateError(CREATE_FAILED_MESSAGE) from e
@@ -308,15 +313,20 @@ def create_one_pager(
         logger.exception(f"Uniqueness re-check failed for {one_pager_id}")
         ids = [one_pager_id]
     if ids and ids[0] != one_pager_id:
-        audit_logger.warning(
-            "action=create_one_pager outcome=duplicate_race "
-            f"one_pager_id={one_pager_id} winner={ids[0]} user={user.initials}"
+        log_event(
+            "create_one_pager",
+            Outcome.DUPLICATE_RACE,
+            user=user.initials,
+            one_pager_id=one_pager_id,
+            winner=ids[0],
         )
         _compensate(data_access, one_pager_id, user)
         return CreateResult(errors=[duplicate_error(ids[0])])
 
-    audit_logger.info(
-        "action=create_one_pager outcome=success "
-        f"one_pager_id={one_pager_id} user={user.initials}"
+    log_event(
+        "create_one_pager",
+        Outcome.SUCCESS,
+        user=user.initials,
+        one_pager_id=one_pager_id,
     )
     return CreateResult(one_pager_id=one_pager_id, version=INITIAL_VERSION)

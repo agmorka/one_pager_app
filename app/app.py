@@ -10,7 +10,7 @@ from pathlib import Path
 
 import streamlit as st
 
-# from adapters.theme import apply_theme
+from adapters.theme import apply_theme, environment_badge
 from onepagerapp.auth import resolve_current_user
 from onepagerapp.config import AppConfig
 from onepagerapp.data_access.base import DataAccess
@@ -99,15 +99,14 @@ def main() -> None:
 
     pg = st.navigation(
         [
-            st.Page("views/home.py", title="Home"),
-            st.Page("views/registry.py", title="Registry"),
+            st.Page("views/registry.py", title="Registry", default=True),
             st.Page("views/preview.py", title="Preview"),
             st.Page("views/editor.py", title="Editor"),
             st.Page("views/use_cases.py", title="Use Cases"),
         ]
     )
 
-    # apply_theme()
+    apply_theme()
 
     try:
         init_services()
@@ -120,12 +119,17 @@ def main() -> None:
 
     resolve_user()
 
-    pg.run()
-
+    # Rendered before pg.run() so it stays visible when a page calls st.stop().
     with st.sidebar:
+        config: AppConfig = st.session_state.config
+        badge = environment_badge(config.environment.value)
+        mode = " · mock data" if config.is_mock else ""
+        st.markdown(f"Environment: {badge}{mode}", unsafe_allow_html=True)
         st.divider()
         user_name = st.session_state.get("current_user") or "unavailable"
         st.caption(f"Logged user: {user_name}")
+
+    pg.run()
 
 if __name__ == "__main__":
     main()
