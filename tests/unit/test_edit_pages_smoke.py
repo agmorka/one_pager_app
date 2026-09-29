@@ -391,3 +391,30 @@ def test__editor__submit_blocked_by_validation(
     assert not at.exception
     assert switched == []
     assert "Submit for Review is blocked" in at.error[0].value
+
+
+@pytest.mark.unit
+def test__preview__cancel_asks_for_confirmation(
+    services: dict, switched: list[str]
+) -> None:
+    at = _app("preview.py", {**services, "preview_one_pager_id": "OP-0003"}).run()
+    at.button(key="preview_cancel").click().run()
+
+    assert not at.exception
+    assert at.text_area(key="preview_cancel_reason")  # the dialog is open
+    row = services["data_access"].get_one_pager_status_row("OP-0003")
+    assert row.one_pager_status == "Draft"
+
+
+@pytest.mark.unit
+def test__preview__cancelled_one_pager_is_read_only(
+    services: dict, switched: list[str]
+) -> None:
+    from onepagerapp.workflow import cancel_one_pager  # noqa: PLC0415
+
+    cancel_one_pager(services["data_access"], "OP-0003", services["current_user_info"])
+    at = _app("preview.py", {**services, "preview_one_pager_id": "OP-0003"}).run()
+
+    assert not at.exception
+    assert _action_keys(at) == {"preview_export_pdf"}
+    assert any("cancelled (read-only)" in c.value for c in at.caption)

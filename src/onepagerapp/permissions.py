@@ -184,7 +184,7 @@ def can_manage_use_cases(current_user: str | None) -> bool:
 
 # Actions whose service exists; the others are shown disabled ("coming soon")
 # when they would apply.
-IMPLEMENTED_ACTIONS: frozenset[str] = frozenset({"edit", "release_lock"})
+IMPLEMENTED_ACTIONS: frozenset[str] = frozenset({"edit", "release_lock", "cancel"})
 
 COMING_SOON = {
     "update": "Update arrives with the review workflow",

@@ -36,6 +36,7 @@ from onepagerapp.permissions import (
     get_status_timeline_stages,
 )
 from adapters.theme import get_op_status_colors, get_dp_status_colors, DEFAULT_BADGE_COLOR
+from adapters.workflow_actions import cancel_and_report
 
 logger = logging.getLogger(__name__)
 
@@ -563,10 +564,30 @@ def open_editor(one_pager_id: str) -> None:
     st.switch_page("views/editor.py")
 
 
+@st.dialog("Cancel this One Pager?")
+def confirm_cancel(data_access: DataAccess, one_pager_id: str, user: CurrentUser) -> None:
+    """Confirmation for **Cancel One Pager** (UI_Design.md §5): it is permanent."""
+    st.write(
+        "Cancelling is permanent: the One Pager and its Data Product both become "
+        "**Cancelled** and can no longer be edited."
+    )
+    reason = st.text_area("Reason (optional)", key="preview_cancel_reason", max_chars=500)
+    col_confirm, col_keep = st.columns(2)
+    if col_confirm.button("Cancel One Pager", type="primary", use_container_width=True):
+        error = cancel_and_report(data_access, one_pager_id, user, reason)
+        if error:
+            st.error(error, icon="⚠️")
+            return
+        st.rerun()
+    if col_keep.button("Keep it", use_container_width=True):
+        st.rerun()
+
+
 def render_action_bar(
+    data_access: DataAccess,
     preview_data: PreviewData,
     lock: LockInfo | None,
-    current_user_initials: str,
+    user: CurrentUser,
     authorized_initials: set[str],
 ) -> None:
     """Render the action button bar.
@@ -577,12 +598,12 @@ def render_action_bar(
     Args:
         preview_data: Complete preview data.
         lock: The active lock, or None.
-        current_user_initials: Current user's initials.
+        user: The current user.
         authorized_initials: Initials of the Owner/SMEs of this One Pager.
     """
     header = preview_data.header
     actions = get_action_states(
-        current_user_initials=current_user_initials,
+        current_user_initials=user.initials,
         owner_initials=header.owner_initials,
         one_pager_status=header.one_pager_status,
         is_locked=lock is not None,
@@ -612,6 +633,8 @@ def render_action_bar(
 
     if clicked == "edit":
         open_editor(header.one_pager_id)
+    elif clicked == "cancel":
+        confirm_cancel(data_access, header.one_pager_id, user)
 
 
 # ============================================================================
@@ -690,9 +713,10 @@ st.divider()
 lock = active_lock(preview_data.lock)
 
 render_action_bar(
+    data_access,
     preview_data,
     lock,
-    current_user_info.initials,
+    current_user_info,
     load_authorized_initials(data_access, one_pager_id),
 )
 
