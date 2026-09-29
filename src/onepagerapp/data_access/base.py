@@ -381,6 +381,25 @@ class DataAccess(ABC):
         ...
 
     # ========================================================================
+    # Review Comment Methods (Backend_Design.md §13)
+    # ========================================================================
+
+    @abstractmethod
+    def add_review_comment(self, comment: ReviewComment) -> None:
+        """Insert a ``review_comments`` row. ``comment.id`` is ignored (identity)."""
+        ...
+
+    @abstractmethod
+    def delete_review_comment(self, comment: ReviewComment) -> None:
+        """Compensation for a failed Reject ONLY.
+
+        Deletes the row matching ``one_pager_id``, ``reviewer_initials`` and
+        ``created_at`` of a comment whose action did not complete. Comments
+        are otherwise never deleted: they are part of the audit trail.
+        """
+        ...
+
+    # ========================================================================
     # Use Cases Page Methods
     # ========================================================================
 

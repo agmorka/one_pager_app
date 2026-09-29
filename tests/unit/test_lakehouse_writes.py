@@ -508,3 +508,60 @@ def test__get_one_pager_status_rows__filters_by_status_oldest_first() -> None:
     assert "WHERE one_pager_status = :one_pager_status" in statement
     assert "ORDER BY last_updated_at ASC" in statement
     assert params == {"one_pager_status": NASTY}
+
+
+@pytest.mark.unit
+def test__review_comment_writes__bound_parameters() -> None:
+    from onepagerapp.models import ReviewComment  # noqa: PLC0415
+
+    comment = ReviewComment(
+        id=0,
+        one_pager_id="OP-0002",
+        version="0.3.0",
+        section=None,
+        reviewer_initials="CJO",
+        reviewer_name="Cjo",
+        comment=NASTY,
+        resolved=False,
+        created_at=NOW,
+    )
+    conn = _FakeConnection()
+    access = _access(conn)
+    access.add_review_comment(comment)
+    access.delete_review_comment(comment)
+
+    insert, params = conn.calls[0]
+    _assert_not_interpolated(insert)
+    assert "INSERT INTO cat.sch.review_comments" in insert
+    assert insert.split("(", 1)[1].startswith("one_pager_id,")
+    assert "CAST(:resolved_at AS TIMESTAMP)" in insert
+    assert params["comment"] == NASTY
+    assert params["resolved"] is False
+    delete, params = conn.calls[1]
+    assert "DELETE FROM cat.sch.review_comments" in delete
+    assert params == {
+        "one_pager_id": "OP-0002",
+        "reviewer_initials": "CJO",
+        "created_at": NOW,
+    }
+
+
+@pytest.mark.unit
+def test__get_review_comments__parses_string_booleans() -> None:
+    columns = [
+        "id", "one_pager_id", "version", "section", "reviewer_initials",
+        "reviewer_name", "comment", "resolved", "resolved_by", "created_at",
+        "resolved_at",
+    ]
+    rows = [
+        ["1", "OP-1", "0.1.0", None, "CJ", "C", "x", "false", None,
+         "2026-09-29T10:00:00Z", None],
+        ["2", "OP-1", "0.1.0", "dataSources", "CJ", "C", "y", "true", "AB",
+         "2026-09-29T10:00:00Z", "2026-09-29T10:00:00Z"],
+    ]
+    conn = _FakeConnection([_response(columns, rows)])
+
+    comments = _access(conn).get_review_comments("OP-1")
+
+    assert [c.resolved for c in comments] == [False, True]
+    assert comments[1].resolved_at == NOW

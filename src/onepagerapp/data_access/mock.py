@@ -60,6 +60,16 @@ class MockDataAccess(DataAccess):
             ("OP-0002", "UC-003"),
             ("OP-0002", "UC-004"),
         }
+        self._review_comments: dict[str, list[ReviewComment]] = (
+            _seed_review_comments()
+        )
+        self._next_review_comment_id = (
+            max(
+                (c.id for comments in self._review_comments.values() for c in comments),
+                default=0,
+            )
+            + 1
+        )
         # Rows of the locks table, keyed by one_pager_id (one lock per One Pager).
         self._locks: dict[str, LockInfo] = {}
         # D14: counters start after the highest seeded mock IDs.
@@ -414,38 +424,12 @@ class MockDataAccess(DataAccess):
         )
 
     def get_review_comments(self, one_pager_id: str) -> list[ReviewComment]:
-        """Fetch review comments for a One Pager (mock data)."""
-        if one_pager_id != "OP-0001":
-            return []
-
-        return [
-            ReviewComment(
-                id=2,
-                one_pager_id="OP-0001",
-                version="0.9.0",
-                section="dataSources",
-                reviewer_initials="BS",
-                reviewer_name="Bob Smith",
-                comment="Need to clarify the refreshFrequency for Salesforce.",
-                resolved=True,
-                created_at=datetime(2026, 9, 12, 11, 0),
-                resolved_by="AB",
-                resolved_at=datetime(2026, 9, 15, 10, 30),
-            ),
-            ReviewComment(
-                id=1,
-                one_pager_id="OP-0001",
-                version="0.1.0",
-                section="businessRequirements",
-                reviewer_initials="CJ",
-                reviewer_name="Charlie Jones",
-                comment="Add a requirement for audit trail compliance.",
-                resolved=True,
-                created_at=datetime(2026, 9, 1, 9, 0),
-                resolved_by="AB",
-                resolved_at=datetime(2026, 9, 5, 14, 0),
-            ),
-        ]
+        """Fetch review comments for a One Pager (oldest first)."""
+        comments = self._review_comments.get(one_pager_id, [])
+        return sorted(
+            (copy.copy(c) for c in comments),
+            key=lambda c: (_as_utc(c.created_at), c.id),
+        )
 
     def get_lock(self, one_pager_id: str) -> LockInfo | None:
         """Return the lock row of a One Pager (mock data), expired or not."""
@@ -605,6 +589,26 @@ class MockDataAccess(DataAccess):
             created_at=current.created_at,
         )
         return True
+
+    # ========================================================================
+    # Review Comment Methods
+    # ========================================================================
+
+    def add_review_comment(self, comment: ReviewComment) -> None:
+        stored = copy.copy(comment)
+        stored.id = self._next_review_comment_id
+        self._next_review_comment_id += 1
+        self._review_comments.setdefault(comment.one_pager_id, []).append(stored)
+
+    def delete_review_comment(self, comment: ReviewComment) -> None:
+        self._review_comments[comment.one_pager_id] = [
+            c
+            for c in self._review_comments.get(comment.one_pager_id, [])
+            if not (
+                c.reviewer_initials == comment.reviewer_initials
+                and c.created_at == comment.created_at
+            )
+        ]
 
     # ========================================================================
     # Use Cases Page Methods
@@ -838,6 +842,39 @@ def _seed_change_logs() -> dict[str, list[ChangeLogEntry]]:
                 author_name="Alice Brown",
                 summary="Initial One Pager created",
                 created_at=datetime(2026, 8, 1, 9, 0),
+            ),
+        ],
+    }
+
+
+def _seed_review_comments() -> dict[str, list[ReviewComment]]:
+    return {
+        "OP-0001": [
+            ReviewComment(
+                id=1,
+                one_pager_id="OP-0001",
+                version="0.1.0",
+                section="businessRequirements",
+                reviewer_initials="CJ",
+                reviewer_name="Charlie Jones",
+                comment="Add a requirement for audit trail compliance.",
+                resolved=True,
+                created_at=datetime(2026, 9, 1, 9, 0),
+                resolved_by="AB",
+                resolved_at=datetime(2026, 9, 5, 14, 0),
+            ),
+            ReviewComment(
+                id=2,
+                one_pager_id="OP-0001",
+                version="0.9.0",
+                section="dataSources",
+                reviewer_initials="BS",
+                reviewer_name="Bob Smith",
+                comment="Need to clarify the refreshFrequency for Salesforce.",
+                resolved=True,
+                created_at=datetime(2026, 9, 12, 11, 0),
+                resolved_by="AB",
+                resolved_at=datetime(2026, 9, 15, 10, 30),
             ),
         ],
     }

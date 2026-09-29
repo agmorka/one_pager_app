@@ -36,9 +36,14 @@ from onepagerapp.permissions import (
     get_status_timeline_stages,
 )
 from adapters.theme import get_op_status_colors, get_dp_status_colors, DEFAULT_BADGE_COLOR
-from adapters.workflow_actions import cancel_and_report, change_dp_status_and_report
-from onepagerapp.state_machine import TransitionRule
-from onepagerapp.workflow import data_product_options
+from adapters.workflow_actions import (
+    REVIEW_MODE_KEY,
+    cancel_and_report,
+    change_dp_status_and_report,
+    reject_and_report,
+)
+from onepagerapp.state_machine import IN_REVIEW, Actor, TransitionRule
+from onepagerapp.workflow import MAX_COMMENT_LENGTH, data_product_options
 
 logger = logging.getLogger(__name__)
 
@@ -591,6 +596,58 @@ def confirm_cancel(data_access: DataAccess, one_pager_id: str, user: CurrentUser
         st.rerun()
 
 
+@st.dialog("Reject this One Pager?")
+def confirm_reject(
+    data_access: DataAccess,
+    one_pager_id: str,
+    user: CurrentUser,
+    roles: frozenset[Actor],
+) -> None:
+    """Reject dialog (UI_Design.md §4.4): the reason is mandatory."""
+    st.write(
+        "The One Pager goes back to **Draft** for its Owner. Your reason is "
+        "stored as a review comment and in the change log."
+    )
+    reason = st.text_area(
+        "Reason *",
+        key="preview_reject_reason",
+        max_chars=MAX_COMMENT_LENGTH,
+        placeholder="Why is this being rejected?",
+    )
+    col_confirm, col_back = st.columns(2)
+    if col_confirm.button("Confirm Reject", type="primary", use_container_width=True):
+        error = reject_and_report(data_access, one_pager_id, user, reason, roles)
+        if error:
+            st.error(error, icon="⚠️")
+            return
+        st.rerun()
+    if col_back.button("Cancel", key="preview_reject_back", use_container_width=True):
+        st.rerun()
+
+
+def in_review_mode(one_pager_id: str, status: str, roles: frozenset[Actor]) -> bool:
+    """Opened from the Review queue by an Approver while it is In Review."""
+    return (
+        st.session_state.get(REVIEW_MODE_KEY) == one_pager_id
+        and status == IN_REVIEW
+        and Actor.APPROVER in roles
+    )
+
+
+def render_review_banner(one_pager_id: str) -> None:
+    """Review-mode notice with the way back to the queue (UI_Design.md §4.3)."""
+    col_text, col_back = st.columns([4, 1])
+    col_text.info(
+        f"🔎 **Review mode** — you are reviewing {one_pager_id}. Approve or "
+        "reject it with the actions below.",
+    )
+    if col_back.button(
+        "Back to Review queue", key="preview_back_to_queue", use_container_width=True
+    ):
+        st.session_state.pop(REVIEW_MODE_KEY, None)
+        st.switch_page("views/review.py")
+
+
 @st.dialog("Change Data Product status")
 def change_dp_status_dialog(
     data_access: DataAccess,
@@ -639,6 +696,7 @@ def render_action_bar(
     lock: LockInfo | None,
     user: CurrentUser,
     authorized_initials: set[str],
+    roles: frozenset[Actor] = frozenset(),
 ) -> None:
     """Render the action button bar.
 
@@ -650,6 +708,7 @@ def render_action_bar(
         lock: The active lock, or None.
         user: The current user.
         authorized_initials: Initials of the Owner/SMEs of this One Pager.
+        roles: Group roles of the user (Approver, Admin).
     """
     header = preview_data.header
     actions = get_action_states(
@@ -660,6 +719,7 @@ def render_action_bar(
         lock_holder_initials=lock.locked_by_initials if lock else None,
         authorized_initials=authorized_initials,
         data_product_status=header.data_product_status,
+        roles=roles,
     )
 
     st.subheader("Actions")
@@ -685,6 +745,8 @@ def render_action_bar(
         open_editor(header.one_pager_id)
     elif clicked == "cancel":
         confirm_cancel(data_access, header.one_pager_id, user)
+    elif clicked == "reject":
+        confirm_reject(data_access, header.one_pager_id, user, roles)
     elif clicked == "change_dp_status":
         row = data_access.get_one_pager_status_row(header.one_pager_id)
         options = (
@@ -711,6 +773,9 @@ data_access: DataAccess = st.session_state.data_access
 current_user_info: CurrentUser = st.session_state.get(
     "current_user_info"
 ) or resolve_current_user(st.session_state.get("current_user", "unknown"))
+current_roles: frozenset[Actor] = st.session_state.get(
+    "current_user_roles", frozenset()
+)
 
 # Resolve one_pager_id: internal navigation (session_state) takes priority since
 # st.switch_page clears query params; fall back to a query param (deep link).
@@ -762,6 +827,9 @@ if flash:
     st.success(flash)
 
 # Populated state: render all regions
+if in_review_mode(one_pager_id, preview_data.header.one_pager_status, current_roles):
+    render_review_banner(one_pager_id)
+
 render_header(preview_data, op_colors, dp_colors)
 
 st.divider()
@@ -779,6 +847,7 @@ render_action_bar(
     lock,
     current_user_info,
     load_authorized_initials(data_access, one_pager_id),
+    current_roles,
 )
 
 st.divider()

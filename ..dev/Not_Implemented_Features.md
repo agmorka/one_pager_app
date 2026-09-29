@@ -23,13 +23,13 @@ Features the docs themselves mark as future work (Version History / version comp
 | 1.1 | ~~Generic `TRANSITIONS` state machine (a single source of truth for allowed transitions)~~ **Done (Phase 5):** `state_machine.TRANSITIONS`, executed by `workflow.apply_transitions` (one conditional status update, one change-log insert, rollback on failure) | Backend §2 |
 | 1.2 | ~~**Submit for Review**: atomic `Draft`/`Draft Update` → `Ready for Review` → `In Review`, with strict validation and rollback~~ **Done (Phase 5):** `workflow.submit_for_review`, the Editor's **Submit for Review** (disabled while there are unsaved changes); releases the lock | Req §6, Backend §2 |
 | 1.3 | **Approve** (`In Review` → `Approved`): version set to `1.0.0` or next MAJOR, automatic DP status change, two change-log entries | Req §6–7, Backend §8 |
-| 1.4 | **Reject** (`In Review` → `Draft`) with a mandatory comment, stored in `review_comments` | Req §6, Backend §2, §13 |
+| 1.4 | ~~**Reject** (`In Review` → `Draft`) with a mandatory comment, stored in `review_comments`~~ **Done (Phase 6):** `workflow.reject_one_pager`; the comment is a document-level, unresolved review comment and is appended to the change-log summary; sets `reviewed_at` / `reviewed_by` | Req §6, Backend §2, §13 |
 | 1.5 | **Update** (`Approved` → `Draft Update`): read the approved YAML and write a working copy, with a confirmation dialog | Req §5, Backend §2, UI §4.4 |
 | 1.6 | ~~**Cancel** (`Draft`/`Ready for Review`/`In Review` → `Cancelled`, which also sets DP to `Cancelled`), by the Owner/SME or an Admin~~ **Done (Phase 5):** `workflow.cancel_one_pager`, **Cancel One Pager** in Preview with a confirmation dialog; releases any active lock | Req §6 |
 | 1.7 | ~~Owner-initiated **DP status transitions**: start development, activate, deprecate (with confirmation)~~ **Done (Phase 5):** `workflow.change_data_product_status`, **Change DP Status** menu in Preview (only valid targets; Deprecate asks for confirmation). Only while the One Pager is `Approved`: in `Draft Update` the DP status is preserved (Req §6) | Req §6, Backend §3 |
 | 1.8 | System-driven DP transitions (`Ready for Development` on first approval, `In Enhancement` on re-approval, `Cancelled` on cancel). **Cancel part done (Phase 5)**; the rules for the approval part are in `TRANSITIONS` and are applied by Approve in Phase 6 | Req §6, Backend §3 |
 | 1.9 | ~~Enforcement of valid OP/DP status combinations~~ **Done (Phase 5):** `state_machine.VALID_COMBINATIONS`, checked on every transition | Req §6 |
-| 1.10 | Segregation of duties: an Approver cannot approve or reject a One Pager where they are Owner/SME | Req §6, Arch §4 |
+| 1.10 | ~~Segregation of duties: an Approver cannot approve or reject a One Pager where they are Owner/SME~~ **Done (Phase 6):** checked by the review decisions from the `TRANSITIONS` guard (`segregation_of_duties`), logged as a permission denial | Req §6, Arch §4 |
 
 ## 2. Editing existing One Pagers (Req §5, UI §4.2)
 
@@ -85,7 +85,7 @@ The Editor has create mode and, from Phase 4, edit mode. Missing:
 | 6.1 | ~~**Review page** (`3_Review.py`): an Approver queue of `In Review` items, sorted oldest first~~ **Done (Phase 6):** `app/views/review.py`, `review.get_review_queue`; in the navigation for Approvers only; **Review** opens Preview in review mode |
 | 6.2 | Approver adds section-level review comments in Preview |
 | 6.3 | Owner marks comments as resolved (`resolved_by`, `resolved_at`) |
-| 6.4 | "Review mode" in Preview, with a Reject dialog |
+| 6.4 | ~~"Review mode" in Preview, with a Reject dialog~~ **Done (Phase 6):** opened from the Review queue; banner with **Back to Review queue**; **Reject** asks for a mandatory reason |
 
 ## 7. Git integration (Req §13, Arch §6, Backend §8)
 
@@ -237,7 +237,7 @@ Locking must exist before users can edit existing records, or two editors can ov
 | Order | Item | Why now |
 |---|---|---|
 | 30 | ~~6.1 Review page (Approver queue)~~ **Done** | Needs `In Review` items from Submit (1.2) and the Approver role (4.1, interim config-based roles) |
-| 31 | 6.4 Review mode in Preview, 1.4 Reject with a mandatory comment | Reject writes the first `review_comments` rows |
+| 31 | ~~6.4 Review mode in Preview, 1.4 Reject with a mandatory comment~~ **Done** | Reject writes the first `review_comments` rows |
 | 32 | 1.3 Approve (version `1.0.0` / next MAJOR, two change-log entries), 1.8 (approval part) DP → `Ready for Development` / `In Enhancement` | Uses segregation of duties (1.10) |
 | 33 | 6.2 Section-level review comments, 6.3 Owner resolves comments | Builds on the comment storage from Reject |
 | 34 | 2.3 Editor Review tab (checklist, resolve comments, submit) | Needs Submit, comments and the strict tier |

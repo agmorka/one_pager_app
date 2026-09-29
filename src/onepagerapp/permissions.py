@@ -194,7 +194,7 @@ def can_manage_use_cases(current_user: str | None) -> bool:
 # Actions whose service exists; the others are shown disabled ("coming soon")
 # when they would apply.
 IMPLEMENTED_ACTIONS: frozenset[str] = frozenset(
-    {"edit", "release_lock", "cancel", "change_dp_status"}
+    {"edit", "release_lock", "cancel", "change_dp_status", "reject"}
 )
 
 COMING_SOON = {
@@ -236,8 +236,8 @@ def get_action_states(  # noqa: PLR0913 - the context of one Preview page
         authorized_initials: Initials of the Owner/SMEs of this One Pager
             (``one_pager_authorized_users``).
         data_product_status: Current Data Product status.
-        roles: Group roles of the user (Approver, Admin). Unity Catalog group
-            resolution is not implemented yet (Phase 2), so callers pass none.
+        roles: Group roles of the user (Approver, Admin), from
+            ``auth.resolve_roles``.
 
     Returns:
         Dictionary mapping action name (e.g. "edit", "approve") to ActionState.

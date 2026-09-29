@@ -506,7 +506,7 @@ class LakehouseAccess(DataAccess):
                     reviewer_initials=row_dict["reviewer_initials"],
                     reviewer_name=row_dict["reviewer_name"],
                     comment=row_dict["comment"],
-                    resolved=bool(row_dict.get("resolved", False)),
+                    resolved=self._parse_bool(row_dict.get("resolved")),
                     created_at=self._parse_timestamp(row_dict["created_at"]),
                     resolved_by=row_dict.get("resolved_by"),
                     resolved_at=(
@@ -923,6 +923,46 @@ class LakehouseAccess(DataAccess):
             reviewed_by=row.get("reviewed_by"),
             structure_definition=str(row["structure_definition"]),
             pending_pr=cls._parse_bool(row.get("pending_pr")),
+        )
+
+    # ========================================================================
+    # Review Comment Methods
+    # ========================================================================
+
+    def add_review_comment(self, comment: ReviewComment) -> None:
+        fqn = f"{self._fqn_prefix}.review_comments"
+        # NULL parameters are untyped; cast the nullable TIMESTAMP explicitly.
+        self._connection.execute_statement(
+            f"INSERT INTO {fqn} "  # noqa: S608
+            "(one_pager_id, version, section, reviewer_initials, reviewer_name, "
+            "comment, resolved, resolved_by, created_at, resolved_at) VALUES "
+            "(:one_pager_id, :version, :section, :reviewer_initials, "
+            ":reviewer_name, :comment, :resolved, :resolved_by, :created_at, "
+            "CAST(:resolved_at AS TIMESTAMP))",
+            parameters={
+                "one_pager_id": comment.one_pager_id,
+                "version": comment.version,
+                "section": comment.section,
+                "reviewer_initials": comment.reviewer_initials,
+                "reviewer_name": comment.reviewer_name,
+                "comment": comment.comment,
+                "resolved": comment.resolved,
+                "resolved_by": comment.resolved_by,
+                "created_at": comment.created_at,
+                "resolved_at": comment.resolved_at,
+            },
+        )
+
+    def delete_review_comment(self, comment: ReviewComment) -> None:
+        fqn = f"{self._fqn_prefix}.review_comments"
+        self._connection.execute_statement(
+            f"DELETE FROM {fqn} WHERE one_pager_id = :one_pager_id "  # noqa: S608
+            "AND reviewer_initials = :reviewer_initials AND created_at = :created_at",
+            parameters={
+                "one_pager_id": comment.one_pager_id,
+                "reviewer_initials": comment.reviewer_initials,
+                "created_at": comment.created_at,
+            },
         )
 
     # ========================================================================

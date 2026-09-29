@@ -92,3 +92,41 @@ def test__change_dp_status_and_report(
         data_access, "OP-0001", "Deprecated", alice, confirmed=True
     )
     assert "cannot change from In Development to Deprecated" in error
+
+
+@pytest.mark.unit
+def test__reject__requires_a_reason_then_reports_success(
+    actions: ModuleType, data_access: MockDataAccess
+) -> None:
+    from onepagerapp.state_machine import Actor  # noqa: PLC0415
+
+    approver = resolve_current_user("cjo@bec.dk")
+    roles = frozenset({Actor.APPROVER})
+    st.session_state["preview_review_mode"] = "OP-0002"
+
+    error = actions.reject_and_report(data_access, "OP-0002", approver, " ", roles)
+    assert error == "Explain why the One Pager is rejected."
+    assert data_access.get_one_pager_status_row("OP-0002").one_pager_status == (
+        "In Review"
+    )
+
+    error = actions.reject_and_report(
+        data_access, "OP-0002", approver, "Data sources missing", roles
+    )
+    assert error is None
+    assert data_access.get_one_pager_status_row("OP-0002").one_pager_status == "Draft"
+    assert "rejected" in st.session_state["preview_flash"]
+    assert "preview_review_mode" not in st.session_state
+
+
+@pytest.mark.unit
+def test__reject__self_review_is_reported(
+    actions: ModuleType, data_access: MockDataAccess
+) -> None:
+    from onepagerapp.state_machine import Actor  # noqa: PLC0415
+
+    owner = resolve_current_user("bob.smith@company.com")  # Owner of OP-0002
+    error = actions.reject_and_report(
+        data_access, "OP-0002", owner, "No", frozenset({Actor.APPROVER})
+    )
+    assert error == "You cannot review a One Pager on which you are Owner or SME."

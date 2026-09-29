@@ -13,6 +13,7 @@ from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import LockInfo
+from onepagerapp.state_machine import Actor
 from tests.conftest import FIXTURES_DIR
 
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
@@ -256,3 +257,59 @@ def test__preview__expired_lock_is_not_shown(
 
     assert not at.exception
     assert not [w for w in at.warning if "Locked by" in w.value]
+
+
+APPROVER = "cjo@bec.dk"
+
+
+def _review_services(tmp_path: Path, username: str = APPROVER) -> dict:
+    services = _services(tmp_path)
+    user = resolve_current_user(username)
+    return {
+        **services,
+        "current_user": user.username,
+        "current_user_info": user,
+        "current_user_roles": frozenset({Actor.APPROVER}),
+        "preview_one_pager_id": "OP-0002",
+        "preview_review_mode": "OP-0002",
+    }
+
+
+@pytest.mark.unit
+def test__preview__review_mode_for_approver(
+    tmp_path: Path, switched: list[str]
+) -> None:
+    at = _app(_review_services(tmp_path)).run()
+
+    assert not at.exception
+    assert any("Review mode" in i.value for i in at.info)
+    keys = {b.key for b in at.button}
+    assert {"preview_reject", "preview_approve"} <= keys
+    assert not at.button(key="preview_reject").disabled
+
+    at.button(key="preview_back_to_queue").click().run()
+    assert switched == ["views/review.py"]
+    assert "preview_review_mode" not in at.session_state
+
+
+@pytest.mark.unit
+def test__preview__no_review_actions_for_owner_or_sme(
+    tmp_path: Path, switched: list[str]
+) -> None:
+    at = _app(_review_services(tmp_path, "dp@bec.dk")).run()  # SME of OP-0002
+
+    assert not at.exception
+    keys = {b.key for b in at.button}
+    assert "preview_reject" not in keys
+    assert "preview_approve" not in keys
+
+
+@pytest.mark.unit
+def test__preview__reject_opens_the_dialog(
+    tmp_path: Path, switched: list[str]
+) -> None:
+    at = _app(_review_services(tmp_path)).run()
+    at.button(key="preview_reject").click().run()
+
+    assert not at.exception
+    assert at.text_area(key="preview_reject_reason")  # the dialog is open

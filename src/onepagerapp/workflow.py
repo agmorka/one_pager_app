@@ -41,6 +41,7 @@ from onepagerapp.models import (
     NewOnePagerInput,
     OnePagerDocument,
     OnePagerStatusRow,
+    ReviewComment,
     ValidationError,
 )
 from onepagerapp.permissions import (
@@ -52,6 +53,7 @@ from onepagerapp.permissions import (
 from onepagerapp.state_machine import (
     DP_CANCELLED,
     DP_STATUS_FIELD,
+    DRAFT,
     IN_REVIEW,
     OP_CANCELLED,
     OP_STATUS_FIELD,
@@ -444,6 +446,7 @@ def apply_transitions(  # noqa: PLR0913 - every argument is part of the change
     *,
     now: datetime | None = None,
     note: str | None = None,
+    reviewed: bool = False,
 ) -> OnePagerStatusRow:
     """Execute one user action made of one or more status transitions.
 
@@ -463,6 +466,8 @@ def apply_transitions(  # noqa: PLR0913 - every argument is part of the change
         user: The acting user (change-log author, ``last_updated_by``).
         now: Transition instant (defaults to the current UTC time).
         note: Text appended to every change-log summary (e.g. a comment).
+        reviewed: The action is a review decision (Approve / Reject): sets
+            ``reviewed_at`` and ``reviewed_by`` (Data_Model.md §3).
 
     Returns:
         The stored status row.
@@ -477,6 +482,9 @@ def apply_transitions(  # noqa: PLR0913 - every argument is part of the change
     new_row = plan_transitions(row, rules)
     new_row.last_updated_at = now
     new_row.last_updated_by = user.initials
+    if reviewed:
+        new_row.reviewed_at = now
+        new_row.reviewed_by = user.initials
     entries = [_transition_entry(rule, new_row, user, now, note) for rule in rules]
     action = rules[0].action if rules else "transition"
 
@@ -835,3 +843,136 @@ def change_data_product_status(  # noqa: PLR0913 - every argument is part of the
         msg = f"Confirm that you want to {rule.label.lower()} this Data Product."
         raise ConfirmationRequiredError(msg)
     return apply_transitions(data_access, row, [rule], user, now=now)
+
+
+# ============================================================================
+# Review decisions (Backend_Design.md §2, §13)
+# ============================================================================
+
+MAX_COMMENT_LENGTH = 2000
+REJECT_COMMENT_REQUIRED = "Explain why the One Pager is rejected."
+
+
+class CommentRequiredError(ValueError):
+    """A mandatory comment (the reason for a Reject) is missing."""
+
+
+def _check_review_decision(  # noqa: PLR0913 - the context of one review decision
+    data_access: DataAccess,
+    one_pager_id: str,
+    to_status: str,
+    user: CurrentUser,
+    roles: Collection[Actor],
+    action: str,
+) -> tuple[OnePagerStatusRow, TransitionRule]:
+    """Load the row and check an Approve / Reject may be made by this user.
+
+    Raises:
+        NotFoundError: No One Pager with this ID.
+        PermissionDeniedError: The user is not an Approver, or is Owner/SME of
+            this One Pager (segregation of duties, Architecture.md §4).
+        InvalidTransitionError: The One Pager is not ``In Review``.
+
+    """
+    row = data_access.get_one_pager_status_row(one_pager_id)
+    if row is None:
+        msg = f"One Pager {one_pager_id} not found."
+        raise NotFoundError(msg)
+    if Actor.APPROVER not in roles:
+        log_permission_denied(action, user=user.initials, one_pager_id=one_pager_id)
+        msg = "Only an Approver can review this One Pager."
+        raise PermissionDeniedError(msg)
+    if row.one_pager_status != IN_REVIEW:
+        msg = f"The One Pager is {row.one_pager_status}, not {IN_REVIEW}."
+        raise InvalidTransitionError(msg)
+    rule = get_rule(OP_STATUS_FIELD, row.one_pager_status, to_status)
+    owner_or_sme = is_owner_or_sme(user, data_access.get_authorized_users(one_pager_id))
+    failure = guard_failure(
+        rule,
+        actors=set(roles),
+        one_pager_status=row.one_pager_status,
+        data_product_status=row.data_product_status,
+        is_owner_or_sme=owner_or_sme,
+    )
+    if failure and owner_or_sme and rule.segregation_of_duties:
+        log_permission_denied(action, user=user.initials, one_pager_id=one_pager_id)
+        raise PermissionDeniedError(failure)
+    if failure:
+        raise InvalidTransitionError(failure)
+    return row, rule
+
+
+def reject_one_pager(  # noqa: PLR0913 - every argument is part of the action
+    data_access: DataAccess,
+    one_pager_id: str,
+    user: CurrentUser,
+    comment: str,
+    *,
+    roles: Collection[Actor],
+    now: datetime | None = None,
+) -> OnePagerStatusRow:
+    """Reject a One Pager: ``In Review`` → ``Draft``, with a mandatory comment.
+
+    Only an Approver who is not Owner/SME of the One Pager may reject it. The
+    comment is stored in ``review_comments`` (document level, unresolved) and
+    appended to the change-log summary (Requirements_and_Scope.md §7). The
+    version does not change. Write order: the comment first, then the status
+    change with its change-log entry; if the status change fails the comment
+    is removed again, so a failed Reject changes nothing.
+
+    Raises:
+        NotFoundError: No One Pager with this ID.
+        PermissionDeniedError: Not an Approver, or Owner/SME of this One Pager.
+        InvalidTransitionError: The One Pager is not ``In Review``.
+        CommentRequiredError: The comment is empty.
+        TransitionError: Storing failed; nothing changed.
+
+    """
+    now = now or datetime.now(UTC)
+    row, rule = _check_review_decision(
+        data_access, one_pager_id, DRAFT, user, roles, "reject"
+    )
+    comment = sanitize_text(comment)[:MAX_COMMENT_LENGTH]
+    if rule.requires_comment and not comment:
+        raise CommentRequiredError(REJECT_COMMENT_REQUIRED)
+
+    review_comment = ReviewComment(
+        id=0,
+        one_pager_id=one_pager_id,
+        version=row.version,
+        section=None,
+        reviewer_initials=user.initials,
+        reviewer_name=user.display_name,
+        comment=comment,
+        resolved=False,
+        created_at=now,
+    )
+    try:
+        data_access.add_review_comment(review_comment)
+    except Exception as e:
+        logger.exception(f"Storing the reject comment of {one_pager_id} failed")
+        log_event(
+            rule.action,
+            Outcome.FAILED,
+            user=user.initials,
+            one_pager_id=one_pager_id,
+            step="add_review_comment",
+        )
+        raise TransitionError(TRANSITION_FAILED_MESSAGE) from e
+
+    try:
+        return apply_transitions(
+            data_access, row, [rule], user, now=now, note=comment, reviewed=True
+        )
+    except Exception:
+        try:
+            data_access.delete_review_comment(review_comment)
+        except Exception:
+            logger.exception(f"Removing the reject comment of {one_pager_id} failed")
+            log_event(
+                rule.action,
+                Outcome.COMPENSATION_FAILED,
+                user=user.initials,
+                one_pager_id=one_pager_id,
+            )
+        raise
