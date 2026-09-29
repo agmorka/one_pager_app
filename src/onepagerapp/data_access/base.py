@@ -300,6 +300,15 @@ class DataAccess(ABC):
         ...
 
     @abstractmethod
+    def append_change_log_entries(self, entries: list[ChangeLogEntry]) -> None:
+        """Append several ``change_log`` entries in one statement (all or none).
+
+        Used when one action changes more than one status (Submit, Cancel,
+        Approve), so the audit trail never shows half of it.
+        """
+        ...
+
+    @abstractmethod
     def insert_one_pager_status(self, row: OnePagerStatusRow) -> None:
         """Insert the ``one_pager_status`` row (makes the One Pager visible)."""
         ...

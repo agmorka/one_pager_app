@@ -20,7 +20,7 @@ Features the docs themselves mark as future work (Version History / version comp
 
 | # | Feature | Doc ref |
 |---|---|---|
-| 1.1 | Generic `TRANSITIONS` state machine (a single source of truth for allowed transitions) | Backend §2 |
+| 1.1 | ~~Generic `TRANSITIONS` state machine (a single source of truth for allowed transitions)~~ **Done (Phase 5):** `state_machine.TRANSITIONS`, executed by `workflow.apply_transitions` (one conditional status update, one change-log insert, rollback on failure) | Backend §2 |
 | 1.2 | **Submit for Review**: atomic `Draft`/`Draft Update` → `Ready for Review` → `In Review`, with strict validation and rollback | Req §6, Backend §2 |
 | 1.3 | **Approve** (`In Review` → `Approved`): version set to `1.0.0` or next MAJOR, automatic DP status change, two change-log entries | Req §6–7, Backend §8 |
 | 1.4 | **Reject** (`In Review` → `Draft`) with a mandatory comment, stored in `review_comments` | Req §6, Backend §2, §13 |
@@ -28,7 +28,7 @@ Features the docs themselves mark as future work (Version History / version comp
 | 1.6 | **Cancel** (`Draft`/`Ready for Review`/`In Review` → `Cancelled`, which also sets DP to `Cancelled`), by the Owner/SME or an Admin | Req §6 |
 | 1.7 | Owner-initiated **DP status transitions**: start development, activate, deprecate (with confirmation) | Req §6, Backend §3 |
 | 1.8 | System-driven DP transitions (`Ready for Development` on first approval, `In Enhancement` on re-approval, `Cancelled` on cancel) | Req §6, Backend §3 |
-| 1.9 | Enforcement of valid OP/DP status combinations | Req §6 |
+| 1.9 | ~~Enforcement of valid OP/DP status combinations~~ **Done (Phase 5):** `state_machine.VALID_COMBINATIONS`, checked on every transition | Req §6 |
 | 1.10 | Segregation of duties: an Approver cannot approve or reject a One Pager where they are Owner/SME | Req §6, Arch §4 |
 
 ## 2. Editing existing One Pagers (Req §5, UI §4.2)
@@ -225,7 +225,7 @@ Locking must exist before users can edit existing records, or two editors can ov
 
 | Order | Item | Why now |
 |---|---|---|
-| 24 | 1.1 `TRANSITIONS` state machine, 1.9 valid OP/DP combinations | The single source of truth that every transition below uses |
+| 24 | ~~1.1 `TRANSITIONS` state machine, 1.9 valid OP/DP combinations~~ **Done** | The single source of truth that every transition below uses |
 | 25 | 9.2 Serialized transitions for the Help page | Trivial once 1.1 exists |
 | 26 | 4.3 Real `get_action_states`, 12.2 action buttons in Preview (Edit first) | Buttons turn on one at a time as each transition lands |
 | 27 | 1.2 Submit for Review (atomic, strict validation, rollback, releases lock) | Needs strict validation (3.2) and locking (5.3) |

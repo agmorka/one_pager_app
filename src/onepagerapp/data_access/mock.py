@@ -533,6 +533,10 @@ class MockDataAccess(DataAccess):
         self._next_change_log_id += 1
         self._change_logs.setdefault(entry.one_pager_id, []).append(stored)
 
+    def append_change_log_entries(self, entries: list[ChangeLogEntry]) -> None:
+        for entry in entries:
+            self.append_change_log(entry)
+
     def insert_one_pager_status(self, row: OnePagerStatusRow) -> None:
         if row.one_pager_id in self._status_rows:
             msg = f"one_pager_status already contains {row.one_pager_id}"

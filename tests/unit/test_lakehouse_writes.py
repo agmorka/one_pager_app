@@ -426,7 +426,11 @@ def test__authorized_users_update_and_delete__bound_parameters() -> None:
     assert params["user_initials"] == NASTY
     delete, params = conn.calls[1]
     assert "user_initials IN (:initials_0, :initials_1)" in delete
-    assert params == {"initials_0": "AB", "initials_1": NASTY, "one_pager_id": "OP-0001"}
+    assert params == {
+        "initials_0": "AB",
+        "initials_1": NASTY,
+        "one_pager_id": "OP-0001",
+    }
     for statement, _ in conn.calls:
         _assert_not_interpolated(statement)
 
@@ -447,3 +451,45 @@ def test__use_case_reference_writes__bound_parameters() -> None:
     assert delete.startswith("DELETE FROM cat.sch.use_case_references")
     for statement, _ in conn.calls:
         _assert_not_interpolated(statement)
+
+
+@pytest.mark.unit
+def test__append_change_log_entries__single_insert() -> None:
+    conn = _FakeConnection()
+    entries = [
+        ChangeLogEntry(
+            0,
+            "OP-1",
+            "0.1.0",
+            "status_transition",
+            "AB",
+            "A",
+            NASTY,
+            NOW,
+            "Draft",
+            "Ready for Review",
+            "one_pager_status",
+        ),
+        ChangeLogEntry(
+            0,
+            "OP-1",
+            "0.1.0",
+            "status_transition",
+            "AB",
+            "A",
+            "s",
+            NOW,
+            "Ready for Review",
+            "In Review",
+            "one_pager_status",
+        ),
+    ]
+    _access(conn).append_change_log_entries(entries)
+    _access(conn).append_change_log_entries([])
+
+    [(statement, params)] = conn.calls
+    assert statement.startswith("INSERT INTO cat.sch.change_log")
+    assert ":summary_0" in statement
+    assert ":summary_1" in statement
+    assert params["summary_0"] == NASTY
+    _assert_not_interpolated(statement)

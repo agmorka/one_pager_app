@@ -761,6 +761,33 @@ class LakehouseAccess(DataAccess):
             },
         )
 
+    def append_change_log_entries(self, entries: list[ChangeLogEntry]) -> None:
+        if not entries:
+            return
+        fqn = f"{self._fqn_prefix}.change_log"
+        columns = (
+            "one_pager_id",
+            "version",
+            "event_type",
+            "author_initials",
+            "author_name",
+            "summary",
+            "from_status",
+            "to_status",
+            "status_field",
+            "created_at",
+        )
+        values = []
+        parameters: dict[str, SqlParameterValue] = {}
+        for i, entry in enumerate(entries):
+            values.append("(" + ", ".join(f":{c}_{i}" for c in columns) + ")")
+            parameters.update({f"{c}_{i}": getattr(entry, c) for c in columns})
+        self._connection.execute_statement(
+            f"INSERT INTO {fqn} ({', '.join(columns)}) "  # noqa: S608
+            f"VALUES {', '.join(values)}",
+            parameters=parameters,
+        )
+
     def insert_one_pager_status(self, row: OnePagerStatusRow) -> None:
         fqn = f"{self._fqn_prefix}.one_pager_status"
         columns = ", ".join(_ONE_PAGER_STATUS_COLUMNS)
