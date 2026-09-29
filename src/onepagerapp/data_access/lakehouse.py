@@ -553,6 +553,73 @@ class LakehouseAccess(DataAccess):
             logger.error(f"Failed to fetch lock for {one_pager_id}: {e}")
             raise RuntimeError(f"Failed to fetch lock: {e}") from e
 
+    def write_lock(self, lock: LockInfo, *, now: datetime) -> bool:
+        """Upsert the lock row with one MERGE, guarded by the takeover rules.
+
+        The guard (no row / expired / same holder and session) is evaluated in
+        the same statement as the write. A Delta write conflict with a
+        concurrent acquire is reported as False; ``locking.acquire_lock`` then
+        re-reads the row to see who won.
+        """
+        fqn = f"{self._fqn_prefix}.locks"
+        try:
+            response = self._connection.execute_statement(
+                f"MERGE INTO {fqn} AS t "  # noqa: S608
+                "USING (SELECT :one_pager_id AS one_pager_id) AS s "
+                "ON t.one_pager_id = s.one_pager_id "
+                "WHEN MATCHED AND (t.expires_at <= :now OR "
+                "(t.locked_by_initials = :locked_by_initials "
+                "AND t.session_id = :session_id)) THEN UPDATE SET "
+                "locked_by_initials = :locked_by_initials, "
+                "locked_by_name = :locked_by_name, session_id = :session_id, "
+                "acquired_at = :acquired_at, last_heartbeat = :last_heartbeat, "
+                "expires_at = :expires_at "
+                "WHEN NOT MATCHED THEN INSERT (one_pager_id, locked_by_initials, "
+                "locked_by_name, session_id, acquired_at, last_heartbeat, "
+                "expires_at) VALUES (:one_pager_id, :locked_by_initials, "
+                ":locked_by_name, :session_id, :acquired_at, :last_heartbeat, "
+                ":expires_at)",
+                parameters={
+                    "one_pager_id": lock.one_pager_id,
+                    "locked_by_initials": lock.locked_by_initials,
+                    "locked_by_name": lock.locked_by_name,
+                    "session_id": lock.session_id,
+                    "acquired_at": lock.acquired_at,
+                    "last_heartbeat": lock.last_heartbeat,
+                    "expires_at": lock.expires_at,
+                    "now": now,
+                },
+            )
+        except StatementFailedError as e:
+            logger.warning(f"Lock write for {lock.one_pager_id} conflicted: {e}")
+            return False
+        return self._affected_rows(response) == 1
+
+    def refresh_lock(
+        self,
+        one_pager_id: str,
+        *,
+        locked_by_initials: str,
+        session_id: str,
+        last_heartbeat: datetime,
+        expires_at: datetime,
+    ) -> bool:
+        fqn = f"{self._fqn_prefix}.locks"
+        response = self._connection.execute_statement(
+            f"UPDATE {fqn} SET last_heartbeat = :last_heartbeat, "  # noqa: S608
+            "expires_at = :expires_at WHERE one_pager_id = :one_pager_id "
+            "AND locked_by_initials = :locked_by_initials "
+            "AND session_id = :session_id",
+            parameters={
+                "one_pager_id": one_pager_id,
+                "locked_by_initials": locked_by_initials,
+                "session_id": session_id,
+                "last_heartbeat": last_heartbeat,
+                "expires_at": expires_at,
+            },
+        )
+        return self._affected_rows(response) == 1
+
     # ========================================================================
     # Create One Pager Methods
     # ========================================================================

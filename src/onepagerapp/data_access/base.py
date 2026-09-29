@@ -1,6 +1,7 @@
 """Abstract base class for data access."""
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 
 import pandas as pd
 
@@ -192,7 +193,41 @@ class DataAccess(ABC):
             one_pager_id: The One Pager identifier.
             
         Returns:
-            LockInfo if locked, None if not locked.
+            LockInfo if a lock row exists (it may have expired — see
+            ``locking.is_expired``), None otherwise.
+        """
+        ...
+
+    @abstractmethod
+    def write_lock(self, lock: LockInfo, *, now: datetime) -> bool:
+        """Insert or replace the lock row of ``lock.one_pager_id``, conditionally.
+
+        The row is written only if there is no lock row, the existing row has
+        expired (``expires_at <= now``), or it belongs to the same holder and
+        session (``locked_by_initials`` and ``session_id`` match). The check and
+        the write are a single statement so a concurrent acquire cannot slip in
+        between.
+
+        Returns:
+            True if the row was written, False if an active lock of someone else
+            was in the way or a concurrent write conflicted.
+        """
+        ...
+
+    @abstractmethod
+    def refresh_lock(
+        self,
+        one_pager_id: str,
+        *,
+        locked_by_initials: str,
+        session_id: str,
+        last_heartbeat: datetime,
+        expires_at: datetime,
+    ) -> bool:
+        """Update the heartbeat of the lock held by this user and session.
+
+        Returns:
+            True if that lock row exists and was updated, False otherwise.
         """
         ...
 

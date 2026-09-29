@@ -68,14 +68,14 @@ The Editor supports **create mode only**. Missing:
 
 ## 5. Concurrency control / locking (Req §10, Backend §6)
 
-Only reading a lock (`get_lock`) exists. There is no `locking.py`.
+`locking.py` implements acquire, heartbeat and expiry (Phase 3). The editor calls it once edit mode exists (Phase 4, 2.1).
 
 | # | Feature |
 |---|---|
-| 5.1 | Acquire a lock when the editor opens (same user and session, same user in another tab, other user, expired lock) |
-| 5.2 | Heartbeat on each re-run, with automatic expiry after 30 minutes |
+| 5.1 | ~~Acquire a lock when the editor opens (same user and session, same user in another tab, other user, expired lock)~~ **Done (Phase 3):** `locking.acquire_lock`; the editor calls it from Phase 4 (2.1) |
+| 5.2 | ~~Heartbeat on each re-run, with automatic expiry after 30 minutes~~ **Done (Phase 3):** `acquire_lock` / `heartbeat`, TTL from `ONE_PAGER_APP_LOCK_TTL_SECONDS` |
 | 5.3 | Release the lock on submit, cancel or manual release (the **Release my lock** button in Preview) |
-| 5.4 | Log an event when an expired lock is overridden |
+| 5.4 | ~~Log an event when an expired lock is overridden~~ **Done (Phase 3)** |
 | 5.5 | Lock icon and holder initials in the **Registry** table |
 
 ## 6. Review & comments (Backend §13, UI §4.3–4.4)

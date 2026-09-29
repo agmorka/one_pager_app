@@ -9,7 +9,12 @@ import pytest
 from onepagerapp.config import AppConfig, AppMode
 from onepagerapp.data_access.connection import StatementFailedError
 from onepagerapp.data_access.lakehouse import LakehouseAccess
-from onepagerapp.models import AuthorizedUser, ChangeLogEntry, OnePagerStatusRow
+from onepagerapp.models import (
+    AuthorizedUser,
+    ChangeLogEntry,
+    LockInfo,
+    OnePagerStatusRow,
+)
 
 NASTY = "x'); DROP TABLE one_pager_status; --"
 NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
@@ -222,3 +227,69 @@ def test__get_one_pager_status__parses_timestamps() -> None:
     assert header.created_at == NOW
     assert conn.calls[0][1] == {"one_pager_id": "OP-0007"}
     assert ":one_pager_id" in conn.calls[0][0]
+
+
+def _lock(holder: str = NASTY) -> LockInfo:
+    return LockInfo(
+        one_pager_id="OP-0001",
+        locked_by_initials=holder,
+        locked_by_name=holder,
+        session_id=holder,
+        acquired_at=NOW,
+        last_heartbeat=NOW,
+        expires_at=NOW,
+    )
+
+
+@pytest.mark.unit
+def test__write_lock__single_guarded_merge_with_bound_parameters() -> None:
+    conn = _FakeConnection([_response(["num_affected_rows"], [["1"]])])
+    assert _access(conn).write_lock(_lock(), now=NOW) is True
+
+    statement, params = conn.calls[0]
+    assert len(conn.calls) == 1
+    assert statement.startswith("MERGE INTO cat.sch.locks")
+    assert "WHEN MATCHED AND (t.expires_at <= :now" in statement
+    assert "t.session_id = :session_id" in statement
+    assert "WHEN NOT MATCHED THEN INSERT" in statement
+    _assert_not_interpolated(statement)
+    assert params["locked_by_initials"] == NASTY
+    assert params["now"] == NOW
+
+    conn = _FakeConnection([_response(["num_affected_rows"], [["0"]])])
+    assert _access(conn).write_lock(_lock("AB"), now=NOW) is False
+
+
+@pytest.mark.unit
+def test__write_lock__concurrent_conflict_is_not_acquired() -> None:
+    conn = _FakeConnection(
+        error=StatementFailedError("SQL statement FAILED: ConcurrentAppendException")
+    )
+    assert _access(conn).write_lock(_lock("AB"), now=NOW) is False
+
+
+@pytest.mark.unit
+def test__refresh_lock__updates_only_the_holders_session() -> None:
+    conn = _FakeConnection([_response(["num_affected_rows"], [["1"]])])
+    assert _access(conn).refresh_lock(
+        "OP-0001",
+        locked_by_initials=NASTY,
+        session_id=NASTY,
+        last_heartbeat=NOW,
+        expires_at=NOW,
+    )
+    statement, params = conn.calls[0]
+    assert statement.startswith("UPDATE cat.sch.locks SET last_heartbeat")
+    assert "locked_by_initials = :locked_by_initials" in statement
+    assert "session_id = :session_id" in statement
+    _assert_not_interpolated(statement)
+    assert params["session_id"] == NASTY
+
+    conn = _FakeConnection([_response(["num_affected_rows"], [["0"]])])
+    assert not _access(conn).refresh_lock(
+        "OP-0001",
+        locked_by_initials="AB",
+        session_id="s1",
+        last_heartbeat=NOW,
+        expires_at=NOW,
+    )

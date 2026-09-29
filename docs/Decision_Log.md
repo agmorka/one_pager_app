@@ -350,3 +350,17 @@ Deleting `change_log` rows is permitted only in this compensation path, for an O
 - Fixtures: OP-0001 v0.1.0/v0.2.0 are v1 documents in the v1 shape; the current versions (OP-0001 v1.0.0, OP-0002 v0.3.0) are complete v2 documents that pass the strict tier.
 
 **Why:** A new file keeps every existing v1 document valid against the schema it was written with, and exercises the schema-evolution design before a real migration is needed. Deriving both tiers from one schema keeps the "schema is the single source of truth" rule (Requirements §5).
+
+---
+
+## 15. Edit Lock Storage and Timing
+
+**Decision:**
+
+- `locking.acquire_lock` implements the five cases of Backend_Design §6. A re-run by the lock holder in the same session is the heartbeat, so the editor calls `acquire_lock` on every re-run; `heartbeat` is also available for callers that already hold the lock. An expired lock of the same user (for example from a closed tab) is re-acquired without an override event; only taking over another user's expired lock is logged (`outcome=lock_override`).
+- The takeover rule is evaluated inside the write: `DataAccess.write_lock` is a single `MERGE` that only replaces the row when it is missing, expired, or held by the same user and session. `acquire_lock` then reads the row back, so of two sessions racing for a lock exactly one holds it and the other is told who does. `refresh_lock` only updates the row of the same user and session, so a lock taken over after expiry is never revived by a late heartbeat.
+- All lock timestamps are UTC. Naive timestamps read back from Delta are treated as UTC.
+- The TTL is `ONE_PAGER_APP_LOCK_TTL_SECONDS` (default 1800 = 30 minutes, Requirements §10), so integration tests can use a few seconds (Testing_Strategy §4).
+- An expired lock row stays in the table until it is overwritten or released; readers treat it as "not locked" (`locking.active_lock`).
+
+**Why:** Delta does not enforce the `locks` primary key, so a read-then-insert would let two editors both believe they hold the lock. A guarded MERGE plus a read-back gives the same guarantee as the ID allocation's compare-and-set (`id_generator.next_id`) without a separate lock service.

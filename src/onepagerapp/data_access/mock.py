@@ -60,6 +60,8 @@ class MockDataAccess(DataAccess):
             ("OP-0002", "UC-003"),
             ("OP-0002", "UC-004"),
         }
+        # Rows of the locks table, keyed by one_pager_id (one lock per One Pager).
+        self._locks: dict[str, LockInfo] = {}
         # D14: counters start after the highest seeded mock IDs.
         self._sequences: dict[str, int] = {
             "OP": max(int(i.removeprefix("OP-")) for i in self._status_rows),
@@ -441,10 +443,43 @@ class MockDataAccess(DataAccess):
         ]
 
     def get_lock(self, one_pager_id: str) -> LockInfo | None:
-        """Check if a One Pager is currently locked for editing (mock data)."""
-        # In mock mode, OP-0001 is not locked
-        # (In real scenario, would check locks table)
-        return None
+        """Return the lock row of a One Pager (mock data), expired or not."""
+        lock = self._locks.get(one_pager_id)
+        return copy.copy(lock) if lock else None
+
+    def write_lock(self, lock: LockInfo, *, now: datetime) -> bool:
+        current = self._locks.get(lock.one_pager_id)
+        if current is not None and not (
+            current.expires_at <= now
+            or (
+                current.locked_by_initials == lock.locked_by_initials
+                and current.session_id == lock.session_id
+            )
+        ):
+            return False
+        self._locks[lock.one_pager_id] = copy.copy(lock)
+        return True
+
+    def refresh_lock(
+        self,
+        one_pager_id: str,
+        *,
+        locked_by_initials: str,
+        session_id: str,
+        last_heartbeat: datetime,
+        expires_at: datetime,
+    ) -> bool:
+        current = self._locks.get(one_pager_id)
+        if (
+            current is None
+            or current.locked_by_initials != locked_by_initials
+            or current.session_id != session_id
+        ):
+            return False
+        self._locks[one_pager_id] = replace(
+            current, last_heartbeat=last_heartbeat, expires_at=expires_at
+        )
+        return True
 
     # ========================================================================
     # Create One Pager Methods
