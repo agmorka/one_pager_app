@@ -41,7 +41,13 @@ def document_from_dict(data: dict[str, Any], raw_content: str = "") -> OnePagerD
         data_element_preview=[
             dict(e) for e in data.get("dataElementPreview", []) if isinstance(e, dict)
         ],
-        data_classification=_classification_from_dict(dc) if isinstance(dc, dict) else {},
+        data_classification=(
+            _classification_from_dict(dc) if isinstance(dc, dict) and dc else {}
+        ),
+        created_by=_optional_str(data.get("createdBy")),
+        created_at=_optional_str(data.get("createdAt")),
+        last_updated=_optional_str(data.get("lastUpdated")),
+        change_log=[dict(c) for c in data.get("changeLog", []) or [] if isinstance(c, dict)],
         raw_content=raw_content,
     )
 
@@ -70,8 +76,10 @@ def document_to_dict(document: OnePagerDocument) -> dict[str, Any]:
         "version": document.version,
         "dataProductOwner": owner,
         "description": document.description,
-        "businessProblemStatement": document.business_problem_statement,
     }
+
+    if document.business_problem_statement:
+        data["businessProblemStatement"] = document.business_problem_statement
 
     if document.smes:
         data["smes"] = document.smes
@@ -85,6 +93,14 @@ def document_to_dict(document: OnePagerDocument) -> dict[str, Any]:
         data["dataClassification"] = document.data_classification
     if document.data_element_preview:
         data["dataElementPreview"] = document.data_element_preview
+    if document.created_by:
+        data["createdBy"] = document.created_by
+    if document.created_at:
+        data["createdAt"] = document.created_at
+    if document.last_updated:
+        data["lastUpdated"] = document.last_updated
+    if document.change_log:
+        data["changeLog"] = document.change_log
 
     return data
 
@@ -97,6 +113,19 @@ def document_to_yaml(document: OnePagerDocument) -> str:
         allow_unicode=True,
         default_flow_style=False,
     )
+
+
+def _optional_str(value: Any) -> str | None:
+    """Return ``value`` as a string, or None when absent.
+
+    YAML may parse unquoted timestamps into datetime objects; they are kept as
+    ISO-8601 strings on the model.
+    """
+    if value is None or value == "":
+        return None
+    if hasattr(value, "isoformat"):
+        return str(value.isoformat())
+    return str(value)
 
 
 def _classification_from_dict(dc: dict[str, Any]) -> dict[str, Any]:

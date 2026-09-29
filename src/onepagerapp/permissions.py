@@ -11,6 +11,12 @@ Permission enforcement happens on state changes (approve, edit, etc.) in the ser
 
 from dataclasses import dataclass
 
+from onepagerapp.models import CurrentUser
+
+
+class PermissionDeniedError(Exception):
+    """Raised by the service layer when a user may not perform an action."""
+
 
 @dataclass
 class ActionState:
@@ -37,6 +43,18 @@ def can_view_one_pager(current_user: str | None) -> bool:
         True if user is authenticated, False otherwise.
     """
     return bool(current_user)
+
+
+def can_create_one_pager(user: CurrentUser | None) -> bool:
+    """Check if the user may create a new One Pager.
+
+    Backend_Design.md §5: creating requires membership of the Owner/SME UC
+    group. Group names are not decided yet (Architecture.md §4), so v1 allows
+    any authenticated user (New_One_Pager_Plan D7). The Registry uses this to
+    show [+ New] and the service layer calls it again to enforce, so adding the
+    group check later only changes this function.
+    """
+    return bool(user and user.username and user.initials)
 
 
 # ============================================================================

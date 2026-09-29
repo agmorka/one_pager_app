@@ -19,6 +19,7 @@ from datetime import datetime
 
 import streamlit as st
 
+from onepagerapp.auth import initials_from_username
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.models import PreviewData
 from onepagerapp.permissions import can_view_one_pager, get_action_states, get_status_timeline_stages
@@ -26,49 +27,6 @@ from adapters.theme import get_op_status_colors, get_dp_status_colors, DEFAULT_B
 
 logger = logging.getLogger(__name__)
 
-
-def extract_initials(user_string: str) -> str:
-    """Extract initials from a user string (email or name).
-    
-    Examples:
-        "alice.brown@company.com" → "AB"
-        "Alice Brown" → "AB"
-        "local-dev-user@mock" → "LD"
-    
-    Args:
-        user_string: User identifier string.
-        
-    Returns:
-        Uppercase initials (2-3 chars).
-    """
-    if not user_string:
-        return "?"
-    
-    # If it's an email, extract the local part
-    if "@" in user_string:
-        email_part = user_string.split("@")[0]
-    else:
-        email_part = user_string
-    
-    # Try to extract from dot-separated parts (e.g., "alice.brown" → "AB")
-    if "." in email_part:
-        parts = email_part.split(".")
-        if len(parts) >= 2:
-            return (parts[0][0] + parts[1][0]).upper()
-    
-    # Try to extract from hyphen-separated parts (e.g., "local-dev-user" → "LD")
-    if "-" in email_part:
-        parts = email_part.split("-")
-        if len(parts) >= 2:
-            return (parts[0][0] + parts[1][0]).upper()
-    
-    # Try to extract from space-separated parts (e.g., "Alice Brown" → "AB")
-    parts = user_string.split()
-    if len(parts) >= 2:
-        return (parts[0][0] + parts[1][0]).upper()
-    
-    # Fallback: first 3 chars
-    return email_part[:3].upper()
 
 # ============================================================================
 # Helpers: Render Components
@@ -490,6 +448,11 @@ except RuntimeError as e:
     st.error(f"Failed to load color scheme: {e}")
     st.stop()
 
+# One-time confirmation after a redirect (e.g. "One Pager OP-0003 created").
+flash = st.session_state.pop("preview_flash", None)
+if flash:
+    st.success(flash)
+
 # Populated state: render all regions
 render_header(preview_data, op_colors, dp_colors)
 
@@ -499,7 +462,7 @@ render_status_timeline(preview_data.header.one_pager_status)
 
 st.divider()
 
-render_action_bar(preview_data, extract_initials(current_user))
+render_action_bar(preview_data, initials_from_username(current_user))
 
 st.divider()
 

@@ -31,7 +31,8 @@ flowchart LR
 - BEC logo at the top
 - Current user identity (name/initials + role badge)
 - Environment badge (DEV / INT / UAT / PRD) — always visible so testers never confuse environments
-- Navigation links: Registry, Editor (hidden unless editing), Review (visible to Approvers), Preview, Use Cases, Help, Admin (visible to Admins)
+- Navigation links: Registry, Editor, Review (visible to Approvers), Preview, Use Cases, Help, Admin (visible to Admins)
+- The Editor is always registered (Streamlit 1.38 cannot hide a single page and `st.switch_page` needs registered pages). Opened without an edit/create intent, it shows "Start from the Registry (➕ New) or from a One Pager's Edit action" and a button back to the Registry.
 - Active page highlighted
 
 ### Page visibility by role
@@ -118,7 +119,7 @@ Always rendered as `[colored dot] + [text label]`. Colors from `ref_*_statuses` 
 - **Metrics row:** Colored count cards for each OP status (counts from `ref_op_status` ordering). Clicking a card filters the table to that status.
 - **Filter bar:** Dropdowns/text inputs for each filter dimension. Filters combine with AND logic. "Clear filters" link resets all.
 - **Table:** Sortable columns. Click a row to navigate to Preview. Lock icon (🔒) shown next to locked items with the lock holder's initials.
-- **[+ New] button:** Visible only to Owner/SME group members. Opens the Editor with a blank document.
+- **[+ New] button:** Visible only to Owner/SME group members. Opens the Editor with a blank document. Rendered as "➕ New" (Streamlit button labels are Markdown, so a leading "+" would become a bullet). Until the Owner/SME UC group names are decided, `can_create_one_pager()` allows any authenticated user ([Decision_Log.md](Decision_Log.md) §8, New_One_Pager_Plan D7).
 - **Pagination:** Page-based navigation below the table.
 
 #### States
@@ -203,7 +204,7 @@ For sections with arrays (use cases, requirements, sources, data elements, etc.)
 | State | What the user sees |
 |---|---|
 | **Loading** | Spinner while fetching existing document (edit mode) |
-| **New (empty form)** | Blank form with helper placeholder text from schema descriptions |
+| **New (empty form)** | Blank form with helper placeholder text from schema descriptions. In the current release create mode shows only **Basics** (Data Product, Product Name, Business Domain, Product Type, Description, Owner, SMEs) plus an optional Business Problem Statement, and a bottom bar with **[Create Draft]** / **[Cancel]** (no change summary — creation is logged automatically as "Initial draft created"). The Owner is pre-filled with the current user. On success the user lands on Preview for the new `OP-####` (Draft, In Definition, v0.1.0). Other tabs arrive with the full Editor. |
 | **Editing (populated)** | Pre-filled form with current content |
 | **Validation errors** | Red dot badge next to each tab label that has issues; validation summary panel at bottom listing all errors as clickable links (clicking scrolls to the relevant tab + field) |
 | **Save error** | Banner: "Save failed — your changes are preserved, please retry." Content stays in session. |

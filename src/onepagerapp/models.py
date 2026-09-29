@@ -284,6 +284,10 @@ class OnePagerDocument:
         data_sources: List of data source objects (sourceName/sourceType/description).
         data_element_preview: List of data element objects (elementName/dataType/...).
         data_classification: Dict with classificationLevel and sensitivity flags.
+        created_by: Display name of the user who created the One Pager.
+        created_at: ISO-8601 creation timestamp (as stored in YAML).
+        last_updated: ISO-8601 timestamp of the last content change.
+        change_log: Denormalized copy of the change log (version/date/author/summary).
         raw_content: Complete raw YAML as string (read cache / fallback display).
     """
 
@@ -307,6 +311,10 @@ class OnePagerDocument:
     data_sources: list[dict] = field(default_factory=list)
     data_element_preview: list[dict] = field(default_factory=list)
     data_classification: dict = field(default_factory=dict)
+    created_by: Optional[str] = None
+    created_at: Optional[str] = None
+    last_updated: Optional[str] = None
+    change_log: list[dict] = field(default_factory=list)
     raw_content: str = ""
 
 
@@ -330,3 +338,153 @@ class PreviewData:
     change_log: list[ChangeLogEntry] = field(default_factory=list)
     review_comments: list[ReviewComment] = field(default_factory=list)
     lock: Optional[LockInfo] = None
+
+
+# ============================================================================
+# Create One Pager Models
+# ============================================================================
+
+
+@dataclass
+class PersonRef:
+    """A person referenced in a One Pager (Data Product Owner or SME).
+
+    Mirrors the ``dataProductOwner`` / ``smes`` item shape of the JSON Schema.
+    ``initials`` is the authorization key; ``email`` is for display only.
+    """
+
+    name: str
+    initials: str
+    email: str
+    team: Optional[str] = None
+
+
+@dataclass
+class CurrentUser:
+    """The authenticated user of the current session.
+
+    Attributes:
+        username: Raw identity from Databricks (e.g. "MJOADM@BECOC001.onmicrosoft.com").
+        initials: Corporate initials derived from the username (authorization key).
+        display_name: Human-readable name used in change log / YAML ``createdBy``.
+    """
+
+    username: str
+    initials: str
+    display_name: str
+
+
+@dataclass
+class NewOnePagerInput:
+    """User input for creating a new One Pager (Editor, create mode)."""
+
+    data_product: str
+    product_name: str
+    business_domain: str
+    data_product_type: str
+    description: str
+    owner: PersonRef
+    smes: list[PersonRef] = field(default_factory=list)
+    business_problem_statement: str = ""
+
+
+@dataclass
+class ValidationError:
+    """A single validation problem, reported (not raised) per Backend_Design §4.
+
+    Attributes:
+        field_path: Dotted path of the offending field (e.g. "dataProductOwner.email",
+            "smes[1].initials"); "" for form-level errors.
+        message: User-facing message.
+    """
+
+    field_path: str
+    message: str
+
+
+@dataclass
+class CreateResult:
+    """Outcome of a create attempt.
+
+    Either ``one_pager_id`` is set (success) or ``errors`` is non-empty
+    (validation failed, nothing was written).
+    """
+
+    one_pager_id: Optional[str] = None
+    version: Optional[str] = None
+    errors: list[ValidationError] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        """Whether the One Pager was created."""
+        return self.one_pager_id is not None and not self.errors
+
+
+@dataclass
+class OnePagerStatusRow:
+    """A full row of the ``one_pager_status`` Delta table (Data_Model §3)."""
+
+    one_pager_id: str
+    data_product: str
+    product_name: str
+    business_domain: str
+    data_product_type: str
+    one_pager_status: str
+    data_product_status: str
+    version: str
+    owner_name: str
+    owner_initials: str
+    owner_email: str
+    owner_team: Optional[str]
+    created_by: str
+    created_at: datetime
+    last_updated_at: datetime
+    last_updated_by: str
+    structure_definition: str
+    reviewed_at: Optional[datetime] = None
+    reviewed_by: Optional[str] = None
+    pending_pr: bool = False
+
+    def to_registry_row(self) -> RegistryRow:
+        """Project to the Registry table row."""
+        return RegistryRow(
+            one_pager_id=self.one_pager_id,
+            product_name=self.product_name,
+            business_domain=self.business_domain,
+            data_product_type=self.data_product_type,
+            one_pager_status=self.one_pager_status,
+            data_product_status=self.data_product_status,
+            owner_name=self.owner_name,
+            owner_email=self.owner_email,
+            version=self.version,
+            last_updated_at=self.last_updated_at,
+            last_updated_by=self.last_updated_by,
+        )
+
+    def to_header(self) -> OnePagerHeader:
+        """Project to the Preview header."""
+        return OnePagerHeader(
+            one_pager_id=self.one_pager_id,
+            product_name=self.product_name,
+            owner_name=self.owner_name,
+            owner_initials=self.owner_initials,
+            owner_email=self.owner_email,
+            version=self.version,
+            one_pager_status=self.one_pager_status,
+            data_product_status=self.data_product_status,
+            created_at=self.created_at,
+            last_updated_at=self.last_updated_at,
+            last_updated_by=self.last_updated_by,
+        )
+
+
+@dataclass
+class AuthorizedUser:
+    """A row of ``one_pager_authorized_users`` (role is "owner" or "sme")."""
+
+    one_pager_id: str
+    user_initials: str
+    user_name: str
+    user_email: str
+    role: str
+    user_team: Optional[str] = None

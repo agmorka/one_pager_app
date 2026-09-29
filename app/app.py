@@ -11,9 +11,11 @@ from pathlib import Path
 import streamlit as st
 
 # from adapters.theme import apply_theme
+from onepagerapp.auth import resolve_current_user
 from onepagerapp.config import AppConfig
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.data_access import create_data_access
+from onepagerapp.data_access.factory import create_document_store
 
 logger = logging.getLogger(__name__)
 
@@ -50,11 +52,33 @@ def init_services() -> None:
         return
 
     config = AppConfig.from_env()
-    data_access = create_data_access(config)
+    document_store = create_document_store(config)
+    data_access = create_data_access(config, document_store)
 
     st.session_state.config = config
+    st.session_state.document_store = document_store
     st.session_state.data_access = data_access
     st.session_state.services_initialized = True
+
+
+def resolve_user() -> None:
+    """Resolve the current user once per session, before any page runs.
+
+    Pages read ``st.session_state.current_user`` (raw username) and
+    ``st.session_state.current_user_info`` (CurrentUser with initials).
+    """
+    if st.session_state.get("current_user_info") is not None:
+        return
+    try:
+        username = get_logged_user(
+            st.session_state.data_access,
+            st.context.headers,
+        )
+    except Exception:
+        logger.exception("Failed to retrieve current user")
+        return
+    st.session_state.current_user = username
+    st.session_state.current_user_info = resolve_current_user(username)
 
 
 def main() -> None:
@@ -78,6 +102,7 @@ def main() -> None:
             st.Page("views/home.py", title="Home"),
             st.Page("views/registry.py", title="Registry"),
             st.Page("views/preview.py", title="Preview"),
+            st.Page("views/editor.py", title="Editor"),
         ]
     )
 
@@ -92,20 +117,13 @@ def main() -> None:
         )
         st.stop()
 
+    resolve_user()
+
     pg.run()
 
     with st.sidebar:
         st.divider()
-        user_name = "unavailable"
-        if st.session_state.get("services_initialized"):
-            try:
-                user_name = get_logged_user(
-                    st.session_state.data_access,
-                    st.context.headers,
-                )
-                st.session_state.current_user = user_name
-            except Exception:
-                logger.exception("Failed to retrieve current user")
+        user_name = st.session_state.get("current_user") or "unavailable"
         st.caption(f"Logged user: {user_name}")
 
 if __name__ == "__main__":

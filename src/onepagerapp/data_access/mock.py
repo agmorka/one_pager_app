@@ -1,5 +1,6 @@
 """Mock data access for local development and unit tests."""
 
+import copy
 from datetime import datetime
 
 import pandas as pd
@@ -7,10 +8,12 @@ import pandas as pd
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import (
+    AuthorizedUser,
     ChangeLogEntry,
     LockInfo,
     OnePagerDocument,
     OnePagerHeader,
+    OnePagerStatusRow,
     PreviewData,
     RegistryFilter,
     RegistryPage,
@@ -20,13 +23,39 @@ from onepagerapp.models import (
 
 
 class MockDataAccess(DataAccess):
-    """In-memory fake for tabular data; documents come from the YAML store."""
+    """In-memory fake for tabular data; documents come from the YAML store.
+
+    Tabular state (status rows, change log, authorized users, ID sequences)
+    lives in instance dicts so writes are visible to later reads within the
+    same instance (one per Streamlit session). The seed data matches the
+    fixtures in tests/fixtures/sample_one_pagers/.
+    """
 
     def __init__(self, document_store: OnePagerDocumentStore) -> None:  # noqa: D107
         self._document_store = document_store
+        self._status_rows: dict[str, OnePagerStatusRow] = {
+            row.one_pager_id: row for row in _seed_status_rows()
+        }
+        self._change_logs: dict[str, list[ChangeLogEntry]] = _seed_change_logs()
+        self._authorized_users: dict[str, list[AuthorizedUser]] = (
+            _seed_authorized_users()
+        )
+        # D14: the OP counter starts after the highest seeded mock ID.
+        self._sequences: dict[str, int] = {
+            "OP": max(int(i.removeprefix("OP-")) for i in self._status_rows),
+            "UC": 0,
+            "BR": 0,
+        }
+        self._next_change_log_id = (
+            max(
+                (e.id for entries in self._change_logs.values() for e in entries),
+                default=0,
+            )
+            + 1
+        )
 
     def get_current_user(self) -> str:
-        return "local-dev-user@mock"
+        return "local-dev-user@mock.local"
 
     def read_table(self, table_name: str) -> pd.DataFrame:  # noqa: ARG002
         return pd.DataFrame()
@@ -169,35 +198,8 @@ class MockDataAccess(DataAccess):
         )
 
     def _get_sample_registry_data(self) -> list[RegistryRow]:
-        """Return sample One Pager data for local testing."""
-        return [
-            RegistryRow(
-                one_pager_id="OP-0001",
-                product_name="Person Master Data",
-                business_domain="Customer",
-                data_product_type="Foundational",
-                one_pager_status="Approved",
-                data_product_status="Ready for Development",
-                owner_name="Alice Brown",
-                owner_email="alice.brown@company.com",
-                version="1.0.0",
-                last_updated_at=datetime(2026, 9, 20, 14, 30),
-                last_updated_by="AB",
-            ),
-            RegistryRow(
-                one_pager_id="OP-0002",
-                product_name="Order Master Data",
-                business_domain="Sales",
-                data_product_type="Foundational",
-                one_pager_status="In Review",
-                data_product_status="In Definition",
-                owner_name="Bob Smith",
-                owner_email="bob.smith@company.com",
-                version="0.3.0",
-                last_updated_at=datetime(2026, 9, 19, 10, 15),
-                last_updated_by="BS",
-            ),
-        ]
+        """Return the current in-memory One Pager rows as Registry rows."""
+        return [row.to_registry_row() for row in self._status_rows.values()]
 
     def get_registry(
         self, filter: RegistryFilter, page: int, page_size: int
@@ -372,35 +374,8 @@ class MockDataAccess(DataAccess):
 
     def get_one_pager_status(self, one_pager_id: str) -> OnePagerHeader | None:
         """Fetch header metadata for a single One Pager (mock data)."""
-        headers = {
-            "OP-0001": OnePagerHeader(
-                one_pager_id="OP-0001",
-                product_name="Person Master Data",
-                owner_name="Alice Brown",
-                owner_initials="AB",
-                owner_email="alice.brown@company.com",
-                version="1.0.0",
-                one_pager_status="Approved",
-                data_product_status="Ready for Development",
-                created_at=datetime(2026, 8, 1, 9, 0),
-                last_updated_at=datetime(2026, 9, 20, 14, 30),
-                last_updated_by="AB",
-            ),
-            "OP-0002": OnePagerHeader(
-                one_pager_id="OP-0002",
-                product_name="Order Master Data",
-                owner_name="Bob Smith",
-                owner_initials="BS",
-                owner_email="bob.smith@company.com",
-                version="0.3.0",
-                one_pager_status="In Review",
-                data_product_status="In Definition",
-                created_at=datetime(2026, 9, 1, 9, 0),
-                last_updated_at=datetime(2026, 9, 19, 10, 15),
-                last_updated_by="BS",
-            ),
-        }
-        return headers.get(one_pager_id)
+        row = self._status_rows.get(one_pager_id)
+        return row.to_header() if row else None
 
     def read_document(self, one_pager_id: str, version: str | None = None) -> OnePagerDocument | None:
         """Read the YAML document content for a One Pager from the document store."""
@@ -408,44 +383,8 @@ class MockDataAccess(DataAccess):
 
     def get_change_log(self, one_pager_id: str) -> list[ChangeLogEntry]:
         """Fetch the change log for a One Pager (mock data, newest-first)."""
-        if one_pager_id != "OP-0001":
-            return []
-
-        return [
-            ChangeLogEntry(
-                id=3,
-                one_pager_id="OP-0001",
-                version="1.0.0",
-                event_type="status_transition",
-                author_initials="ADMIN",
-                author_name="Approval System",
-                summary="Document approved and published to Git",
-                created_at=datetime(2026, 9, 20, 14, 30),
-                from_status="In Review",
-                to_status="Approved",
-                status_field="one_pager_status",
-            ),
-            ChangeLogEntry(
-                id=2,
-                one_pager_id="OP-0001",
-                version="0.9.0",
-                event_type="content_save",
-                author_initials="AB",
-                author_name="Alice Brown",
-                summary="Addressed review comments on data sources",
-                created_at=datetime(2026, 9, 15, 10, 0),
-            ),
-            ChangeLogEntry(
-                id=1,
-                one_pager_id="OP-0001",
-                version="0.1.0",
-                event_type="creation",
-                author_initials="AB",
-                author_name="Alice Brown",
-                summary="Initial One Pager created",
-                created_at=datetime(2026, 8, 1, 9, 0),
-            ),
-        ]
+        entries = self._change_logs.get(one_pager_id, [])
+        return sorted(entries, key=lambda e: (e.created_at, e.id), reverse=True)
 
     def get_review_comments(self, one_pager_id: str) -> list[ReviewComment]:
         """Fetch review comments for a One Pager (mock data)."""
@@ -486,3 +425,175 @@ class MockDataAccess(DataAccess):
         # In mock mode, OP-0001 is not locked
         # (In real scenario, would check locks table)
         return None
+
+    # ========================================================================
+    # Create One Pager Methods
+    # ========================================================================
+
+    def get_sequence_value(self, id_type: str) -> int:
+        if id_type not in self._sequences:
+            msg = f"id_sequences has no row for {id_type}"
+            raise RuntimeError(msg)
+        return self._sequences[id_type]
+
+    def compare_and_set_sequence(self, id_type: str, expected: int, new: int) -> bool:
+        if self._sequences.get(id_type) != expected:
+            return False
+        self._sequences[id_type] = new
+        return True
+
+    def get_one_pager_ids_for_data_product(self, data_product: str) -> list[str]:
+        return sorted(
+            row.one_pager_id
+            for row in self._status_rows.values()
+            if row.data_product == data_product
+        )
+
+    def get_authorized_users(self, one_pager_id: str) -> list[AuthorizedUser]:
+        return list(self._authorized_users.get(one_pager_id, []))
+
+    def insert_authorized_users(self, users: list[AuthorizedUser]) -> None:
+        for user in users:
+            self._authorized_users.setdefault(user.one_pager_id, []).append(
+                copy.copy(user)
+            )
+
+    def append_change_log(self, entry: ChangeLogEntry) -> None:
+        stored = copy.copy(entry)
+        stored.id = self._next_change_log_id
+        self._next_change_log_id += 1
+        self._change_logs.setdefault(entry.one_pager_id, []).append(stored)
+
+    def insert_one_pager_status(self, row: OnePagerStatusRow) -> None:
+        if row.one_pager_id in self._status_rows:
+            msg = f"one_pager_status already contains {row.one_pager_id}"
+            raise RuntimeError(msg)
+        self._status_rows[row.one_pager_id] = copy.copy(row)
+
+    def delete_one_pager_records(self, one_pager_id: str) -> None:
+        self._status_rows.pop(one_pager_id, None)
+        self._authorized_users.pop(one_pager_id, None)
+        self._change_logs.pop(one_pager_id, None)
+
+
+# ============================================================================
+# Seed data (matches tests/fixtures/sample_one_pagers/)
+# ============================================================================
+
+
+def _seed_status_rows() -> list[OnePagerStatusRow]:
+    return [
+        OnePagerStatusRow(
+            one_pager_id="OP-0001",
+            data_product="person",
+            product_name="Person Master Data",
+            business_domain="Customer",
+            data_product_type="Foundational",
+            one_pager_status="Approved",
+            data_product_status="Ready for Development",
+            version="1.0.0",
+            owner_name="Alice Brown",
+            owner_initials="AB",
+            owner_email="alice.brown@company.com",
+            owner_team="Data Platform",
+            created_by="AB",
+            created_at=datetime(2026, 8, 1, 9, 0),
+            last_updated_at=datetime(2026, 9, 20, 14, 30),
+            last_updated_by="AB",
+            structure_definition="structure_one_pager_v_1.json",
+            reviewed_at=datetime(2026, 9, 20, 14, 30),
+            reviewed_by="CJ",
+        ),
+        OnePagerStatusRow(
+            one_pager_id="OP-0002",
+            data_product="order",
+            product_name="Order Master Data",
+            business_domain="Sales",
+            data_product_type="Foundational",
+            one_pager_status="In Review",
+            data_product_status="In Definition",
+            version="0.3.0",
+            owner_name="Bob Smith",
+            owner_initials="BS",
+            owner_email="bob.smith@company.com",
+            owner_team="Sales Analytics",
+            created_by="BS",
+            created_at=datetime(2026, 9, 1, 9, 0),
+            last_updated_at=datetime(2026, 9, 19, 10, 15),
+            last_updated_by="BS",
+            structure_definition="structure_one_pager_v_1.json",
+        ),
+    ]
+
+
+def _seed_authorized_users() -> dict[str, list[AuthorizedUser]]:
+    return {
+        "OP-0001": [
+            AuthorizedUser(
+                one_pager_id="OP-0001",
+                user_initials="AB",
+                user_name="Alice Brown",
+                user_email="alice.brown@company.com",
+                user_team="Data Platform",
+                role="owner",
+            ),
+        ],
+        "OP-0002": [
+            AuthorizedUser(
+                one_pager_id="OP-0002",
+                user_initials="BS",
+                user_name="Bob Smith",
+                user_email="bob.smith@company.com",
+                user_team="Sales Analytics",
+                role="owner",
+            ),
+            AuthorizedUser(
+                one_pager_id="OP-0002",
+                user_initials="DP",
+                user_name="Diana Prince",
+                user_email="diana.prince@company.com",
+                user_team="Finance",
+                role="sme",
+            ),
+        ],
+    }
+
+
+def _seed_change_logs() -> dict[str, list[ChangeLogEntry]]:
+    return {
+        "OP-0001": [
+            ChangeLogEntry(
+                id=3,
+                one_pager_id="OP-0001",
+                version="1.0.0",
+                event_type="status_transition",
+                author_initials="ADMIN",
+                author_name="Approval System",
+                summary="Document approved and published to Git",
+                created_at=datetime(2026, 9, 20, 14, 30),
+                from_status="In Review",
+                to_status="Approved",
+                status_field="one_pager_status",
+            ),
+            ChangeLogEntry(
+                id=2,
+                one_pager_id="OP-0001",
+                version="0.9.0",
+                event_type="content_save",
+                author_initials="AB",
+                author_name="Alice Brown",
+                summary="Addressed review comments on data sources",
+                created_at=datetime(2026, 9, 15, 10, 0),
+            ),
+            ChangeLogEntry(
+                id=1,
+                one_pager_id="OP-0001",
+                version="0.1.0",
+                event_type="creation",
+                author_initials="AB",
+                author_name="Alice Brown",
+                summary="Initial One Pager created",
+                created_at=datetime(2026, 8, 1, 9, 0),
+            ),
+        ],
+    }

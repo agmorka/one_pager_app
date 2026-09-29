@@ -70,7 +70,7 @@ The authoritative record of each One Pager's current state. One row per Data Pro
 | `last_updated_by` | STRING | No | Initials of the user who last modified. |
 | `reviewed_at` | TIMESTAMP | Yes | Timestamp of last review decision. |
 | `reviewed_by` | STRING | Yes | Initials of the reviewer. |
-| `structure_definition` | STRING | No | Schema version this document follows (e.g. `structure_one_pager/structure_one_pager_v_1.json`). |
+| `structure_definition` | STRING | No | Schema version this document follows (e.g. `structure_one_pager_v_1.json`, a file name in `schemas/` — see [Decision_Log.md](Decision_Log.md) §11). |
 | `pending_pr` | BOOLEAN | No | `true` if approval happened but Git PR creation has not yet succeeded (retry flag, per architecture doc §7). Default `false`. |
 
 **Indexes / constraints:**
@@ -98,7 +98,7 @@ All authorized users (Data Product Owner and assigned SMEs) per One Pager. Denor
 - SMEs have `role = sme` (zero or more per One Pager).
 
 **Sync mechanism:**
-- On **initial creation**, the app populates this table as part of the create transaction: the authenticated user is inserted as `owner`, and any SMEs entered during creation are inserted as `sme`. This happens in the same Delta write that creates the `one_pager_status` row, so permission checks on subsequent operations work immediately.
+- On **initial creation**, the app populates this table from the document: the `dataProductOwner` is inserted as `owner` and each entry of `smes` as `sme`. The creator is **not** inserted automatically; validation requires the creator to be listed as the Owner or an SME ([Decision_Log.md](Decision_Log.md) §8). These rows are written before the `one_pager_status` row, so permission checks work as soon as the One Pager is visible ([Decision_Log.md](Decision_Log.md) §10).
 - On **subsequent saves**, the app compares the `dataProductOwner` and `smes` arrays in the YAML against the current contents of `one_pager_authorized_users` and updates this table to match (insert new users, delete removed users).
 - This ensures the table is always consistent with the authoritative One Pager document.
 
@@ -256,7 +256,7 @@ Reference/lookup table for valid Data Product status values.
 | Use Case ID | `UC-###` | 3-digit zero-padded | Same pattern, `id_type = 'UC'`. |
 | Business Req ID | `BR-###` | 3-digit zero-padded | Same pattern, `id_type = 'BR'`. |
 
-Atomic increment uses a Delta `MERGE` or `UPDATE ... SET last_value = last_value + 1 WHERE id_type = ? RETURNING last_value` pattern (exact SQL depends on connector capabilities; the domain layer's `id_generator.py` encapsulates this). Delta's optimistic concurrency control (OCC) with automatic retries is sufficient at the expected scale (dozens/hundreds of One Pagers, not thousands created per minute); `id_generator.py` must handle `ConcurrentAppendException` with retry.
+Atomic increment uses compare-and-set, because Delta has no `UPDATE ... RETURNING`: read `last_value`, then `UPDATE id_sequences SET last_value = :new WHERE id_type = :type AND last_value = :expected`. The increment succeeded only if the UPDATE reports `num_affected_rows = 1` (a re-read is not sufficient — another writer may have advanced the counter to the same value). On 0 affected rows or a Delta concurrent-modification error, `id_generator.py` retries the whole cycle (up to 5 attempts). This is sufficient at the expected scale (dozens/hundreds of One Pagers, not thousands created per minute).
 
 **Note on BR-### global uniqueness:** Requirements doc §14 states BR IDs are "unique within a One Pager," but the shared `id_sequences` counter makes them globally unique — a stronger guarantee. This is intentional: it simplifies cross-referencing and avoids collision if Business Requirements are ever shared across One Pagers in the future.
 
@@ -292,7 +292,7 @@ See architecture doc §7 for the full error-handling strategy.
 
 ## 6. Schema Evolution
 
-The `structure_definition` field on each One Pager records which schema version it was written against (e.g. `structure_one_pager/structure_one_pager_v_1.json`). This enables future schema evolution:
+The `structure_definition` field on each One Pager records which schema version it was written against (e.g. `structure_one_pager_v_1.json`). This enables future schema evolution:
 
 - When a `v2` schema is introduced, existing documents remain valid against `v1` until explicitly migrated.
 - The app validates each document against the schema version declared in its own `structure_definition` field, not against a single hardcoded schema.

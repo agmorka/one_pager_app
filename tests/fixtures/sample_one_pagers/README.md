@@ -14,7 +14,7 @@ tests/fixtures/sample_one_pagers/
     └── OP-0002_v0.3.0.yml
 ```
 
-The current version, product name, owner, and status of each fixture match the corresponding row returned by `MockDataAccess` (see `_get_sample_registry_data`), so the Registry list and each One Pager document stay consistent.
+The current version, product name, owner, and status of each fixture match the corresponding row seeded by `MockDataAccess` (see `_seed_status_rows` in `mock.py`), so the Registry list and each One Pager document stay consistent.
 
 ## How It Works
 
@@ -64,7 +64,7 @@ The app will serve these fixture documents when browsing the Registry and Previe
 
 ## Sample One Pagers Included
 
-Every fixture corresponds 1:1 to a row in `MockDataAccess._get_sample_registry_data`. The current
+Every fixture corresponds 1:1 to a row in `_seed_status_rows` (`mock.py`). The current
 version, product name, domain, owner, and statuses match on both sides.
 
 | OP-ID | Product | Domain | Type | Current version | One Pager status | Owner |
@@ -107,3 +107,4 @@ To add a new sample One Pager:
 - Status (`Draft`, `In Review`, `Approved`) is stored in the YAML file's `onePagerStatus` field
 - In production, status is determined by Delta `one_pager_status` table, not by file path
 - Fixture files are version-controlled; updates require code review
+- Fixtures are read-only at runtime: in `local-mock` mode, One Pagers created in the app are written to a temporary directory that is read before this folder, never into it
