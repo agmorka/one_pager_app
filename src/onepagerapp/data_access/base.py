@@ -1,5 +1,6 @@
 """Abstract base class for data access."""
 
+import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime
 
@@ -30,6 +31,19 @@ class NotFoundError(LookupError):
 
 class DataAccess(ABC):
     """Interface for accessing application data."""
+
+    @property
+    def cache_scope(self) -> str:
+        """Key of the data this instance reads, for the app's shared caches.
+
+        Instances with the same scope read the same data, so they may share
+        cached results. The default is unique per instance (in-memory data).
+        """
+        scope = getattr(self, "_cache_scope", None)
+        if scope is None:
+            scope = f"{type(self).__name__}:{uuid.uuid4().hex}"
+            self._cache_scope = scope
+        return scope
 
     @abstractmethod
     def get_current_user(self) -> str: ...

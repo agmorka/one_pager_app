@@ -381,3 +381,17 @@ Deleting `change_log` rows is permitted only in this compensation path, for an O
 
 **Why:** It is the smallest change that makes the documented update cycle work end to end, keeps "Draft Update: DP preserved" true through the whole cycle, and keeps every status pair checked by `VALID_COMBINATIONS`.
 
+
+---
+
+## 17. Registry and Use Case List Caching
+
+**Context:** UI_Design §6 asks for a short TTL on the Registry list and the Use Case registry, "invalidated explicitly after writes". `st.cache_data` cannot hash a `DataAccess` instance, and each Streamlit session builds its own instance, so the cache key has to say which data an instance reads.
+
+**Decision:**
+
+- `app/adapters/cache.py` caches `get_registry`, `get_registry_status_counts` and `get_use_cases` for 30 seconds (`LIST_CACHE_TTL_SECONDS`). The Registry page, the Use Cases page and the editor's Use Case picker read through it. Single records (Preview, Use Case details), locks, the review queue and editor content are not cached.
+- The key includes `DataAccess.cache_scope`. `LakehouseAccess` returns `lakehouse:<catalog>.<schema>`, so every session of an app instance shares one cache. `MockDataAccess` (in-memory data per session) gets a random scope per instance, so sessions never see each other's mock data.
+- Every app-layer write that can change these lists runs inside `writes_data()`: create, Save Draft, Submit, Approve, Reject, Cancel, Update, DP status changes, and Use Case create, edit, deprecate and restore (including the editor's inline create). It clears the three caches for all sessions when the write ends, **also when it fails**, because a failed write may have changed some rows before it rolled back. Review comments and locks do not change the lists, so they do not clear them.
+
+**Why:** Clearing on write keeps a user's own change visible at once. Other app instances (replicas) see the change within the TTL. Clearing the whole cache is cheap, because writes are rare compared to Registry reads.

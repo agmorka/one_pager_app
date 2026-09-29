@@ -10,6 +10,7 @@ from typing import Any
 
 import streamlit as st
 
+from adapters.cache import get_use_cases, writes_data
 from adapters.repeating import (
     BOOL,
     DATE,
@@ -83,8 +84,8 @@ def _use_case_or_none(data_access: DataAccess, use_case_id: str) -> UseCase | No
 
 
 def _linkable_use_cases(data_access: DataAccess, linked: list[str]) -> list[UseCase]:
-    page = data_access.get_use_cases(
-        UseCaseFilter(include_deprecated=False), 1, USE_CASE_PICKER_SIZE
+    page = get_use_cases(
+        data_access, UseCaseFilter(include_deprecated=False), 1, USE_CASE_PICKER_SIZE
     )
     return [uc for uc in page.rows if uc.use_case_id not in linked]
 
@@ -194,7 +195,8 @@ def _create_use_case(
         st.session_state["edit_uc_new_errors"] = list(errors.values())
         st.rerun()
     try:
-        use_case_id = data_access.create_use_case(data, user.initials)
+        with writes_data():
+            use_case_id = data_access.create_use_case(data, user.initials)
     except Exception:
         logger.exception("Failed to create a Use Case from the editor")
         st.session_state["edit_uc_new_errors"] = [

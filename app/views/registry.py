@@ -21,6 +21,7 @@ import logging
 import streamlit as st
 from streamlit.delta_generator import DeltaGenerator
 
+from adapters import cache
 from adapters.theme import (
     TOTAL_CARD_COLOR,
     get_dp_status_colors,
@@ -232,8 +233,11 @@ def _load_use_cases(data_access: DataAccess) -> list[UseCase]:
     use_cases: list[UseCase] = []
     page = 1
     while True:
-        result = data_access.get_use_cases(
-            UseCaseFilter(include_deprecated=True), page, _USE_CASE_OPTIONS_PAGE_SIZE
+        result = cache.get_use_cases(
+            data_access,
+            UseCaseFilter(include_deprecated=True),
+            page,
+            _USE_CASE_OPTIONS_PAGE_SIZE,
         )
         use_cases.extend(result.rows)
         if not result.has_next:
@@ -602,7 +606,7 @@ filter_obj = RegistryFilter(
     owner=None, domain=None, data_product_type=None
 )
 try:
-    status_counts = data_access.get_registry_status_counts(filter_obj)
+    status_counts = cache.get_registry_status_counts(data_access, filter_obj)
 except Exception as e:
     logger.exception("Failed to fetch status counts")
     status_counts = dict.fromkeys(op_status_colors, 0)
@@ -651,7 +655,8 @@ if "registry_page" not in st.session_state:
 # Fetch and render registry data
 try:
     with st.spinner("Loading One Pagers..."):
-        registry_page = data_access.get_registry(
+        registry_page = cache.get_registry(
+            data_access,
             current_filter,
             st.session_state.registry_page,
             ROWS_PER_PAGE,

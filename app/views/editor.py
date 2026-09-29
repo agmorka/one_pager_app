@@ -15,6 +15,7 @@ import logging
 
 import pandas as pd
 import streamlit as st
+from adapters.cache import writes_data
 from adapters.edit_mode import render_edit_mode
 
 from onepagerapp.models import CurrentUser, NewOnePagerInput, PersonRef, ValidationError
@@ -199,7 +200,7 @@ def _submit(data_access, document_store, user: CurrentUser, smes_df) -> None:  #
     )
     st.session_state[_BANNER_KEY] = None
     try:
-        with st.spinner("Creating One Pager..."):
+        with st.spinner("Creating One Pager..."), writes_data():
             result = create_one_pager(data, user, data_access, document_store)
     except PermissionDeniedError as e:
         st.session_state[_BANNER_KEY] = str(e)

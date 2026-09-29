@@ -92,6 +92,11 @@ class LakehouseAccess(DataAccess):
         self._document_store = document_store
 
     @property
+    def cache_scope(self) -> str:
+        """Every user reads the same tables, so all sessions share the caches."""
+        return f"lakehouse:{self._fqn_prefix}"
+
+    @property
     def _fqn_prefix(self) -> str:
         """Fully qualified name prefix for tables (catalog.schema)."""
         catalog = self._config.ONE_PAGER_APP_DATABRICKS_CATALOG

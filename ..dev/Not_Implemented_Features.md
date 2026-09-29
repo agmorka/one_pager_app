@@ -147,7 +147,7 @@ There is no `git_integration.py`.
 | 13.2 | ~~BEC theme: `.streamlit/config.toml` is missing, and `apply_theme()` is commented out in `app.py`~~ **Done (Phase 0):** `app/.streamlit/config.toml`, `apply_theme()` enabled, dark blue sidebar | UI §3 |
 | 13.3 | ~~Home page has placeholder content only (Registry is meant to be the landing page)~~ **Done (Phase 0):** Home page removed, Registry is the default page | UI §4.1 |
 | 13.4 | ~~Structured security-event logging module (`audit.py`). Only ad-hoc `audit_logger` calls exist in create.~~ **Done (Phase 0):** `onepagerapp.audit`, used by create | Arch §8, Backend §14 |
-| 13.5 | Caching strategy for the registry and use cases (short TTL, invalidated after writes). Only the reference data is cached. | UI §6 |
+| 13.5 | ~~Caching strategy for the registry and use cases (short TTL, invalidated after writes). Only the reference data is cached.~~ **Done (Phase 7):** `app/adapters/cache.py` (30 s TTL, keyed by `DataAccess.cache_scope`); every app-layer write runs in `writes_data()`, which clears the list caches (Decision_Log §17) | UI §6 |
 | 13.6 | Accessibility items: keyboard row activation, ARIA labels, errors shown next to their fields | UI §7 |
 | 13.7 | ~~Schema evolution handling (validation pinned to `structureDefinition` for older documents)~~ **Done (Phase 1):** `structure_one_pager_v_2.json` added, v1 kept | Arch open item #5 |
 
@@ -245,12 +245,12 @@ Locking must exist before users can edit existing records, or two editors can ov
 
 At the end of Phase 6 the full lifecycle works end to end, without Git.
 
-### Phase 7: Registry polish and caching — 🚧 in progress
+### Phase 7: Registry polish and caching — ✅ done
 
 | Order | Item | Why now |
 |---|---|---|
 | 36 | ~~11.1 Use case filter, 11.2 clickable metric cards, 11.3 sortable columns~~ **Done** | Independent Registry improvements |
-| 37 | 13.5 Registry and use case caching with invalidation after writes | Easiest now that every write path is known |
+| 37 | ~~13.5 Registry and use case caching with invalidation after writes~~ **Done** | Easiest now that every write path is known |
 
 ### Phase 8: Git integration
 

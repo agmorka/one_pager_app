@@ -18,6 +18,7 @@ from datetime import UTC, timedelta
 import pandas as pd
 import streamlit as st
 
+from adapters.cache import writes_data
 from adapters.edit_tabs import (
     bound,
     render_classification_tab,
@@ -736,7 +737,7 @@ def _save(
     """Run **Save Draft** and record the outcome for the next run."""
     st.session_state[BANNER_KEY] = None
     try:
-        with st.spinner("Saving..."):
+        with st.spinner("Saving..."), writes_data():
             result = save_draft(
                 data_access,
                 document_store,
@@ -771,7 +772,7 @@ def _submit(data_access: DataAccess, one_pager_id: str, user: CurrentUser) -> No
     """Run **Submit for Review**; on success leave the editor for Preview."""
     st.session_state[BANNER_KEY] = None
     try:
-        with st.spinner("Submitting for review..."):
+        with st.spinner("Submitting for review..."), writes_data():
             result = submit_for_review(
                 data_access, one_pager_id, user, current_session_id()
             )

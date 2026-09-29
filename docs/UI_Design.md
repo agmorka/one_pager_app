@@ -469,6 +469,8 @@ Used for destructive/irreversible actions: Cancel One Pager, Reject, Deprecate U
 | Reference tables (`ref_op_status`, `ref_dp_status`) | `st.cache_data` with long TTL (e.g. 1 hour) — rarely changes. |
 | Registry list (browse/filter) | `st.cache_data` with short TTL (e.g. 30 seconds); invalidated explicitly after writes. |
 | Use Case registry | Same as registry list — short TTL. |
+
+Implemented in `app/adapters/cache.py`: the Registry list, its status counts and the Use Case lists are cached for 30 seconds, and every write clears them via `writes_data()` ([Decision_Log.md](Decision_Log.md) §17).
 | Editor content (current document) | Not cached — always read fresh from volume on entering editor. Held in `st.session_state` during the editing session. |
 | Lock status | Never cached — always read fresh from Delta on every page load/re-run. |
 | Review queue | Not cached — always fresh (Approver needs to see real-time status). |
