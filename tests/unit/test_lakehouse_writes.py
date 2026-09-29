@@ -408,3 +408,24 @@ def test__update_one_pager_status__conditional_update_with_bound_parameters() ->
     assert not _access(conn).update_one_pager_status(
         row, expected_version="0.1.0", expected_status="Draft"
     )
+
+
+@pytest.mark.unit
+def test__authorized_users_update_and_delete__bound_parameters() -> None:
+    conn = _FakeConnection()
+    access = _access(conn)
+    access.update_authorized_users(
+        [AuthorizedUser("OP-0001", NASTY, NASTY, "a@b.dk", "sme")]
+    )
+    access.delete_authorized_users("OP-0001", ["AB", NASTY])
+    access.delete_authorized_users("OP-0001", [])
+
+    assert len(conn.calls) == 2
+    update, params = conn.calls[0]
+    assert update.startswith("UPDATE cat.sch.one_pager_authorized_users SET")
+    assert params["user_initials"] == NASTY
+    delete, params = conn.calls[1]
+    assert "user_initials IN (:initials_0, :initials_1)" in delete
+    assert params == {"initials_0": "AB", "initials_1": NASTY, "one_pager_id": "OP-0001"}
+    for statement, _ in conn.calls:
+        _assert_not_interpolated(statement)

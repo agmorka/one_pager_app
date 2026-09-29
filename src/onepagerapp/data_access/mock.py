@@ -552,6 +552,23 @@ class MockDataAccess(DataAccess):
         row = self._status_rows.get(one_pager_id)
         return copy.copy(row) if row else None
 
+    def update_authorized_users(self, users: list[AuthorizedUser]) -> None:
+        for user in users:
+            rows = self._authorized_users.get(user.one_pager_id, [])
+            self._authorized_users[user.one_pager_id] = [
+                copy.copy(user) if row.user_initials == user.user_initials else row
+                for row in rows
+            ]
+
+    def delete_authorized_users(
+        self, one_pager_id: str, user_initials: list[str]
+    ) -> None:
+        self._authorized_users[one_pager_id] = [
+            row
+            for row in self._authorized_users.get(one_pager_id, [])
+            if row.user_initials not in user_initials
+        ]
+
     def update_one_pager_status(
         self, row: OnePagerStatusRow, *, expected_version: str, expected_status: str
     ) -> bool:

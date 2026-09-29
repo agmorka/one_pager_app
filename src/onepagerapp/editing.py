@@ -29,6 +29,7 @@ from onepagerapp.locking import (
     is_held_by,
 )
 from onepagerapp.models import (
+    AuthorizedUser,
     ChangeLogEntry,
     CurrentUser,
     OnePagerDocument,
@@ -323,9 +324,10 @@ def save_draft(  # noqa: PLR0913 - every argument is needed to save
 
     Write order: the new YAML version file first (nothing references it yet),
     then the ``one_pager_status`` row (conditional on the version the editor
-    started from — this makes the new version current), then the change-log
-    entry. If the change log cannot be written the status row is put back, so
-    a failed save changes nothing visible.
+    started from — this makes the new version current), then the sync of
+    ``one_pager_authorized_users`` with the Owner/SMEs (Backend_Design §11),
+    then the change-log entry. If a later step fails the earlier ones are put
+    back, so a failed save changes nothing visible.
 
     Args:
         data_access: Tabular data access (Delta or mock).
@@ -354,12 +356,9 @@ def save_draft(  # noqa: PLR0913 - every argument is needed to save
     if row is None:
         msg = f"One Pager {one_pager_id} not found."
         raise NotFoundError(msg)
-    check_can_edit(
-        user,
-        one_pager_id,
-        row.one_pager_status,
-        data_access.get_authorized_users(one_pager_id),
-    )
+    # Checked against the list *before* the edit (Backend_Design §11).
+    authorized_before = data_access.get_authorized_users(one_pager_id)
+    check_can_edit(user, one_pager_id, row.one_pager_status, authorized_before)
     require_lock(data_access, one_pager_id, user, session_id, now)
 
     summary = sanitize_text(summary)
@@ -401,11 +400,19 @@ def save_draft(  # noqa: PLR0913 - every argument is needed to save
         document_store.discard_unreferenced(one_pager_id, version)
         raise SaveError(SAVE_CONFLICT_MESSAGE)
 
+    step = "sync_authorized_users"
     try:
+        sync_authorized_users(
+            data_access,
+            authorized_before,
+            authorized_users_from_document(one_pager_id, saved),
+        )
+        step = "append_change_log"
         data_access.append_change_log(_content_save_entry(new_row, summary, user, now))
     except Exception as e:
-        logger.exception(f"Change log of {one_pager_id} v{version} failed")
-        _save_failed(user, one_pager_id, "append_change_log")
+        logger.exception(f"Save of {one_pager_id} v{version} failed at {step}")
+        _save_failed(user, one_pager_id, step)
+        _restore_authorized_users(data_access, one_pager_id, authorized_before, user)
         if _restore_status_row(data_access, row, new_row, user):
             document_store.discard_unreferenced(one_pager_id, version)
         raise SaveError(SAVE_FAILED_MESSAGE) from e
@@ -418,6 +425,28 @@ def save_draft(  # noqa: PLR0913 - every argument is needed to save
         version=version,
     )
     return SaveResult(version=version, document=saved, status_row=new_row)
+
+
+def _restore_authorized_users(
+    data_access: DataAccess,
+    one_pager_id: str,
+    previous: list[AuthorizedUser],
+    user: CurrentUser,
+) -> None:
+    """Best-effort: put the authorized users back as they were before a save."""
+    try:
+        sync_authorized_users(
+            data_access, data_access.get_authorized_users(one_pager_id), previous
+        )
+    except Exception:
+        logger.exception(f"Restoring the authorized users of {one_pager_id} failed")
+        log_event(
+            "save_draft",
+            Outcome.COMPENSATION_FAILED,
+            user=user.initials,
+            one_pager_id=one_pager_id,
+            step="restore_authorized_users",
+        )
 
 
 def _restore_status_row(
@@ -444,3 +473,96 @@ def _restore_status_row(
             one_pager_id=previous.one_pager_id,
         )
     return restored
+
+
+# ============================================================================
+# Owner/SME sync (Backend_Design.md §11)
+# ============================================================================
+
+
+@dataclass
+class AuthorizedUsersDiff:
+    """Changes that make ``one_pager_authorized_users`` match a document."""
+
+    inserts: list[AuthorizedUser] = field(default_factory=list)
+    updates: list[AuthorizedUser] = field(default_factory=list)
+    deletes: list[str] = field(default_factory=list)
+
+    @property
+    def empty(self) -> bool:
+        return not (self.inserts or self.updates or self.deletes)
+
+
+def authorized_users_from_document(
+    one_pager_id: str, document: OnePagerDocument
+) -> list[AuthorizedUser]:
+    """Build the Owner (role ``owner``) and SME (role ``sme``) rows of a document."""
+    users = [
+        AuthorizedUser(
+            one_pager_id=one_pager_id,
+            user_initials=document.owner_initials,
+            user_name=document.owner_name,
+            user_email=document.owner_email,
+            user_team=document.owner_team,
+            role="owner",
+        )
+    ]
+    users.extend(
+        AuthorizedUser(
+            one_pager_id=one_pager_id,
+            user_initials=str(sme.get("initials") or ""),
+            user_name=str(sme.get("name") or ""),
+            user_email=str(sme.get("email") or ""),
+            user_team=sme.get("team") or None,
+            role="sme",
+        )
+        for sme in document.smes
+    )
+    return [u for u in users if u.user_initials]
+
+
+def diff_authorized_users(
+    current: list[AuthorizedUser], desired: list[AuthorizedUser]
+) -> AuthorizedUsersDiff:
+    """Compare the table rows with the document's Owner/SMEs, keyed by initials.
+
+    New initials are inserted, rows whose name, email, team or role changed
+    are updated, and initials no longer listed are deleted.
+    """
+    by_initials = {u.user_initials: u for u in current}
+    wanted = {u.user_initials: u for u in desired}
+    diff = AuthorizedUsersDiff()
+    for initials, user in wanted.items():
+        existing = by_initials.get(initials)
+        if existing is None:
+            diff.inserts.append(user)
+        elif (
+            existing.user_name,
+            existing.user_email,
+            existing.user_team,
+            existing.role,
+        ) != (user.user_name, user.user_email, user.user_team, user.role):
+            diff.updates.append(user)
+    diff.deletes = [initials for initials in by_initials if initials not in wanted]
+    return diff
+
+
+def sync_authorized_users(
+    data_access: DataAccess,
+    current: list[AuthorizedUser],
+    desired: list[AuthorizedUser],
+) -> AuthorizedUsersDiff:
+    """Make ``one_pager_authorized_users`` match ``desired`` (insert/update/delete).
+
+    Inserts run before deletes, so a failure part-way never leaves the One
+    Pager with fewer editors than either the old or the new list.
+    """
+    diff = diff_authorized_users(current, desired)
+    if diff.inserts:
+        data_access.insert_authorized_users(diff.inserts)
+    if diff.updates:
+        data_access.update_authorized_users(diff.updates)
+    if diff.deletes:
+        one_pager_id = (current or desired)[0].one_pager_id
+        data_access.delete_authorized_users(one_pager_id, diff.deletes)
+    return diff

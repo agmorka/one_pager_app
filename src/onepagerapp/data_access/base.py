@@ -329,6 +329,21 @@ class DataAccess(ABC):
         ...
 
     @abstractmethod
+    def update_authorized_users(self, users: list[AuthorizedUser]) -> None:
+        """Update name, email, team and role of existing authorized-user rows.
+
+        Rows are matched on (``one_pager_id``, ``user_initials``).
+        """
+        ...
+
+    @abstractmethod
+    def delete_authorized_users(
+        self, one_pager_id: str, user_initials: list[str]
+    ) -> None:
+        """Delete the authorized-user rows of these initials for a One Pager."""
+        ...
+
+    @abstractmethod
     def update_one_pager_status(
         self, row: OnePagerStatusRow, *, expected_version: str, expected_status: str
     ) -> bool:

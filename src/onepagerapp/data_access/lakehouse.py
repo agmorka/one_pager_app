@@ -798,6 +798,40 @@ class LakehouseAccess(DataAccess):
         rows = self._response_rows(response)
         return self._row_to_status_row(rows[0]) if rows else None
 
+    def update_authorized_users(self, users: list[AuthorizedUser]) -> None:
+        fqn = f"{self._fqn_prefix}.one_pager_authorized_users"
+        for user in users:
+            self._connection.execute_statement(
+                f"UPDATE {fqn} SET user_name = :user_name, "  # noqa: S608
+                "user_email = :user_email, user_team = :user_team, role = :role "
+                "WHERE one_pager_id = :one_pager_id AND user_initials = :user_initials",
+                parameters={
+                    "one_pager_id": user.one_pager_id,
+                    "user_initials": user.user_initials,
+                    "user_name": user.user_name,
+                    "user_email": user.user_email,
+                    "user_team": user.user_team,
+                    "role": user.role,
+                },
+            )
+
+    def delete_authorized_users(
+        self, one_pager_id: str, user_initials: list[str]
+    ) -> None:
+        if not user_initials:
+            return
+        fqn = f"{self._fqn_prefix}.one_pager_authorized_users"
+        markers = ", ".join(f":initials_{i}" for i in range(len(user_initials)))
+        parameters: dict[str, SqlParameterValue] = {
+            f"initials_{i}": initials for i, initials in enumerate(user_initials)
+        }
+        parameters["one_pager_id"] = one_pager_id
+        self._connection.execute_statement(
+            f"DELETE FROM {fqn} WHERE one_pager_id = :one_pager_id "  # noqa: S608
+            f"AND user_initials IN ({markers})",
+            parameters=parameters,
+        )
+
     def update_one_pager_status(
         self, row: OnePagerStatusRow, *, expected_version: str, expected_status: str
     ) -> bool:

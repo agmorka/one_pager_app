@@ -43,7 +43,7 @@ The Editor has create mode and, from Phase 4, edit mode. Missing:
 | 2.4 | Repeating-items pattern: add, edit and remove for array sections |
 | 2.5 | Validation error badges on tabs, plus a clickable validation summary |
 | 2.6 | Unsaved-changes guard on sidebar navigation |
-| 2.7 | Sync of `one_pager_authorized_users` when the Owner or SMEs change on a save (insert, update, delete) (Backend §11) |
+| 2.7 | ~~Sync of `one_pager_authorized_users` when the Owner or SMEs change on a save (insert, update, delete) (Backend §11)~~ **Done (Phase 4):** `editing.sync_authorized_users`, run by `save_draft` and undone if the save fails |
 | 2.8 | Linking a Use Case to a One Pager: `link_use_case` / `unlink_use_case` writes to `use_case_references` (Backend §9) |
 
 ## 3. Validation (Req §5, Backend §4)
@@ -215,7 +215,7 @@ Locking must exist before users can edit existing records, or two editors can ov
 |---|---|---|
 | 17 | ~~2.1 Edit mode (pre-filled Basics)~~ **Done** | Uses permissions (4.2) and locking (5.1) |
 | 18 | ~~2.2 Save Draft (lenient validation, change summary, MINOR bump, new YAML version, change-log entry)~~ **Done** | The first write path for existing records. Every tab saves through it |
-| 19 | 2.7 Sync `one_pager_authorized_users` on save | Owner and SME changes on the Basics tab must update who may edit |
+| 19 | ~~2.7 Sync `one_pager_authorized_users` on save~~ **Done** | Owner and SME changes on the Basics tab must update who may edit |
 | 20 | 2.4 Repeating-items pattern | A shared component used by most of the remaining tabs |
 | 21 | 2.3 Editor tabs in this order: Business Requirements, Use Cases (with 2.8 `link_use_case` / `unlink_use_case`), Data Sources, Data Product Preview, Classification, Governance, Scope & Questions | Simple arrays first. The Classification and Governance tabs rely on the conditional rules (3.3). The Review tab waits for Phase 6 |
 | 22 | 2.5 Validation badges on tabs and the clickable summary | Needs all tabs and the strict tier |
