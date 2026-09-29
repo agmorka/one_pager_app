@@ -1,6 +1,7 @@
 """Configuration module for the OnePagerApp application."""
 
 import os
+from datetime import timedelta
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -40,6 +41,14 @@ class AppConfig(BaseModel):
             "When empty it is derived from the catalog prefix."
         ),
     )
+    ONE_PAGER_APP_LOCK_TTL_SECONDS: int = Field(
+        1800,
+        gt=0,
+        description=(
+            "Edit lock expiry window in seconds (Backend_Design.md §6). "
+            "30 minutes in every environment; tests override it."
+        ),
+    )
     CLOUD_ROLE_NAME: str = "OnePagerApp"
 
     @classmethod
@@ -49,6 +58,11 @@ class AppConfig(BaseModel):
             name: os.environ[name] for name in cls.model_fields if name in os.environ
         }
         return cls(**env_values)
+
+    @property
+    def lock_ttl(self) -> timedelta:
+        """How long an edit lock lives after its last heartbeat."""
+        return timedelta(seconds=self.ONE_PAGER_APP_LOCK_TTL_SECONDS)
 
     @property
     def is_mock(self) -> bool:

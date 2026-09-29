@@ -515,43 +515,123 @@ class LakehouseAccess(DataAccess):
 
     def get_lock(self, one_pager_id: str) -> LockInfo | None:
         """Check if a One Pager is currently locked for editing."""
-        fqn = f"{self._fqn_prefix}.locks"
-        
-        query = (
-            f"SELECT "
-            f"one_pager_id, locked_by_initials, locked_by_name, session_id, "
-            f"acquired_at, last_heartbeat, expires_at "
-            f"FROM {fqn} "
-            f"WHERE one_pager_id = :one_pager_id"
-        )
-        
         try:
-            response = self._connection.execute_statement(
-                query, parameters={"one_pager_id": one_pager_id}
-            )
-            
-            schema = response.manifest.schema if response.manifest else None
-            columns = [col.name for col in (schema.columns if schema else None) or []]
-            rows = (response.result.data_array if response.result else None) or []
-            
-            if not rows:
-                return None
-            
-            row = rows[0]
-            row_dict = dict(zip(columns, row, strict=False))
-            
-            return LockInfo(
-                one_pager_id=row_dict["one_pager_id"],
-                locked_by_initials=row_dict["locked_by_initials"],
-                locked_by_name=row_dict["locked_by_name"],
-                session_id=row_dict["session_id"],
-                acquired_at=self._parse_timestamp(row_dict["acquired_at"]),
-                last_heartbeat=self._parse_timestamp(row_dict["last_heartbeat"]),
-                expires_at=self._parse_timestamp(row_dict["expires_at"]),
-            )
+            locks = self._select_locks([one_pager_id])
         except Exception as e:
             logger.error(f"Failed to fetch lock for {one_pager_id}: {e}")
             raise RuntimeError(f"Failed to fetch lock: {e}") from e
+        return locks[0] if locks else None
+
+    def get_locks(self, one_pager_ids: list[str]) -> list[LockInfo]:
+        """Fetch the lock rows of a page of One Pagers in one query."""
+        if not one_pager_ids:
+            return []
+        try:
+            return self._select_locks(one_pager_ids)
+        except Exception as e:
+            logger.error(f"Failed to fetch locks: {e}")
+            raise RuntimeError(f"Failed to fetch locks: {e}") from e
+
+    def _select_locks(self, one_pager_ids: list[str]) -> list[LockInfo]:
+        fqn = f"{self._fqn_prefix}.locks"
+        markers = ", ".join(f":id_{i}" for i in range(len(one_pager_ids)))
+        response = self._connection.execute_statement(
+            "SELECT one_pager_id, locked_by_initials, locked_by_name, session_id, "  # noqa: S608
+            f"acquired_at, last_heartbeat, expires_at FROM {fqn} "
+            f"WHERE one_pager_id IN ({markers})",
+            parameters={f"id_{i}": op_id for i, op_id in enumerate(one_pager_ids)},
+        )
+        return [
+            LockInfo(
+                one_pager_id=str(row["one_pager_id"]),
+                locked_by_initials=str(row["locked_by_initials"]),
+                locked_by_name=str(row["locked_by_name"]),
+                session_id=str(row["session_id"]),
+                acquired_at=self._parse_timestamp(row["acquired_at"]),
+                last_heartbeat=self._parse_timestamp(row["last_heartbeat"]),
+                expires_at=self._parse_timestamp(row["expires_at"]),
+            )
+            for row in self._response_rows(response)
+        ]
+
+    def write_lock(self, lock: LockInfo, *, now: datetime) -> bool:
+        """Upsert the lock row with one MERGE, guarded by the takeover rules.
+
+        The guard (no row / expired / same holder and session) is evaluated in
+        the same statement as the write. A Delta write conflict with a
+        concurrent acquire is reported as False; ``locking.acquire_lock`` then
+        re-reads the row to see who won.
+        """
+        fqn = f"{self._fqn_prefix}.locks"
+        try:
+            response = self._connection.execute_statement(
+                f"MERGE INTO {fqn} AS t "  # noqa: S608
+                "USING (SELECT :one_pager_id AS one_pager_id) AS s "
+                "ON t.one_pager_id = s.one_pager_id "
+                "WHEN MATCHED AND (t.expires_at <= :now OR "
+                "(t.locked_by_initials = :locked_by_initials "
+                "AND t.session_id = :session_id)) THEN UPDATE SET "
+                "locked_by_initials = :locked_by_initials, "
+                "locked_by_name = :locked_by_name, session_id = :session_id, "
+                "acquired_at = :acquired_at, last_heartbeat = :last_heartbeat, "
+                "expires_at = :expires_at "
+                "WHEN NOT MATCHED THEN INSERT (one_pager_id, locked_by_initials, "
+                "locked_by_name, session_id, acquired_at, last_heartbeat, "
+                "expires_at) VALUES (:one_pager_id, :locked_by_initials, "
+                ":locked_by_name, :session_id, :acquired_at, :last_heartbeat, "
+                ":expires_at)",
+                parameters={
+                    "one_pager_id": lock.one_pager_id,
+                    "locked_by_initials": lock.locked_by_initials,
+                    "locked_by_name": lock.locked_by_name,
+                    "session_id": lock.session_id,
+                    "acquired_at": lock.acquired_at,
+                    "last_heartbeat": lock.last_heartbeat,
+                    "expires_at": lock.expires_at,
+                    "now": now,
+                },
+            )
+        except StatementFailedError as e:
+            logger.warning(f"Lock write for {lock.one_pager_id} conflicted: {e}")
+            return False
+        return self._affected_rows(response) == 1
+
+    def refresh_lock(
+        self,
+        one_pager_id: str,
+        *,
+        locked_by_initials: str,
+        session_id: str,
+        last_heartbeat: datetime,
+        expires_at: datetime,
+    ) -> bool:
+        fqn = f"{self._fqn_prefix}.locks"
+        response = self._connection.execute_statement(
+            f"UPDATE {fqn} SET last_heartbeat = :last_heartbeat, "  # noqa: S608
+            "expires_at = :expires_at WHERE one_pager_id = :one_pager_id "
+            "AND locked_by_initials = :locked_by_initials "
+            "AND session_id = :session_id",
+            parameters={
+                "one_pager_id": one_pager_id,
+                "locked_by_initials": locked_by_initials,
+                "session_id": session_id,
+                "last_heartbeat": last_heartbeat,
+                "expires_at": expires_at,
+            },
+        )
+        return self._affected_rows(response) == 1
+
+    def delete_lock(self, one_pager_id: str, *, locked_by_initials: str) -> bool:
+        fqn = f"{self._fqn_prefix}.locks"
+        response = self._connection.execute_statement(
+            f"DELETE FROM {fqn} WHERE one_pager_id = :one_pager_id "  # noqa: S608
+            "AND locked_by_initials = :locked_by_initials",
+            parameters={
+                "one_pager_id": one_pager_id,
+                "locked_by_initials": locked_by_initials,
+            },
+        )
+        return self._affected_rows(response) == 1
 
     # ========================================================================
     # Create One Pager Methods
