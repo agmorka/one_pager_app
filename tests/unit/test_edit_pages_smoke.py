@@ -95,12 +95,12 @@ def test__preview__edit_opens_editor_in_edit_mode(
 
 
 @pytest.mark.unit
-def test__preview__edit_disabled_for_non_owner(
+def test__preview__edit_hidden_for_non_owner(
     services: dict, switched: list[str]
 ) -> None:
     # Alice is not Owner/SME of OP-0002 (and it is In Review).
     at = _app("preview.py", {**services, "preview_one_pager_id": "OP-0002"}).run()
-    assert at.button(key="preview_edit").disabled
+    assert "preview_edit" not in {b.key for b in at.button}
 
 
 @pytest.mark.unit
@@ -335,3 +335,26 @@ def test__editor__badges_follow_input(services: dict, switched: list[str]) -> No
     at.text_area(key="edit_problem").input("Scattered data").run()
     badges = next(c.value for c in at.caption if "Needs attention" in c.value)
     assert "Business Problem" not in badges
+
+
+def _action_keys(at: AppTest) -> set[str]:
+    return {b.key for b in at.button if b.key and b.key.startswith("preview_")}
+
+
+@pytest.mark.unit
+def test__preview__actions_follow_role_and_status(
+    services: dict, switched: list[str]
+) -> None:
+    owner_draft = _app(
+        "preview.py", {**services, "preview_one_pager_id": "OP-0003"}
+    ).run()
+    assert {"preview_edit", "preview_cancel", "preview_export_pdf"} <= _action_keys(
+        owner_draft
+    )
+    assert "preview_approve" not in _action_keys(owner_draft)
+
+    # Alice is not Owner/SME of OP-0002 (In Review): read-only.
+    viewer = _app("preview.py", {**services, "preview_one_pager_id": "OP-0002"}).run()
+    assert not viewer.exception
+    assert _action_keys(viewer) == {"preview_export_pdf"}
+    assert any("Waiting for an Approver" in c.value for c in viewer.caption)

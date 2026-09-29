@@ -1,8 +1,9 @@
 """Preview page — read-only view of a single One Pager.
 
 Displays the complete One Pager document with header, status timeline, content sections,
-change log, review comments, and lock indicator. State-changing actions are disabled in v1,
-except **Release my lock** for the holder of an active lock.
+change log, review comments, and lock indicator. The action bar shows the actions that
+apply to the user's role and the One Pager's statuses (``permissions.get_action_states``,
+derived from the workflow state machine); actions not implemented yet are disabled.
 
 The view:
 1. Resolves one_pager_id from session state or the query param; without one it
@@ -14,7 +15,7 @@ The view:
 5. Does not cache dynamic data (document, lock, comments) — fresh on every re-run
 
 Per Backend_Design.md §2, read permission is universal (authenticated users only).
-Per UI_Design.md §4.4, v1 renders action buttons as disabled with "coming soon" tooltips.
+Per UI_Design.md §4.4, actions depend on role and status.
 """
 
 import logging
@@ -532,6 +533,19 @@ def render_lock_indicator(
         _release_my_lock(data_access, header.one_pager_id, user)
 
 
+# Preview actions in display order → button label (UI_Design.md §4.4).
+ACTION_BUTTONS = {
+    "edit": "✏️ Edit",
+    "update": "🔄 Update",
+    "change_dp_status": "🚦 Change DP Status",
+    "approve": "✅ Approve",
+    "reject": "❌ Reject",
+    "add_comment": "📝 Add Comment",
+    "cancel": "🛑 Cancel One Pager",
+    "export_pdf": "📄 Export PDF",
+}
+
+
 def load_authorized_initials(data_access: DataAccess, one_pager_id: str) -> set[str]:
     """Initials of the Owner/SMEs; empty (edit disabled) if they cannot be read."""
     try:
@@ -567,7 +581,6 @@ def render_action_bar(
         authorized_initials: Initials of the Owner/SMEs of this One Pager.
     """
     header = preview_data.header
-    
     actions = get_action_states(
         current_user_initials=current_user_initials,
         owner_initials=header.owner_initials,
@@ -575,48 +588,30 @@ def render_action_bar(
         is_locked=lock is not None,
         lock_holder_initials=lock.locked_by_initials if lock else None,
         authorized_initials=authorized_initials,
+        data_product_status=header.data_product_status,
     )
-    
+
     st.subheader("Actions")
-    
-    col1, col2, col3, col4, col5 = st.columns(5)
-    
-    with col1:
-        if st.button(
-            "✏️ Edit",
-            key="preview_edit",
-            disabled=not actions["edit"].enabled,
-            help=actions["edit"].tooltip if actions["edit"].tooltip else None,
-        ):
-            open_editor(header.one_pager_id)
-    
-    with col2:
-        st.button(
-            "✅ Approve",
-            disabled=not actions["approve"].enabled,
-            help=actions["approve"].tooltip if actions["approve"].tooltip else None,
-        )
-    
-    with col3:
-        st.button(
-            "❌ Reject",
-            disabled=not actions["reject"].enabled,
-            help=actions["reject"].tooltip if actions["reject"].tooltip else None,
-        )
-    
-    with col4:
-        st.button(
-            "📝 Add Comment",
-            disabled=not actions["add_comment"].enabled,
-            help=actions["add_comment"].tooltip if actions["add_comment"].tooltip else None,
-        )
-    
-    with col5:
-        st.button(
-            "📄 Export PDF",
-            disabled=not actions["export_pdf"].enabled,
-            help=actions["export_pdf"].tooltip if actions["export_pdf"].tooltip else None,
-        )
+    shown = [name for name in ACTION_BUTTONS if actions[name].visible]
+    clicked = None
+    for column, name in zip(st.columns(max(len(shown), 1)), shown, strict=False):
+        state = actions[name]
+        with column:
+            if st.button(
+                ACTION_BUTTONS[name],
+                key=f"preview_{name}",
+                disabled=not state.enabled,
+                help=state.tooltip or None,
+                use_container_width=True,
+            ):
+                clicked = name
+    if header.one_pager_status == "Cancelled":
+        st.caption("This One Pager is cancelled (read-only).")
+    elif header.one_pager_status == "In Review" and not actions["approve"].visible:
+        st.caption("Waiting for an Approver's review.")
+
+    if clicked == "edit":
+        open_editor(header.one_pager_id)
 
 
 # ============================================================================
