@@ -24,11 +24,25 @@ class IdGenerationError(RuntimeError):
 
 
 def format_id(id_type: str, value: int) -> str:
-    """Format a sequence value, e.g. ("OP", 7) -> "OP-0007"."""
+    """Format a sequence value, e.g. ("OP", 7) -> "OP-0007".
+
+    Raises:
+        ValueError: For an unknown ID type, or a value outside the range the
+            format can hold (1..9999 for OP, 1..999 for UC/BR — Data_Model §4
+            overflow note).
+
+    """
     if id_type not in ID_WIDTHS:
         msg = f"Unknown ID type: {id_type}"
         raise ValueError(msg)
-    return f"{id_type}-{value:0{ID_WIDTHS[id_type]}d}"
+    width = ID_WIDTHS[id_type]
+    if not 1 <= value <= 10**width - 1:
+        msg = (
+            f"{id_type} ID sequence value {value} is outside the "
+            f"{id_type}-{'#' * width} range (1..{10**width - 1})."
+        )
+        raise ValueError(msg)
+    return f"{id_type}-{value:0{width}d}"
 
 
 def next_id(data_access: "DataAccess", id_type: str) -> str:
@@ -37,6 +51,7 @@ def next_id(data_access: "DataAccess", id_type: str) -> str:
     Raises:
         IdGenerationError: If the counter could not be advanced after
             ``MAX_ATTEMPTS`` attempts (sustained contention).
+        ValueError: If the next value would overflow the ID format.
 
     """
     if id_type not in ID_WIDTHS:
@@ -45,8 +60,10 @@ def next_id(data_access: "DataAccess", id_type: str) -> str:
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
         current = data_access.get_sequence_value(id_type)
+        # Format first: an overflow must not consume a counter value.
+        candidate = format_id(id_type, current + 1)
         if data_access.compare_and_set_sequence(id_type, current, current + 1):
-            return format_id(id_type, current + 1)
+            return candidate
         logger.info(
             "ID sequence %s changed concurrently (attempt %d/%d), retrying",
             id_type,
@@ -54,5 +71,5 @@ def next_id(data_access: "DataAccess", id_type: str) -> str:
             MAX_ATTEMPTS,
         )
 
-    msg = f"Could not reserve a new {id_type} ID after {MAX_ATTEMPTS} attempts."
+    msg = f"Could not allocate a new {id_type} ID after {MAX_ATTEMPTS} attempts."
     raise IdGenerationError(msg)

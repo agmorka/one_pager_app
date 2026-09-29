@@ -8,9 +8,14 @@ import pandas as pd
 from databricks.sdk.service.sql import StatementResponse
 
 from onepagerapp.config import AppConfig
-from onepagerapp.data_access.base import DataAccess
-from onepagerapp.data_access.connection import DatabricksConnection
+from onepagerapp.data_access.base import DataAccess, NotFoundError
+from onepagerapp.data_access.connection import (
+    DatabricksConnection,
+    SqlParameterValue,
+    StatementFailedError,
+)
 from onepagerapp.documents import OnePagerDocumentStore
+from onepagerapp.id_generator import next_id
 from onepagerapp.models import (
     AuthorizedUser,
     ChangeLogEntry,
@@ -23,9 +28,18 @@ from onepagerapp.models import (
     RegistryPage,
     RegistryRow,
     ReviewComment,
+    UseCase,
+    UseCaseFilter,
+    UseCaseInput,
+    UseCasePage,
 )
 
 logger = logging.getLogger(__name__)
+
+_USE_CASE_COLUMNS = (
+    "use_case_id, persona, goal, scenario, decision_enabled, priority, deprecated, "
+    "created_by, created_at, last_updated_by, last_updated_at"
+)
 
 _ONE_PAGER_STATUS_COLUMNS = (
     "one_pager_id",
@@ -49,24 +63,6 @@ _ONE_PAGER_STATUS_COLUMNS = (
     "structure_definition",
     "pending_pr",
 )
-
-
-def _to_datetime(value: object) -> datetime:
-    """Parse a TIMESTAMP value returned by the Statement Execution API.
-
-    The API returns timestamps as ISO-8601 strings (e.g. "2026-09-20T14:30:00Z").
-    """
-    if isinstance(value, datetime):
-        return value
-    return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-
-
-def _rows(response: StatementResponse) -> list[dict[str, Any]]:
-    """Convert a StatementResponse into a list of column -> value dicts."""
-    schema = response.manifest.schema if response.manifest else None
-    columns = [str(col.name) for col in (schema.columns if schema else None) or []]
-    data = (response.result.data_array if response.result else None) or []
-    return [dict(zip(columns, row, strict=False)) for row in data]
 
 
 class LakehouseAccess(DataAccess):
@@ -413,8 +409,8 @@ class LakehouseAccess(DataAccess):
                 version=row_dict["version"],
                 one_pager_status=row_dict["one_pager_status"],
                 data_product_status=row_dict["data_product_status"],
-                created_at=_to_datetime(row_dict["created_at"]),
-                last_updated_at=_to_datetime(row_dict["last_updated_at"]),
+                created_at=self._parse_timestamp(row_dict["created_at"]),
+                last_updated_at=self._parse_timestamp(row_dict["last_updated_at"]),
                 last_updated_by=row_dict["last_updated_by"],
             )
         except Exception as e:
@@ -458,7 +454,7 @@ class LakehouseAccess(DataAccess):
                     author_initials=row_dict["author_initials"],
                     author_name=row_dict["author_name"],
                     summary=row_dict["summary"],
-                    created_at=_to_datetime(row_dict["created_at"]),
+                    created_at=self._parse_timestamp(row_dict["created_at"]),
                     from_status=row_dict.get("from_status"),
                     to_status=row_dict.get("to_status"),
                     status_field=row_dict.get("status_field"),
@@ -503,10 +499,10 @@ class LakehouseAccess(DataAccess):
                     reviewer_name=row_dict["reviewer_name"],
                     comment=row_dict["comment"],
                     resolved=bool(row_dict.get("resolved", False)),
-                    created_at=_to_datetime(row_dict["created_at"]),
+                    created_at=self._parse_timestamp(row_dict["created_at"]),
                     resolved_by=row_dict.get("resolved_by"),
                     resolved_at=(
-                        _to_datetime(row_dict["resolved_at"])
+                        self._parse_timestamp(row_dict["resolved_at"])
                         if row_dict.get("resolved_at")
                         else None
                     ),
@@ -549,9 +545,9 @@ class LakehouseAccess(DataAccess):
                 locked_by_initials=row_dict["locked_by_initials"],
                 locked_by_name=row_dict["locked_by_name"],
                 session_id=row_dict["session_id"],
-                acquired_at=_to_datetime(row_dict["acquired_at"]),
-                last_heartbeat=_to_datetime(row_dict["last_heartbeat"]),
-                expires_at=_to_datetime(row_dict["expires_at"]),
+                acquired_at=self._parse_timestamp(row_dict["acquired_at"]),
+                last_heartbeat=self._parse_timestamp(row_dict["last_heartbeat"]),
+                expires_at=self._parse_timestamp(row_dict["expires_at"]),
             )
         except Exception as e:
             logger.error(f"Failed to fetch lock for {one_pager_id}: {e}")
@@ -564,14 +560,15 @@ class LakehouseAccess(DataAccess):
     def get_sequence_value(self, id_type: str) -> int:
         """Read the last assigned value of an id_sequences counter."""
         fqn = f"{self._fqn_prefix}.id_sequences"
-        response = self._connection.execute_statement(
-            f"SELECT last_value FROM {fqn} WHERE id_type = :id_type",  # noqa: S608
-            parameters={"id_type": id_type},
+        rows = self._response_rows(
+            self._connection.execute_statement(
+                f"SELECT last_value FROM {fqn} WHERE id_type = :id_type",  # noqa: S608
+                {"id_type": id_type},
+            )
         )
-        rows = _rows(response)
         if not rows:
             msg = (
-                f"id_sequences has no row for {id_type}. "
+                f"id_sequences has no row for id_type '{id_type}'. "
                 "Please ensure the Liquibase migrations have been applied."
             )
             raise RuntimeError(msg)
@@ -581,28 +578,22 @@ class LakehouseAccess(DataAccess):
         """Advance the counter only if it still holds ``expected``.
 
         Success is decided by the UPDATE's ``num_affected_rows`` (exactly 1).
-        A re-read of the counter is not sufficient: if another writer advanced
-        it from the same ``expected`` value, a re-read would also show ``new``.
-        A Delta concurrent-modification conflict is reported as False so the
-        caller retries.
+        Re-reading the counter afterwards cannot tell two racing writers apart —
+        both would see the new value and hand out the same ID. A failed
+        statement (e.g. a Delta write conflict) is reported as False so
+        ``id_generator.next_id`` retries.
         """
         fqn = f"{self._fqn_prefix}.id_sequences"
         try:
             response = self._connection.execute_statement(
-                f"UPDATE {fqn} SET last_value = :new "  # noqa: S608
-                "WHERE id_type = :id_type AND last_value = :expected",
-                parameters={"new": new, "id_type": id_type, "expected": expected},
+                f"UPDATE {fqn} SET last_value = :new_value "  # noqa: S608
+                "WHERE id_type = :id_type AND last_value = :current_value",
+                {"id_type": id_type, "new_value": new, "current_value": expected},
             )
-        except RuntimeError as e:
-            if "concurrent" in str(e).lower():
-                logger.info(f"Concurrent update on id_sequences ({id_type}): {e}")
-                return False
-            raise
-        rows = _rows(response)
-        if not rows or "num_affected_rows" not in rows[0]:
-            msg = "UPDATE on id_sequences did not report num_affected_rows"
-            raise RuntimeError(msg)
-        return int(rows[0]["num_affected_rows"]) == 1
+        except StatementFailedError as e:
+            logger.warning(f"ID allocation for {id_type} conflicted: {e}")
+            return False
+        return self._affected_rows(response) == 1
 
     def get_one_pager_ids_for_data_product(self, data_product: str) -> list[str]:
         fqn = f"{self._fqn_prefix}.one_pager_status"
@@ -611,7 +602,7 @@ class LakehouseAccess(DataAccess):
             "WHERE data_product = :data_product ORDER BY one_pager_id",
             parameters={"data_product": data_product},
         )
-        return [str(r["one_pager_id"]) for r in _rows(response)]
+        return [str(r["one_pager_id"]) for r in self._response_rows(response)]
 
     def get_authorized_users(self, one_pager_id: str) -> list[AuthorizedUser]:
         fqn = f"{self._fqn_prefix}.one_pager_authorized_users"
@@ -630,7 +621,7 @@ class LakehouseAccess(DataAccess):
                 user_team=r.get("user_team"),
                 role=r["role"],
             )
-            for r in _rows(response)
+            for r in self._response_rows(response)
         ]
 
     def insert_authorized_users(self, users: list[AuthorizedUser]) -> None:
@@ -638,7 +629,7 @@ class LakehouseAccess(DataAccess):
             return
         fqn = f"{self._fqn_prefix}.one_pager_authorized_users"
         values = []
-        parameters: dict[str, object] = {}
+        parameters: dict[str, SqlParameterValue] = {}
         for i, user in enumerate(users):
             values.append(
                 f"(:id_{i}, :initials_{i}, :name_{i}, :email_{i}, :team_{i}, :role_{i})"
@@ -704,3 +695,248 @@ class LakehouseAccess(DataAccess):
                 "WHERE one_pager_id = :one_pager_id",
                 parameters={"one_pager_id": one_pager_id},
             )
+
+    # ========================================================================
+    # Use Cases Page Methods
+    # ========================================================================
+    # Every user-supplied value is passed as a bound parameter (:name markers);
+    # only table names and integers computed here are formatted into SQL.
+
+    @staticmethod
+    def _response_rows(response: StatementResponse) -> list[dict[str, Any]]:
+        """Convert a StatementResponse into a list of column → value dicts."""
+        schema = response.manifest.schema if response.manifest else None
+        columns = [col.name or "" for col in (schema.columns if schema else None) or []]
+        rows = (response.result.data_array if response.result else None) or []
+        return [dict(zip(columns, row, strict=False)) for row in rows]
+
+    @classmethod
+    def _affected_rows(cls, response: StatementResponse) -> int:
+        """Read num_affected_rows from an UPDATE/INSERT/DELETE response."""
+        rows = cls._response_rows(response)
+        if not rows:
+            return 0
+        value = rows[0].get("num_affected_rows", next(iter(rows[0].values()), 0))
+        return int(value or 0)
+
+    @staticmethod
+    def _parse_bool(value: object) -> bool:
+        """Parse a boolean; the Statement API returns "true"/"false" strings."""
+        if isinstance(value, str):
+            return value.strip().lower() == "true"
+        return bool(value)
+
+    @staticmethod
+    def _parse_timestamp(value: object) -> datetime:
+        """Parse a timestamp string from the Statement API into a datetime."""
+        if isinstance(value, datetime):
+            return value
+        parsed: datetime = pd.Timestamp(value).to_pydatetime()
+        return parsed
+
+    @classmethod
+    def _row_to_use_case(cls, row: dict[str, Any]) -> UseCase:
+        return UseCase(
+            use_case_id=str(row["use_case_id"]),
+            persona=str(row["persona"]),
+            goal=str(row["goal"]),
+            scenario=str(row["scenario"]),
+            decision_enabled=str(row["decision_enabled"]),
+            priority=str(row["priority"]),
+            deprecated=cls._parse_bool(row["deprecated"]),
+            created_by=str(row["created_by"]),
+            created_at=cls._parse_timestamp(row["created_at"]),
+            last_updated_by=str(row["last_updated_by"]),
+            last_updated_at=cls._parse_timestamp(row["last_updated_at"]),
+            reference_count=int(row.get("reference_count") or 0),
+        )
+
+    @staticmethod
+    def _like_pattern(text: str) -> str:
+        """Build a LIKE "contains" pattern, escaping the LIKE wildcards.
+
+        Backslash is the default LIKE escape character in Databricks SQL.
+        """
+        escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return f"%{escaped}%"
+
+    def _use_cases_where(
+        self, filter: UseCaseFilter
+    ) -> tuple[str, dict[str, SqlParameterValue]]:
+        """Build the WHERE clause and its parameters for a UseCaseFilter."""
+        clauses: list[str] = []
+        parameters: dict[str, SqlParameterValue] = {}
+        if not filter.include_deprecated:
+            clauses.append("uc.deprecated = false")
+        if filter.search:
+            clauses.append(
+                "(lower(uc.persona) LIKE lower(:search) "
+                "OR lower(uc.goal) LIKE lower(:search))"
+            )
+            parameters["search"] = self._like_pattern(filter.search)
+        if filter.priority:
+            clauses.append("uc.priority = :priority")
+            parameters["priority"] = filter.priority
+        return (" AND ".join(clauses) if clauses else "1=1"), parameters
+
+    def _use_cases_select(self, where_clause: str) -> str:
+        """SELECT for use_cases rows with their One Pager reference counts."""
+        uc_columns = ", ".join(f"uc.{c.strip()}" for c in _USE_CASE_COLUMNS.split(","))
+        return (
+            f"SELECT {uc_columns}, "  # noqa: S608
+            f"COALESCE(ref.reference_count, 0) AS reference_count "
+            f"FROM {self._fqn_prefix}.use_cases uc "
+            f"LEFT JOIN ("
+            f"SELECT use_case_id, COUNT(*) AS reference_count "
+            f"FROM {self._fqn_prefix}.use_case_references GROUP BY use_case_id"
+            f") ref ON uc.use_case_id = ref.use_case_id "
+            f"WHERE {where_clause}"
+        )
+
+    def get_use_cases(
+        self, filter: UseCaseFilter, page: int, page_size: int
+    ) -> UseCasePage:
+        """Query Use Cases with server-side filtering and pagination."""
+        where_clause, parameters = self._use_cases_where(filter)
+        count_query = (
+            f"SELECT COUNT(*) AS total FROM {self._fqn_prefix}.use_cases uc "  # noqa: S608
+            f"WHERE {where_clause}"
+        )
+        offset = (int(page) - 1) * int(page_size)
+        page_query = (
+            f"{self._use_cases_select(where_clause)} "
+            f"ORDER BY uc.use_case_id LIMIT {int(page_size)} OFFSET {offset}"
+        )
+        try:
+            count_rows = self._response_rows(
+                self._connection.execute_statement(count_query, parameters)
+            )
+            total_rows = int(count_rows[0]["total"]) if count_rows else 0
+            rows = self._response_rows(
+                self._connection.execute_statement(page_query, parameters)
+            )
+        except Exception as e:
+            logger.error(f"Failed to fetch use cases: {e}")
+            msg = f"Failed to fetch Use Cases: {e}"
+            raise RuntimeError(msg) from e
+        return UseCasePage(
+            rows=[self._row_to_use_case(row) for row in rows],
+            total_rows=total_rows,
+            page=page,
+            page_size=page_size,
+        )
+
+    def get_use_case(self, use_case_id: str) -> UseCase | None:
+        """Fetch a single Use Case with its reference count."""
+        query = self._use_cases_select("uc.use_case_id = :use_case_id")
+        try:
+            rows = self._response_rows(
+                self._connection.execute_statement(
+                    query, {"use_case_id": use_case_id}
+                )
+            )
+        except Exception as e:
+            logger.error(f"Failed to fetch use case {use_case_id}: {e}")
+            msg = f"Failed to fetch Use Case: {e}"
+            raise RuntimeError(msg) from e
+        return self._row_to_use_case(rows[0]) if rows else None
+
+    def get_use_case_references(self, use_case_id: str) -> list[str]:
+        """List the One Pager IDs referencing a Use Case."""
+        query = (
+            f"SELECT one_pager_id FROM {self._fqn_prefix}.use_case_references "  # noqa: S608
+            f"WHERE use_case_id = :use_case_id ORDER BY one_pager_id"
+        )
+        try:
+            rows = self._response_rows(
+                self._connection.execute_statement(
+                    query, {"use_case_id": use_case_id}
+                )
+            )
+        except Exception as e:
+            logger.error(f"Failed to fetch references for {use_case_id}: {e}")
+            msg = f"Failed to fetch Use Case references: {e}"
+            raise RuntimeError(msg) from e
+        return [str(row["one_pager_id"]) for row in rows]
+
+    @staticmethod
+    def _use_case_parameters(data: UseCaseInput) -> dict[str, SqlParameterValue]:
+        return {
+            "persona": data.persona,
+            "goal": data.goal,
+            "scenario": data.scenario,
+            "decision_enabled": data.decision_enabled,
+            "priority": data.priority,
+        }
+
+    def create_use_case(self, data: UseCaseInput, user_initials: str) -> str:
+        """Allocate a UC-### ID and insert the Use Case.
+
+        If the INSERT fails after the ID was allocated, that ID is skipped —
+        a gap in the sequence is harmless (Data_Model.md §4).
+        """
+        use_case_id = next_id(self, "UC")
+        query = (
+            f"INSERT INTO {self._fqn_prefix}.use_cases ({_USE_CASE_COLUMNS}) "  # noqa: S608
+            f"VALUES (:use_case_id, :persona, :goal, :scenario, :decision_enabled, "
+            f":priority, false, :user_initials, current_timestamp(), "
+            f":user_initials, current_timestamp())"
+        )
+        parameters = {
+            **self._use_case_parameters(data),
+            "use_case_id": use_case_id,
+            "user_initials": user_initials,
+        }
+        try:
+            self._connection.execute_statement(query, parameters)
+        except Exception as e:
+            logger.error(f"Failed to create use case {use_case_id}: {e}")
+            msg = f"Failed to create Use Case: {e}"
+            raise RuntimeError(msg) from e
+        return use_case_id
+
+    def _update_use_case_row(
+        self,
+        use_case_id: str,
+        set_clause: str,
+        parameters: dict[str, SqlParameterValue],
+    ) -> None:
+        """Run an UPDATE on one Use Case, stamping the audit columns."""
+        query = (
+            f"UPDATE {self._fqn_prefix}.use_cases SET {set_clause}, "  # noqa: S608
+            f"last_updated_by = :user_initials, "
+            f"last_updated_at = current_timestamp() "
+            f"WHERE use_case_id = :use_case_id"
+        )
+        try:
+            response = self._connection.execute_statement(
+                query, {**parameters, "use_case_id": use_case_id}
+            )
+        except Exception as e:
+            logger.error(f"Failed to update use case {use_case_id}: {e}")
+            msg = f"Failed to update Use Case: {e}"
+            raise RuntimeError(msg) from e
+        if self._affected_rows(response) == 0:
+            msg = f"Use Case {use_case_id} not found"
+            raise NotFoundError(msg)
+
+    def update_use_case(
+        self, use_case_id: str, data: UseCaseInput, user_initials: str
+    ) -> None:
+        """Update a Use Case's editable fields."""
+        self._update_use_case_row(
+            use_case_id,
+            "persona = :persona, goal = :goal, scenario = :scenario, "
+            "decision_enabled = :decision_enabled, priority = :priority",
+            {**self._use_case_parameters(data), "user_initials": user_initials},
+        )
+
+    def set_use_case_deprecated(
+        self, use_case_id: str, deprecated: bool, user_initials: str  # noqa: FBT001
+    ) -> None:
+        """Deprecate or restore a Use Case."""
+        self._update_use_case_row(
+            use_case_id,
+            "deprecated = :deprecated",
+            {"deprecated": deprecated, "user_initials": user_initials},
+        )

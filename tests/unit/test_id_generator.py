@@ -78,3 +78,21 @@ def test__next_id__gives_up_after_max_attempts() -> None:
     with pytest.raises(IdGenerationError):
         next_id(fake, "OP")
     assert fake.cas_calls == MAX_ATTEMPTS
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("id_type", "value"), [("OP", 0), ("OP", 10000), ("UC", 1000), ("BR", 1000)]
+)
+def test__format_id__out_of_range(id_type: str, value: int) -> None:
+    with pytest.raises(ValueError, match="outside"):
+        format_id(id_type, value)
+
+
+@pytest.mark.unit
+def test__next_id__overflow_does_not_consume_a_value() -> None:
+    fake = _FakeSequences(value=999)
+    with pytest.raises(ValueError, match="outside"):
+        next_id(fake, "UC")
+    assert fake.value == 999
+    assert fake.cas_calls == 0

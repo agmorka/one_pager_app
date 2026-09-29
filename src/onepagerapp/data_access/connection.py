@@ -4,7 +4,6 @@ import logging
 import time
 from collections.abc import Mapping
 from datetime import date, datetime
-from typing import Any
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.sql import (
@@ -21,6 +20,60 @@ logger = logging.getLogger(__name__)
 _MAX_RETRIES = 3
 _RETRY_DELAY_SECONDS = 5
 _STATEMENT_WAIT_TIMEOUT = "30s"
+_FAILED_STATES = (StatementState.FAILED, StatementState.CANCELED, StatementState.CLOSED)
+
+SqlParameterValue = str | int | bool | datetime | date | None
+
+
+class StatementFailedError(RuntimeError):
+    """The SQL warehouse accepted a statement but reported it as failed."""
+
+
+def to_statement_parameters(
+    parameters: Mapping[str, SqlParameterValue],
+) -> list[StatementParameterListItem]:
+    """Convert a name → value mapping into SQL Statement API parameters.
+
+    Values are bound server-side and referenced in SQL as ``:name`` markers,
+    so user input never becomes part of the SQL text.
+
+    Args:
+        parameters: Parameter values keyed by marker name. ``None`` binds NULL.
+
+    Returns:
+        Parameter list for ``statement_execution.execute_statement``.
+    """
+    items = []
+    for name, value in parameters.items():
+        if isinstance(value, bool):
+            items.append(
+                StatementParameterListItem(
+                    name=name, value=str(value).lower(), type="BOOLEAN"
+                )
+            )
+        elif isinstance(value, int):
+            items.append(
+                StatementParameterListItem(name=name, value=str(value), type="INT")
+            )
+        elif isinstance(value, datetime):
+            items.append(
+                StatementParameterListItem(
+                    name=name, value=value.isoformat(), type="TIMESTAMP"
+                )
+            )
+        elif isinstance(value, date):
+            items.append(
+                StatementParameterListItem(
+                    name=name, value=value.isoformat(), type="DATE"
+                )
+            )
+        elif value is None:
+            items.append(StatementParameterListItem(name=name, type="STRING"))
+        else:
+            items.append(
+                StatementParameterListItem(name=name, value=value, type="STRING")
+            )
+    return items
 
 
 class DatabricksConnection:
@@ -61,31 +114,26 @@ class DatabricksConnection:
     def execute_statement(
         self,
         statement: str,
-        parameters: Mapping[str, Any] | None = None,
+        parameters: Mapping[str, SqlParameterValue] | None = None,
     ) -> StatementResponse:
         """Execute a SQL statement with retry logic.
 
-        Values are bound server-side via named parameter markers, e.g.
-        ``WHERE one_pager_id = :one_pager_id`` with
-        ``parameters={"one_pager_id": "OP-0001"}``. Never interpolate
-        user-supplied values into ``statement``.
-
-        Only connection errors are retried. A statement that reaches the
-        warehouse and fails is reported immediately (not retried), so
-        non-idempotent writes are never executed twice.
-
         Args:
-            statement: SQL statement to execute.
-            parameters: Optional mapping of marker name to value.
+            statement: SQL statement to execute. User-supplied values must be
+                referenced as named markers (``:name``) and passed in
+                ``parameters`` — never formatted into the statement text.
+            parameters: Values for the named markers in ``statement``.
 
         Returns:
             StatementResponse from Databricks.
 
         Raises:
-            RuntimeError: If the statement fails or all retry attempts fail.
+            StatementFailedError: If the warehouse reports the statement as
+                failed, canceled, or closed.
+            RuntimeError: If all retry attempts fail.
         """
+        bound = to_statement_parameters(parameters) if parameters else None
         token = self._get_access_token()
-        bound = to_statement_parameters(parameters)
         
         # auth_type is required: the Databricks Apps runtime sets OAuth env vars,
         # which conflict with this explicit token unless we pin the auth method
@@ -118,58 +166,15 @@ class DatabricksConnection:
         raise RuntimeError(msg) from last_err
 
 
-def to_statement_parameters(
-    parameters: Mapping[str, Any] | None,
-) -> list[StatementParameterListItem] | None:
-    """Convert a name -> value mapping into Statement Execution API parameters.
-
-    ``None`` is bound as SQL NULL. Booleans, integers and timestamps get an
-    explicit type so they compare correctly with typed columns; everything
-    else is bound as STRING.
-    """
-    if not parameters:
-        return None
-    items = []
-    for name, value in parameters.items():
-        if value is None:
-            items.append(StatementParameterListItem(name=name, value=None))
-        elif isinstance(value, bool):
-            items.append(
-                StatementParameterListItem(
-                    name=name, value="true" if value else "false", type="BOOLEAN"
-                )
-            )
-        elif isinstance(value, int):
-            items.append(
-                StatementParameterListItem(name=name, value=str(value), type="BIGINT")
-            )
-        elif isinstance(value, datetime):
-            items.append(
-                StatementParameterListItem(
-                    name=name, value=value.isoformat(), type="TIMESTAMP"
-                )
-            )
-        elif isinstance(value, date):
-            items.append(
-                StatementParameterListItem(
-                    name=name, value=value.isoformat(), type="DATE"
-                )
-            )
-        else:
-            items.append(StatementParameterListItem(name=name, value=str(value)))
-    return items
-
-
 def _raise_if_failed(response: StatementResponse) -> None:
-    """Raise if the warehouse reports the statement as failed/cancelled."""
+    """Raise StatementFailedError when the warehouse reports a failed statement.
+
+    Without this check a failed statement looks like an empty result, which
+    would silently swallow failed writes.
+    """
     status = response.status
-    if status is None or status.state is None:
+    if status is None or status.state not in _FAILED_STATES:
         return
-    if status.state in (
-        StatementState.FAILED,
-        StatementState.CANCELED,
-        StatementState.CLOSED,
-    ):
-        detail = status.error.message if status.error else status.state.value
-        msg = f"SQL statement {status.state.value}: {detail}"
-        raise RuntimeError(msg)
+    detail = status.error.message if status.error else "no error details"
+    msg = f"SQL statement {status.state.value}: {detail}"
+    raise StatementFailedError(msg)

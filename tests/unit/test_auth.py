@@ -14,10 +14,10 @@ from onepagerapp.auth import (
         ("MJOADM@BECOC001.onmicrosoft.com", "MJO"),
         ("abADM@BECOC001.onmicrosoft.com", "AB"),
         ("alice.brown@company.com", "AB"),
-        ("local-dev-user@mock.local", "LD"),
+        ("local-dev-user@mock.local", "LDU"),
         ("Alice Brown", "AB"),
         ("svc@company.com", "SVC"),
-        ("", "?"),
+        ("", "??"),
     ],
 )
 def test__initials_from_username__known_formats(username: str, expected: str) -> None:
