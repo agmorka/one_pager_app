@@ -42,7 +42,7 @@ The Editor has create mode and, from Phase 4, edit mode. Missing:
 | 2.3 | Editor tabs other than Basics: ~~**Use Cases** (link existing / create new inline / unlink), **Business Requirements** (with automatic `BR-###` IDs), **Data Sources**, **Data Product Preview** (data element grid), **Classification** (with retention requirements), **Governance** (business concepts, CDE quality, CDE lineage), **Scope & Questions** (out of scope, open questions, assumptions)~~ **Done (Phase 4):** `app/adapters/edit_tabs.py`. Still missing: **Review** (validation checklist, resolve comments, submit) — Phase 6 |
 | 2.4 | ~~Repeating-items pattern: add, edit and remove for array sections~~ **Done (Phase 4):** `app/adapters/repeating.py` (summary table, inline add/edit form, remove with confirmation) |
 | 2.5 | ~~Validation error badges on tabs, plus a clickable validation summary~~ **Done (Phase 4):** badges show the strict-tier issues per tab (`editing.submission_issues`); every summary entry opens its tab. The badges sit in a line under the tab bar, because changing the tab labels would reset the selected tab |
-| 2.6 | Unsaved-changes guard on sidebar navigation |
+| 2.6 | ~~Unsaved-changes guard on sidebar navigation~~ **Done (Phase 4):** Streamlit cannot block sidebar navigation, so the guard runs on the page the user lands on: unsaved changes are kept and a dialog offers **Return to the Editor** / **Discard changes**; a clean edit session is closed and its lock released. **Close editor** asks first when there are unsaved changes |
 | 2.7 | ~~Sync of `one_pager_authorized_users` when the Owner or SMEs change on a save (insert, update, delete) (Backend §11)~~ **Done (Phase 4):** `editing.sync_authorized_users`, run by `save_draft` and undone if the save fails |
 | 2.8 | ~~Linking a Use Case to a One Pager: `link_use_case` / `unlink_use_case` writes to `use_case_references` (Backend §9)~~ **Done (Phase 4):** `editing.link_use_case` / `unlink_use_case`; links made in the editor are written on Save Draft; deprecated Use Cases cannot be newly linked |
 
@@ -209,7 +209,7 @@ Locking must exist before users can edit existing records, or two editors can ov
 | 15 | ~~5.3 Manual release (**Release my lock** in Preview)~~ **Done** | Release on submit and cancel is wired up in Phase 5 |
 | 16 | ~~5.5 / 11.4 Lock icon and holder initials in the Registry~~ **Done** | Reads the same lock data |
 
-### Phase 4: Editing existing One Pagers
+### Phase 4: Editing existing One Pagers — ✅ done
 
 | Order | Item | Why now |
 |---|---|---|
@@ -219,7 +219,7 @@ Locking must exist before users can edit existing records, or two editors can ov
 | 20 | ~~2.4 Repeating-items pattern~~ **Done** | A shared component used by most of the remaining tabs |
 | 21 | ~~2.3 Editor tabs in this order: Business Requirements, Use Cases (with 2.8 `link_use_case` / `unlink_use_case`), Data Sources, Data Product Preview, Classification, Governance, Scope & Questions~~ **Done** | Simple arrays first. The Classification and Governance tabs rely on the conditional rules (3.3). The Review tab waits for Phase 6 |
 | 22 | ~~2.5 Validation badges on tabs and the clickable summary~~ **Done** | Needs all tabs and the strict tier |
-| 23 | 2.6 Unsaved-changes guard | UX polish once the editor is complete |
+| 23 | ~~2.6 Unsaved-changes guard~~ **Done** | UX polish once the editor is complete |
 
 ### Phase 5: Workflow state machine (owner side)
 

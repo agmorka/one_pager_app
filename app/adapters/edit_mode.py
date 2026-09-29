@@ -36,6 +36,7 @@ from onepagerapp.editing import (
     SAVE_FAILED_MESSAGE,
     SaveError,
     open_for_edit,
+    has_unsaved_changes,
     save_draft,
     submission_issues,
     working_copy,
@@ -278,6 +279,126 @@ def close_editor(data_access: DataAccess, one_pager_id: str, user: CurrentUser) 
         # The lock expires on its own; leaving the editor must not fail.
         logger.exception(f"Failed to release the lock on {one_pager_id}")
     _go_to_preview(one_pager_id)
+
+
+def is_dirty() -> bool:
+    """Whether the editor's working copy has unsaved changes."""
+    saved = st.session_state.get(SAVED_KEY)
+    working = st.session_state.get(DOCUMENT_KEY)
+    if saved is None or working is None:
+        return False
+    return has_unsaved_changes(saved, working)
+
+
+@st.dialog("Leave without saving?")
+def _confirm_close(
+    data_access: DataAccess, one_pager_id: str, user: CurrentUser
+) -> None:
+    st.write("You have unsaved changes. They will be lost.")
+    col_leave, col_stay = st.columns(2)
+    if col_leave.button(
+        "Leave without saving", type="primary", use_container_width=True
+    ):
+        close_editor(data_access, one_pager_id, user)
+    if col_stay.button("Keep editing", use_container_width=True):
+        st.rerun()
+
+
+# What the navigation guard does when the user left the editor.
+GUARD_NONE = "none"
+GUARD_RELEASE = "release"
+GUARD_CONFIRM = "confirm"
+
+
+def guard_action(
+    *,
+    on_editor_page: bool,
+    editor_mode: str | None,
+    editor_one_pager_id: str | None,
+    edit_one_pager_id: str | None,
+    dirty: bool,
+) -> str:
+    """Decide what to do about an open edit session on this page run.
+
+    Streamlit cannot stop sidebar navigation, so the guard runs on the page
+    the user navigated to: an edit session with unsaved changes asks the user
+    to return or discard; a clean one is closed and its lock released.
+    """
+    if edit_one_pager_id is None:
+        return GUARD_NONE
+    still_editing = (
+        on_editor_page
+        and editor_mode == "edit"
+        and editor_one_pager_id == edit_one_pager_id
+    )
+    if still_editing:
+        return GUARD_NONE
+    return GUARD_CONFIRM if dirty else GUARD_RELEASE
+
+
+def _release_quietly(
+    data_access: DataAccess, one_pager_id: str, user: CurrentUser
+) -> None:
+    try:
+        release_lock(data_access, one_pager_id, user)
+    except Exception:
+        logger.exception(f"Failed to release the lock on {one_pager_id}")
+    clear_edit_state()
+
+
+def _return_to_editor(one_pager_id: str) -> None:
+    st.session_state["editor_mode"] = "edit"
+    st.session_state["editor_one_pager_id"] = one_pager_id
+    st.switch_page("views/editor.py")
+
+
+@st.dialog("You have unsaved changes")
+def _confirm_leave(
+    data_access: DataAccess, one_pager_id: str, user: CurrentUser
+) -> None:
+    st.write(
+        f"You left the Editor with unsaved changes to **{one_pager_id}**. "
+        "Leave without saving?"
+    )
+    col_back, col_discard = st.columns(2)
+    if col_back.button(
+        "Return to the Editor", type="primary", use_container_width=True
+    ):
+        _return_to_editor(one_pager_id)
+    if col_discard.button("Discard changes", use_container_width=True):
+        _release_quietly(data_access, one_pager_id, user)
+        st.rerun()
+
+
+def navigation_guard(
+    page_title: str, data_access: DataAccess, user: CurrentUser | None
+) -> None:
+    """Unsaved-changes guard for sidebar navigation (UI_Design.md §4.2).
+
+    Called by the app shell before every page runs.
+    """
+    edit_id = st.session_state.get(ONE_PAGER_KEY)
+    action = guard_action(
+        on_editor_page=page_title == "Editor",
+        editor_mode=st.session_state.get("editor_mode"),
+        editor_one_pager_id=st.session_state.get("editor_one_pager_id"),
+        edit_one_pager_id=edit_id,
+        dirty=is_dirty(),
+    )
+    if action == GUARD_NONE or user is None:
+        if edit_id is not None:
+            st.session_state.pop("guard_prompted", None)
+        return
+    if action == GUARD_RELEASE:
+        _release_quietly(data_access, edit_id, user)
+        return
+    with st.sidebar:
+        st.warning(f"Unsaved changes in the Editor ({edit_id}).", icon="✏️")
+        if st.button("Return to the Editor", key="guard_return"):
+            _return_to_editor(edit_id)
+    if st.session_state.get("guard_prompted") != edit_id:
+        st.session_state["guard_prompted"] = edit_id
+        _confirm_leave(data_access, edit_id, user)
 
 
 def _stop_with_preview_link(one_pager_id: str) -> None:
@@ -559,7 +680,10 @@ def render_bottom_bar(
         _save(data_access, document_store, one_pager_id, user)
         st.rerun()
     if close_clicked:
-        close_editor(data_access, one_pager_id, user)
+        if is_dirty():
+            _confirm_close(data_access, one_pager_id, user)
+        else:
+            close_editor(data_access, one_pager_id, user)
 
 
 def render_edit_mode(
@@ -600,6 +724,8 @@ def render_edit_mode(
         submission_issues(doc, st.session_state[STATUS_ROW_KEY])
     )
     with badge_line:
+        if is_dirty():
+            st.caption("● Unsaved changes")
         render_badges(submit_issues)
 
     st.divider()

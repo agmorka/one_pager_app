@@ -10,6 +10,7 @@ from pathlib import Path
 
 import streamlit as st
 
+from adapters.edit_mode import navigation_guard
 from adapters.theme import apply_theme, environment_badge
 from onepagerapp.auth import resolve_current_user
 from onepagerapp.config import AppConfig
@@ -128,6 +129,11 @@ def main() -> None:
         st.divider()
         user_name = st.session_state.get("current_user") or "unavailable"
         st.caption(f"Logged user: {user_name}")
+
+    if st.session_state.get("current_user_info") is not None:
+        navigation_guard(
+            pg.title, st.session_state.data_access, st.session_state.current_user_info
+        )
 
     pg.run()
 

@@ -177,6 +177,17 @@ def working_copy(document: OnePagerDocument) -> OnePagerDocument:
     return copy.deepcopy(document)
 
 
+def has_unsaved_changes(saved: OnePagerDocument, working: OnePagerDocument) -> bool:
+    """Whether the working copy differs from the stored document in content.
+
+    Both are normalized first, so whitespace, HTML tags or a blank row the
+    user left behind do not count as a change.
+    """
+    return document_to_dict(normalize_document(saved)) != document_to_dict(
+        normalize_document(working)
+    )
+
+
 def bump_minor(version: str) -> str:
     """Next MINOR version (Requirements_and_Scope.md §7): 0.3.0 -> 0.4.0.
 
