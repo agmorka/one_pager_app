@@ -29,6 +29,7 @@ from adapters.edit_tabs import (
     render_use_cases_tab,
 )
 from adapters.session import current_session_id
+from adapters.workflow_actions import resolve_comment_and_report
 from onepagerapp.data_access.base import DataAccess, NotFoundError
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.editing import (
@@ -49,6 +50,7 @@ from onepagerapp.models import (
     ValidationError,
 )
 from onepagerapp.permissions import PermissionDeniedError
+from onepagerapp.review import section_label
 from onepagerapp.state_machine import InvalidTransitionError
 from onepagerapp.validation import MAX_NAME_LENGTH, MAX_TEXT_LENGTH
 from onepagerapp.workflow import (
@@ -239,7 +241,112 @@ def render_problem_tab(doc: OnePagerDocument, data_access: DataAccess) -> None: 
     )
 
 
+def _resolve_in_editor(
+    data_access: DataAccess, one_pager_id: str, comment_id: int, user: CurrentUser
+) -> None:
+    """Handle **Mark resolved** in the Review tab."""
+    error = resolve_comment_and_report(data_access, one_pager_id, comment_id, user)
+    st.session_state[BANNER_KEY] = error
+    if not error:
+        st.session_state[FLASH_KEY] = "The comment was marked as resolved."
+
+
+def _render_checklist(doc: OnePagerDocument) -> int:
+    """Validation checklist per tab (strict tier); returns the issue count."""
+    issues = issues_by_tab(submission_issues(doc, st.session_state[STATUS_ROW_KEY]))
+    st.markdown("**Validation checklist**")
+    for tab in [t for t in TABS if t != REVIEW_TAB]:
+        count = len(issues.get(tab, []))
+        if count:
+            st.button(
+                f"⚠ {tab}: {count} issue(s) — open the tab",
+                key=f"edit_review_check_{tab}",
+                on_click=_go_to_tab,
+                args=(tab,),
+            )
+        else:
+            st.markdown(f"✅ {tab}")
+    for error in issues.get("Form", []):
+        st.markdown(f"⚠ {error.message}")
+    return sum(len(v) for v in issues.values())
+
+
+def _render_open_comments(data_access: DataAccess, one_pager_id: str) -> None:
+    """Review comments from earlier cycles, with **Mark resolved** (§13)."""
+    st.markdown("**Review comments**")
+    try:
+        comments = data_access.get_review_comments(one_pager_id)
+    except Exception:
+        logger.exception(f"Failed to load the review comments of {one_pager_id}")
+        st.warning("Review comments are unavailable right now.", icon="⚠️")
+        return
+    if not comments:
+        st.caption("No review comments.")
+        return
+    user = st.session_state.get("current_user_info")
+    unresolved = [c for c in comments if not c.resolved]
+    resolved = [c for c in comments if c.resolved]
+    if not unresolved:
+        st.caption("✅ Every review comment is resolved.")
+    for comment in unresolved:
+        with st.container(border=True):
+            st.markdown(
+                f"**{section_label(comment.section)}** · {comment.reviewer_name} "
+                f"({comment.reviewer_initials}) · v{comment.version}"
+            )
+            st.write(comment.comment)
+            if user is not None:
+                st.button(
+                    "✅ Mark resolved",
+                    key=f"edit_resolve_{comment.id}",
+                    on_click=_resolve_in_editor,
+                    args=(data_access, one_pager_id, comment.id, user),
+                )
+    if resolved:
+        with st.expander(f"Resolved comments ({len(resolved)})"):
+            for comment in resolved:
+                st.markdown(
+                    f"✅ **{section_label(comment.section)}** · "
+                    f"{comment.reviewer_name}: {comment.comment} "
+                    f"(resolved by {comment.resolved_by})"
+                )
+
+
+def render_review_tab(doc: OnePagerDocument, data_access: DataAccess) -> None:
+    """Review tab (UI_Design.md §4.2): checklist, review comments, Submit.
+
+    Read-only summary. Its **Submit for Review** is the same action as the
+    bottom bar's; it is enabled only when strict validation passes and there
+    are no unsaved changes.
+    """
+    one_pager_id = st.session_state[ONE_PAGER_KEY]
+    issue_count = _render_checklist(doc)
+    st.divider()
+    _render_open_comments(data_access, one_pager_id)
+    st.divider()
+    dirty = is_dirty()
+    if dirty:
+        reason = "Save your changes first."
+    elif issue_count:
+        reason = f"Fix the {issue_count} issue(s) of the checklist first."
+    else:
+        reason = "Sends the One Pager to review. Releases your lock."
+    user = st.session_state.get("current_user_info")
+    if st.button(
+        "Submit for Review",
+        key="edit_review_submit",
+        type="primary",
+        disabled=bool(dirty or issue_count or user is None),
+        help=reason,
+    ):
+        _submit(data_access, one_pager_id, user)
+        st.rerun()
+    st.caption(reason)
+
+
 TabRenderer = Callable[[OnePagerDocument, DataAccess], None]
+
+REVIEW_TAB = "Review"
 
 # Tab label → renderer, in the order of UI_Design.md §4.2.
 TABS: dict[str, TabRenderer] = {
@@ -252,6 +359,7 @@ TABS: dict[str, TabRenderer] = {
     "Classification": render_classification_tab,
     "Governance": render_governance_tab,
     "Scope & Questions": render_scope_tab,
+    REVIEW_TAB: render_review_tab,
 }
 
 

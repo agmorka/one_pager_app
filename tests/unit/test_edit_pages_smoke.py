@@ -214,6 +214,7 @@ TAB_NAMES = [
     "Classification",
     "Governance",
     "Scope & Questions",
+    "Review",
 ]
 
 
@@ -455,3 +456,78 @@ def test__preview__renders_after_transition_on_seeded_one_pager(
 
     assert not at.exception
     assert any("Development started" in m.value for m in at.markdown)
+
+
+def _reject_with_comment(services: dict) -> int:
+    """Send OP-0003 through review and back (rejected with one comment)."""
+    from onepagerapp.review import add_review_comment  # noqa: PLC0415
+    from onepagerapp.state_machine import Actor  # noqa: PLC0415
+    from onepagerapp.workflow import reject_one_pager  # noqa: PLC0415
+
+    data_access = services["data_access"]
+    rows = data_access._status_rows
+    rows["OP-0003"].one_pager_status = "In Review"
+    approver = resolve_current_user("cjo@bec.dk")
+    roles = {Actor.APPROVER}
+    add_review_comment(
+        data_access, "OP-0003", approver, "dataSources", "Add sources", roles=roles
+    )
+    reject_one_pager(data_access, "OP-0003", approver, "See comments", roles=roles)
+    return data_access.get_review_comments("OP-0003")[0].id
+
+
+@pytest.mark.unit
+def test__editor__review_tab_checklist_and_blocked_submit(
+    services: dict, switched: list[str]
+) -> None:
+    at = _tab(_editor(services).run(), "Review")
+
+    assert not at.exception
+    assert any(m.value == "✅ Basics" for m in at.markdown)
+    check = at.button(key="edit_review_check_Data Sources")
+    assert "issue(s)" in check.label
+    assert at.button(key="edit_review_submit").disabled
+    assert "No review comments." in [c.value for c in at.caption]
+
+    check.click().run()
+    assert at.radio(key="edit_active_tab").value == "Data Sources"
+
+
+@pytest.mark.unit
+def test__editor__review_tab_resolves_comments(
+    services: dict, switched: list[str]
+) -> None:
+    comment_id = _reject_with_comment(services)
+    at = _tab(_editor(services).run(), "Review")
+
+    assert not at.exception
+    assert any("Data Sources" in m.value for m in at.markdown)
+    at.button(key=f"edit_resolve_{comment_id}").click().run()
+
+    assert not at.exception
+    comment = services["data_access"].get_review_comments("OP-0003")[0]
+    assert (comment.resolved, comment.resolved_by) == (True, "AB")
+    assert "The comment was marked as resolved." in [s.value for s in at.success]
+    assert f"edit_resolve_{comment_id}" not in {b.key for b in at.button}
+
+
+@pytest.mark.unit
+def test__editor__review_tab_submits_when_complete(
+    services: dict, switched: list[str]
+) -> None:
+    from tests.unit.test_editing_links import fill_all_sections  # noqa: PLC0415
+
+    at = _editor(services).run()
+    fill_all_sections(at.session_state["edit_document"])
+    at.text_input(key="edit_change_summary").input("Complete").run()
+    _tab(at, "Review")
+    assert at.button(key="edit_review_submit").disabled  # unsaved changes
+    _button(at, "Save Draft").click().run()
+    assert not at.button(key="edit_review_submit").disabled
+
+    at.button(key="edit_review_submit").click().run()
+
+    assert not at.exception
+    assert switched == ["views/preview.py"]
+    row = services["data_access"].get_one_pager_status_row("OP-0003")
+    assert row.one_pager_status == "In Review"
