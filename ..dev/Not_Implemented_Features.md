@@ -125,9 +125,9 @@ There is no `git_integration.py`.
 
 | # | Feature |
 |---|---|
-| 11.1 | **Use case** filter. `RegistryFilter` has no use case field. |
-| 11.2 | Clicking a metric card filters the table by that status |
-| 11.3 | Sortable columns |
+| 11.1 | ~~**Use case** filter. `RegistryFilter` has no use case field.~~ **Done (Phase 7):** `RegistryFilter.use_case_id` (One Pagers linked through `use_case_references`); **Use Case** dropdown in the filter bar lists every Use Case, deprecated ones marked |
+| 11.2 | ~~Clicking a metric card filters the table by that status~~ **Done (Phase 7):** a **Show** button under each card sets the OP Status filter (Total shows all); the active card is outlined |
+| 11.3 | ~~Sortable columns~~ **Done (Phase 7):** `RegistrySort` (column + direction, ties by ID) passed to `get_registry`; the column titles are buttons that sort, a second click reverses (▲/▼). Lock is not sortable |
 | 11.4 | ~~Lock indicator in the table (same item as 5.5)~~ **Done (Phase 3)** |
 
 ## 12. Preview gaps (UI §4.4)
@@ -245,11 +245,11 @@ Locking must exist before users can edit existing records, or two editors can ov
 
 At the end of Phase 6 the full lifecycle works end to end, without Git.
 
-### Phase 7: Registry polish and caching
+### Phase 7: Registry polish and caching — 🚧 in progress
 
 | Order | Item | Why now |
 |---|---|---|
-| 36 | 11.1 Use case filter, 11.2 clickable metric cards, 11.3 sortable columns | Independent Registry improvements |
+| 36 | ~~11.1 Use case filter, 11.2 clickable metric cards, 11.3 sortable columns~~ **Done** | Independent Registry improvements |
 | 37 | 13.5 Registry and use case caching with invalidation after writes | Easiest now that every write path is known |
 
 ### Phase 8: Git integration

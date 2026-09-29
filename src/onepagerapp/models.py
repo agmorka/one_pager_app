@@ -2,6 +2,7 @@
 
 These models define the structure of data flowing through the application layers:
 - RegistryFilter: parameters for querying One Pagers
+- RegistrySort: column and direction the Registry table is sorted by
 - StatusRef: reference data for status values (display label, color, sort order)
 - RegistryRow: a single One Pager row for display in the Registry table
 - RegistryPage: paginated result set with total count
@@ -26,6 +27,7 @@ class RegistryFilter:
         owner: Partial match on owner name or email.
         domain: Business domain (exact match after normalization).
         data_product_type: Data product type: "Foundational", "Integrated", "Augmented".
+        use_case_id: Only One Pagers linked to this Use Case (use_case_references).
     """
 
     product_name: Optional[str] = None
@@ -34,6 +36,49 @@ class RegistryFilter:
     owner: Optional[str] = None
     domain: Optional[str] = None
     data_product_type: Optional[str] = None
+    use_case_id: str | None = None
+
+
+# RegistryRow fields the Registry table can be sorted by (UI_Design.md §4.1).
+REGISTRY_SORT_COLUMNS = (
+    "one_pager_id",
+    "product_name",
+    "business_domain",
+    "data_product_type",
+    "owner_name",
+    "one_pager_status",
+    "data_product_status",
+)
+
+
+@dataclass(frozen=True)
+class RegistrySort:
+    """Sort order of a Registry query.
+
+    Ties are broken by one_pager_id (ascending) so pagination stays stable.
+
+    Attributes:
+        column: One of REGISTRY_SORT_COLUMNS.
+        descending: Sort from highest to lowest.
+
+    """
+
+    column: str = "one_pager_id"
+    descending: bool = False
+
+    def __post_init__(self) -> None:
+        if self.column not in REGISTRY_SORT_COLUMNS:
+            msg = f"Cannot sort the registry by {self.column!r}"
+            raise ValueError(msg)
+
+    def toggled(self, column: str) -> "RegistrySort":
+        """Return the sort after clicking ``column``.
+
+        The same column flips the direction; another column sorts ascending by it.
+        """
+        if column == self.column:
+            return RegistrySort(column, not self.descending)
+        return RegistrySort(column)
 
 
 @dataclass

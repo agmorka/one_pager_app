@@ -15,6 +15,7 @@ from onepagerapp.models import (
     PreviewData,
     RegistryFilter,
     RegistryPage,
+    RegistrySort,
     ReviewComment,
     UseCase,
     UseCaseFilter,
@@ -69,8 +70,14 @@ class DataAccess(ABC):
         ...
 
     @abstractmethod
-    def get_registry(self, filter: RegistryFilter, page: int, page_size: int) -> RegistryPage:
-        """Query One Pagers with filtering and pagination.
+    def get_registry(
+        self,
+        filter: RegistryFilter,
+        page: int,
+        page_size: int,
+        sort: RegistrySort | None = None,
+    ) -> RegistryPage:
+        """Query One Pagers with filtering, sorting and pagination.
         
         Applies filters with AND semantics. Returns a RegistryPage with the requested page
         of results and the total count across all matching rows.
@@ -79,6 +86,7 @@ class DataAccess(ABC):
             filter: RegistryFilter with optional criteria (None = no filter on that dimension).
             page: 1-indexed page number.
             page_size: Number of rows per page.
+            sort: Sort order; None sorts by one_pager_id ascending.
             
         Returns:
             RegistryPage containing rows for the requested page, total row count, and pagination info.
