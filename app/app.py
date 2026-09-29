@@ -103,6 +103,7 @@ def main() -> None:
             st.Page("views/registry.py", title="Registry"),
             st.Page("views/preview.py", title="Preview"),
             st.Page("views/editor.py", title="Editor"),
+            st.Page("views/use_cases.py", title="Use Cases"),
         ]
     )
 

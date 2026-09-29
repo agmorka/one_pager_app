@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from onepagerapp.config import AppConfig, AppMode
+from onepagerapp.data_access.connection import StatementFailedError
 from onepagerapp.data_access.lakehouse import LakehouseAccess
 from onepagerapp.models import AuthorizedUser, ChangeLogEntry, OnePagerStatusRow
 
@@ -66,8 +67,8 @@ def test__compare_and_set__uses_num_affected_rows() -> None:
     assert _access(conn).compare_and_set_sequence("OP", 6, 7) is True
     statement, params = conn.calls[0]
     assert "UPDATE cat.sch.id_sequences" in statement
-    assert "last_value = :expected" in statement
-    assert params == {"new": 7, "id_type": "OP", "expected": 6}
+    assert "last_value = :current_value" in statement
+    assert params == {"id_type": "OP", "new_value": 7, "current_value": 6}
 
     conn = _FakeConnection([_response(["num_affected_rows"], [["0"]])])
     assert _access(conn).compare_and_set_sequence("OP", 6, 7) is False
@@ -76,7 +77,7 @@ def test__compare_and_set__uses_num_affected_rows() -> None:
 @pytest.mark.unit
 def test__compare_and_set__concurrent_conflict_is_retryable() -> None:
     conn = _FakeConnection(
-        error=RuntimeError("SQL statement FAILED: ConcurrentAppendException")
+        error=StatementFailedError("SQL statement FAILED: ConcurrentAppendException")
     )
     assert _access(conn).compare_and_set_sequence("OP", 6, 7) is False
 
@@ -84,7 +85,7 @@ def test__compare_and_set__concurrent_conflict_is_retryable() -> None:
 @pytest.mark.unit
 def test__get_sequence_value__missing_row_raises() -> None:
     conn = _FakeConnection([_response(["last_value"], [])])
-    with pytest.raises(RuntimeError, match="no row for OP"):
+    with pytest.raises(RuntimeError, match="no row for id_type 'OP'"):
         _access(conn).get_sequence_value("OP")
 
 

@@ -24,3 +24,9 @@ databaseChangeLog:
         file: ddl/review_comments.sql
     - include:
         file: ddl/locks.sql
+
+    # Use Case registry (references depend on one_pager_status and use_cases)
+    - include:
+        file: ddl/use_cases.sql
+    - include:
+        file: ddl/use_case_references.sql

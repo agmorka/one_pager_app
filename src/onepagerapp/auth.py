@@ -9,37 +9,45 @@ import re
 
 from onepagerapp.models import CurrentUser
 
-# Corporate admin accounts: <INITIALS>ADM@BECOC001.onmicrosoft.com -> INITIALS
-_CORPORATE_PATTERN = re.compile(r"^([A-Za-z]{2,5})ADM@", re.IGNORECASE)
+# Corporate usernames look like "<initials>ADM@BECOC001.onmicrosoft.com"
+# (Requirements_and_Scope.md §2), e.g. "MJOADM@..." -> "MJO".
+_CORPORATE_USERNAME = re.compile(r"^([A-Za-z]{2,4})ADM$", re.IGNORECASE)
+_PLAIN_INITIALS = re.compile(r"^[A-Za-z]{2,4}$")
 _SEPARATORS = re.compile(r"[.\-_\s]+")
 _MIN_PARTS = 2
+_MAX_PARTS = 3
 
 
-def initials_from_username(username: str) -> str:
-    """Extract initials from a Databricks username, email or display name.
+def initials_from_username(username: str | None) -> str:
+    """Derive a user's corporate initials from their Databricks identity.
+
+    This is the single implementation used everywhere initials are needed
+    (authorization, Delta audit columns, change log); ``permissions.
+    extract_initials`` delegates here.
 
     Examples:
-        "MJOADM@BECOC001.onmicrosoft.com" -> "MJO"
-        "alice.brown@company.com" -> "AB"
-        "Alice Brown" -> "AB"
-        "local-dev-user@mock" -> "LD"
+        "MJOADM@BECOC001.onmicrosoft.com" -> "MJO"  (documented corporate format)
+        "mjo@bec.dk"                      -> "MJO"  (bare initials)
+        "alice.brown@company.com"         -> "AB"
+        "local-dev-user@mock"             -> "LDU"  (fallback: first letters)
+        None / ""                         -> "??"
 
     Returns:
-        Uppercase initials, or "?" for an empty username.
+        Upper-case initials, or "??" when nothing usable is available.
 
     """
-    if not username:
-        return "?"
-
-    match = _CORPORATE_PATTERN.match(username)
-    if match:
-        return match.group(1).upper()
-
-    local_part = username.split("@", 1)[0]
-    parts = [p for p in _SEPARATORS.split(local_part) if p]
-    if len(parts) >= _MIN_PARTS:
-        return (parts[0][0] + parts[1][0]).upper()
-    return local_part[:3].upper()
+    local_part = (username or "").split("@", 1)[0].strip()
+    corporate = _CORPORATE_USERNAME.match(local_part)
+    if corporate:
+        return corporate.group(1).upper()
+    if _PLAIN_INITIALS.match(local_part):
+        return local_part.upper()
+    tokens = [token for token in _SEPARATORS.split(local_part) if token]
+    if len(tokens) >= _MIN_PARTS:
+        return "".join(token[0] for token in tokens[:_MAX_PARTS]).upper()
+    if tokens:
+        return tokens[0][:3].upper()
+    return "??"
 
 
 def display_name_from_username(username: str) -> str:
@@ -52,10 +60,10 @@ def display_name_from_username(username: str) -> str:
     """
     if not username:
         return "Unknown user"
-    match = _CORPORATE_PATTERN.match(username)
-    if match:
-        return match.group(1).upper()
-    local_part = username.split("@", 1)[0]
+    local_part = username.split("@", 1)[0].strip()
+    corporate = _CORPORATE_USERNAME.match(local_part)
+    if corporate:
+        return corporate.group(1).upper()
     parts = [p for p in _SEPARATORS.split(local_part) if p]
     return " ".join(p.capitalize() for p in parts) or username
 

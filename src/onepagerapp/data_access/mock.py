@@ -1,12 +1,14 @@
 """Mock data access for local development and unit tests."""
 
 import copy
+from dataclasses import replace
 from datetime import datetime
 
 import pandas as pd
 
-from onepagerapp.data_access.base import DataAccess
+from onepagerapp.data_access.base import DataAccess, NotFoundError
 from onepagerapp.documents import OnePagerDocumentStore
+from onepagerapp.id_generator import next_id
 from onepagerapp.models import (
     AuthorizedUser,
     ChangeLogEntry,
@@ -19,6 +21,10 @@ from onepagerapp.models import (
     RegistryPage,
     RegistryRow,
     ReviewComment,
+    UseCase,
+    UseCaseFilter,
+    UseCaseInput,
+    UseCasePage,
 )
 
 
@@ -40,10 +46,23 @@ class MockDataAccess(DataAccess):
         self._authorized_users: dict[str, list[AuthorizedUser]] = (
             _seed_authorized_users()
         )
-        # D14: the OP counter starts after the highest seeded mock ID.
+        self._use_cases: dict[str, UseCase] = {
+            uc.use_case_id: uc for uc in _sample_use_cases()
+        }
+        # (one_pager_id, use_case_id) rows of the use_case_references table.
+        # The sample YAML documents store Use Cases inline without IDs, so the
+        # references are seeded here rather than derived from the documents.
+        self._use_case_references: set[tuple[str, str]] = {
+            ("OP-0001", "UC-001"),
+            ("OP-0001", "UC-002"),
+            ("OP-0002", "UC-002"),
+            ("OP-0002", "UC-003"),
+            ("OP-0002", "UC-004"),
+        }
+        # D14: counters start after the highest seeded mock IDs.
         self._sequences: dict[str, int] = {
             "OP": max(int(i.removeprefix("OP-")) for i in self._status_rows),
-            "UC": 0,
+            "UC": len(self._use_cases),
             "BR": 0,
         }
         self._next_change_log_id = (
@@ -475,6 +494,104 @@ class MockDataAccess(DataAccess):
         self._authorized_users.pop(one_pager_id, None)
         self._change_logs.pop(one_pager_id, None)
 
+    # ========================================================================
+    # Use Cases Page Methods
+    # ========================================================================
+
+    def _with_reference_count(self, use_case: UseCase) -> UseCase:
+        """Return a copy with reference_count derived from the references set."""
+        count = sum(
+            1 for _, uc_id in self._use_case_references if uc_id == use_case.use_case_id
+        )
+        return replace(use_case, reference_count=count)
+
+    def _require_use_case(self, use_case_id: str) -> UseCase:
+        use_case = self._use_cases.get(use_case_id)
+        if use_case is None:
+            msg = f"Use Case {use_case_id} not found"
+            raise NotFoundError(msg)
+        return use_case
+
+    def get_use_cases(
+        self, filter: UseCaseFilter, page: int, page_size: int
+    ) -> UseCasePage:
+        rows = sorted(self._use_cases.values(), key=lambda uc: uc.use_case_id)
+        if not filter.include_deprecated:
+            rows = [uc for uc in rows if not uc.deprecated]
+        if filter.search:
+            needle = filter.search.lower()
+            rows = [
+                uc
+                for uc in rows
+                if needle in uc.persona.lower() or needle in uc.goal.lower()
+            ]
+        if filter.priority:
+            rows = [uc for uc in rows if uc.priority == filter.priority]
+
+        offset = (page - 1) * page_size
+        return UseCasePage(
+            rows=[
+                self._with_reference_count(uc)
+                for uc in rows[offset : offset + page_size]
+            ],
+            total_rows=len(rows),
+            page=page,
+            page_size=page_size,
+        )
+
+    def get_use_case(self, use_case_id: str) -> UseCase | None:
+        use_case = self._use_cases.get(use_case_id)
+        return self._with_reference_count(use_case) if use_case else None
+
+    def get_use_case_references(self, use_case_id: str) -> list[str]:
+        return sorted(
+            op_id for op_id, uc_id in self._use_case_references if uc_id == use_case_id
+        )
+
+    def create_use_case(self, data: UseCaseInput, user_initials: str) -> str:
+        use_case_id = next_id(self, "UC")
+        now = datetime.now()
+        self._use_cases[use_case_id] = UseCase(
+            use_case_id=use_case_id,
+            persona=data.persona,
+            goal=data.goal,
+            scenario=data.scenario,
+            decision_enabled=data.decision_enabled,
+            priority=data.priority,
+            deprecated=False,
+            created_by=user_initials,
+            created_at=now,
+            last_updated_by=user_initials,
+            last_updated_at=now,
+        )
+        return use_case_id
+
+    def update_use_case(
+        self, use_case_id: str, data: UseCaseInput, user_initials: str
+    ) -> None:
+        use_case = self._require_use_case(use_case_id)
+        self._use_cases[use_case_id] = replace(
+            use_case,
+            persona=data.persona,
+            goal=data.goal,
+            scenario=data.scenario,
+            decision_enabled=data.decision_enabled,
+            priority=data.priority,
+            last_updated_by=user_initials,
+            last_updated_at=datetime.now(),
+        )
+
+    def set_use_case_deprecated(
+        self, use_case_id: str, deprecated: bool, user_initials: str  # noqa: FBT001
+    ) -> None:
+        use_case = self._require_use_case(use_case_id)
+        self._use_cases[use_case_id] = replace(
+            use_case,
+            deprecated=deprecated,
+            last_updated_by=user_initials,
+            last_updated_at=datetime.now(),
+        )
+
 
 # ============================================================================
 # Seed data (matches tests/fixtures/sample_one_pagers/)
@@ -597,3 +714,64 @@ def _seed_change_logs() -> dict[str, list[ChangeLogEntry]]:
             ),
         ],
     }
+
+
+def _sample_use_cases() -> list[UseCase]:
+    """Return sample Use Cases for local testing (mirrors seed_use_cases_dev.sql)."""
+    samples = [
+        (
+            "UC-001", "Analytics Manager",
+            "Understand customer lifetime value trends",
+            "Aggregate spending, engagement, and product usage "
+            "without duplicate records",
+            "Identify high-value customer segments for targeted marketing",
+            "Must Have", False, "JD", datetime(2026, 6, 1, 9, 0),
+        ),
+        (
+            "UC-002", "Compliance Officer",
+            "Fulfill GDPR data subject access requests quickly",
+            "Query Person dataset with unique ID and get all attributes in one place",
+            "Respond to GDPR requests within 30 days",
+            "Must Have", False, "AB", datetime(2026, 6, 1, 9, 30),
+        ),
+        (
+            "UC-003", "Finance Director",
+            "Reconcile revenue across channels and time periods",
+            "Query unified order data by date range, channel, product, and customer",
+            "Close accounting books on time with full audit trail",
+            "High", False, "BS", datetime(2026, 7, 2, 11, 0),
+        ),
+        (
+            "UC-004", "Operations Manager",
+            "Track fulfillment status and predict delivery dates",
+            "See order status, warehouse inventory, and shipping progress in one view",
+            "Proactively communicate delivery estimates to customers",
+            "Medium", False, "BS", datetime(2026, 7, 2, 11, 15),
+        ),
+        (
+            "UC-005", "Branch Advisor",
+            "See a customer summary before meetings",
+            "Open a printed customer summary prepared by the back office",
+            "Prepare advice for scheduled customer meetings",
+            "Low", True, "AB", datetime(2026, 5, 20, 8, 45),
+        ),
+    ]
+    return [
+        UseCase(
+            use_case_id=uc_id,
+            persona=persona,
+            goal=goal,
+            scenario=scenario,
+            decision_enabled=decision,
+            priority=priority,
+            deprecated=deprecated,
+            created_by=initials,
+            created_at=created_at,
+            last_updated_by=initials,
+            last_updated_at=created_at,
+        )
+        for (
+            uc_id, persona, goal, scenario, decision, priority, deprecated, initials,
+            created_at,
+        ) in samples
+    ]

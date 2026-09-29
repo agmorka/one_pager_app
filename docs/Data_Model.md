@@ -70,7 +70,7 @@ The authoritative record of each One Pager's current state. One row per Data Pro
 | `last_updated_by` | STRING | No | Initials of the user who last modified. |
 | `reviewed_at` | TIMESTAMP | Yes | Timestamp of last review decision. |
 | `reviewed_by` | STRING | Yes | Initials of the reviewer. |
-| `structure_definition` | STRING | No | Schema version this document follows (e.g. `structure_one_pager_v_1.json`, a file name in `schemas/` — see [Decision_Log.md](Decision_Log.md) §11). |
+| `structure_definition` | STRING | No | Schema version this document follows (e.g. `structure_one_pager_v_1.json`, a file name in `schemas/` — see [Decision_Log.md](Decision_Log.md) §12). |
 | `pending_pr` | BOOLEAN | No | `true` if approval happened but Git PR creation has not yet succeeded (retry flag, per architecture doc §7). Default `false`. |
 
 **Indexes / constraints:**
@@ -98,7 +98,7 @@ All authorized users (Data Product Owner and assigned SMEs) per One Pager. Denor
 - SMEs have `role = sme` (zero or more per One Pager).
 
 **Sync mechanism:**
-- On **initial creation**, the app populates this table from the document: the `dataProductOwner` is inserted as `owner` and each entry of `smes` as `sme`. The creator is **not** inserted automatically; validation requires the creator to be listed as the Owner or an SME ([Decision_Log.md](Decision_Log.md) §8). These rows are written before the `one_pager_status` row, so permission checks work as soon as the One Pager is visible ([Decision_Log.md](Decision_Log.md) §10).
+- On **initial creation**, the app populates this table from the document: the `dataProductOwner` is inserted as `owner` and each entry of `smes` as `sme`. The creator is **not** inserted automatically; validation requires the creator to be listed as the Owner or an SME ([Decision_Log.md](Decision_Log.md) §9). These rows are written before the `one_pager_status` row, so permission checks work as soon as the One Pager is visible ([Decision_Log.md](Decision_Log.md) §11).
 - On **subsequent saves**, the app compares the `dataProductOwner` and `smes` arrays in the YAML against the current contents of `one_pager_authorized_users` and updates this table to match (insert new users, delete removed users).
 - This ensures the table is always consistent with the authoritative One Pager document.
 

@@ -15,7 +15,7 @@ It implements:
 - The Registry **[+ New]** button and the Editor **"New (empty form)"** state in [UI_Design.md](../docs/UI_Design.md) §4.1–§4.2.
 - The layering rules in [Project_Structure.md](../docs/Project_Structure.md) §2b and the test expectations in [Testing_Strategy.md](../docs/Testing_Strategy.md).
 
-It follows the same phased structure as [Registry_Page_Plan.md](Registry_Page_Plan.md) and [Preview_Page_Plan.md](Preview_Page_Plan.md), and borrows the "decisions made up front" style of [use-cases-page-implementation-plan.md](use-cases-page-implementation-plan.md).
+It follows the same phased structure as [Registry_Page_Plan.md](Registry_Page_Plan.md) and [Preview_Page_Plan.md](Preview_Page_Plan.md), and borrows the "decisions made up front" style of [Use_Cases_Page_Plan.md](Use_Cases_Page_Plan.md).
 
 ## 2. Current State vs. Target
 
@@ -148,7 +148,7 @@ Deleting `change_log` rows is allowed **only** in this compensation path, for an
 ### D6 — ID generation
 **Decision:** `src/onepagerapp/id_generator.py` exposes `next_id(data_access, id_type) -> str` over two `DataAccess` primitives: `get_sequence_value(id_type) -> int` and `compare_and_set_sequence(id_type, expected, new) -> bool`. `next_id` runs the compare-and-swap loop (read → CAS → retry up to 5 times, then raise `IdGenerationError`), so the retry logic is unit-testable without a warehouse. `LakehouseAccess` implements the CAS as `UPDATE … SET last_value = :new WHERE id_type = :id_type AND last_value = :expected` and treats it as successful **only if `num_affected_rows = 1`**; a Delta concurrent-modification error counts as "not successful" and is retried. Formats: `OP-{n:04d}`, `UC-{n:03d}`, `BR-{n:03d}`.
 **Why not "re-read and compare" (as in the Use Cases plan D5):** if two writers read the same `expected` value and one wins, a re-read by the loser also shows `expected + 1`, so both would believe they got the same ID. The affected-row count is the only reliable signal.
-Coordination: whichever of this plan and the Use Cases plan is built first creates `id_sequences.sql` and the generator; the other reuses them. If the Use Cases plan already added a private `_generate_use_case_id()`, it is replaced by a call to `next_id(…, "UC")`.
+Coordination (done at merge time): both branches created an identical `id_sequences.sql`; the Use Cases branch's private `LakehouseAccess._next_id()` was replaced by a call to `next_id(self, "UC")` so there is a single allocator (see §12).
 **Why:** one tested implementation for all three ID types, as Backend_Design §14 intends (`id_generator.py`), and the CAS pattern is already agreed for this codebase.
 
 ### D7 — Identity and permissions in v1
@@ -284,7 +284,7 @@ Per [Testing_Strategy.md](../docs/Testing_Strategy.md). Services receive fakes b
 | # | Step | Detail |
 |---|---|---|
 | 32 | Quality gates | `ruff check` + `ruff format` + `mypy` + `pytest tests/unit/` |
-| 33 | Docs | Add D2, D3, D4, D5, D9, D13 to [Decision_Log.md](../docs/Decision_Log.md) (new §7–§12). Update [Data_Model.md](../docs/Data_Model.md) §3 (`one_pager_authorized_users` populated from Owner/SMEs, not the creator; `structure_definition` example = `structure_one_pager_v_1.json`) and §6; update [UI_Design.md](../docs/UI_Design.md) §2/§4.2 (Editor registered but shows a start message without intent; create mode shows Basics + Business Problem only) |
+| 33 | Docs | Add D2, D3, D4, D5, D9, D13 to [Decision_Log.md](../docs/Decision_Log.md) (§8–§13; §7 is the Use Cases page). Update [Data_Model.md](../docs/Data_Model.md) §3 (`one_pager_authorized_users` populated from Owner/SMEs, not the creator; `structure_definition` example = `structure_one_pager_v_1.json`) and §6; update [UI_Design.md](../docs/UI_Design.md) §2/§4.2 (Editor registered but shows a start message without intent; create mode shows Basics + Business Problem only) |
 | 34 | Bump `VERSION` | In [__version.py](../src/onepagerapp/__version.py) (currently `0.1.5.dev2`). Per [Dev_Notes.md](../docs/Dev_Notes.md), pip skips reinstalling the wheel without a version bump |
 | 35 | Deploy | Bundle deploy → Liquibase migrate (new `id_sequences`, `one_pager_authorized_users`) → set the DEV `OP` sequence past seeded IDs → create a One Pager in DEV and verify Registry, Preview, the three tables and the volume file |
 
@@ -347,4 +347,5 @@ What was built, and where it goes beyond or differs from the steps above:
 | Preview | Shows a one-time success message ("One Pager OP-#### created as Draft (v0.1.0)") after the redirect from the Editor |
 | Audit logging | `workflow.py` logs `action=create_one_pager outcome=… one_pager_id=… user=<initials>` on the `onepagerapp.audit` logger — never field values (Architecture §8) |
 | Verification | 79 unit tests pass (3 integration tests are skipped without a live warehouse). The create flow was also run in Chromium against `local-mock`: Registry → ➕ New → validation errors → Create Draft → Preview → Registry lists OP-0003; Cancel dialog; Editor start message. New files pass `ruff check` / `ruff format`; mypy errors in `src/` fell from 48 to 9 (all 9 were already there) |
+| Merge with the Use Cases page | Both features were built in parallel and merged afterwards. Duplicates were unified: one ID allocator (`id_generator.next_id`, used for OP and UC; the Use Cases branch's private `LakehouseAccess._next_id` was removed and its UC-### overflow guard moved into `format_id` for all ID types), one SQL parameter binder (the Use Cases branch's `to_statement_parameters` / `StatementFailedError`, extended with TIMESTAMP/DATE), one initials function (`auth.initials_from_username`, using the Use Cases branch's algorithm; `permissions.extract_initials` delegates to it — e.g. `local-dev-user@…` → `LDU`), and one user-resolution step in `app.py`. Decision_Log: the Use Cases entry is §7, this feature's entries are §8–§13 |
 | Not verifiable here | `tests/integration/test_create_one_pager.py` and the Liquibase migrations need the INT workspace (step 35) |

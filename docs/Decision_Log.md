@@ -256,9 +256,24 @@ If the structure needs to change in the future (e.g., to flatten further for clo
 - To find orphaned files: list volume directories and cross-reference with Delta; any OP-ID present in the volume but absent from Delta is orphaned.
 - To recover a specific version: read `<OP-ID>/<OP-ID>_v<version>.yml` directly; all versions are retained immutably.
 
+
 ---
 
-## 7. "Create" Validation Tier for New One Pagers
+## 7. Use Case Registry Page (v1)
+
+**Context:** The Use Cases page ([UI_Design.md](UI_Design.md) §4.5) is the first page that writes to Delta. Implementing it surfaced three questions the design docs leave open or that the rest of the code base does not yet support. See `..dev/Use_Cases_Page_Plan.md` §3 for the full plan.
+
+**Decisions:**
+
+1. **Deprecated Use Cases can be restored.** [Backend_Design.md](Backend_Design.md) §9 only defines `deprecate_use_case`. Deprecation is a soft state (`deprecated` flag), so the page also offers **Restore**, which clears the flag. This lets a mistaken deprecation be undone without a manual database fix. Deprecation asks for confirmation and lists the referencing One Pagers; restore does not ask.
+2. **Write access is temporarily open to every authenticated user.** The docs restrict create/edit/deprecate to the Owner/SME group and make the page read-only for Approver, Admin and Viewer ([Requirements_and_Scope.md](Requirements_and_Scope.md) §9, [UI_Design.md](UI_Design.md) §2). UC group resolution (`auth.py`) does not exist yet, so `permissions.can_manage_use_cases()` is a v1 stub that allows any authenticated user. Every write action on the page goes through it, so enforcing the real rule is a change to that one function. [Backend_Design.md](Backend_Design.md) §15 open item #2 remains open.
+3. **User-supplied values are bound as SQL parameters.** `DatabricksConnection.execute_statement()` now accepts named parameters (`:name` markers), passed to the SQL Statement Execution API as bound values. All Use Case queries use them, and the Preview queries were moved from the unsupported `%s` form to named markers. `LIKE` wildcards in search text are escaped. Statements the warehouse reports as failed now raise `StatementFailedError` instead of looking like empty results.
+
+**ID generation:** `UC-###` IDs come from `id_sequences` via a compare-and-swap `UPDATE ... WHERE last_value = <read value>`. Success is decided by the statement's `num_affected_rows`, and conflicts are retried up to 5 times. Re-reading the counter to confirm success is not safe: two racing writers would both see the new value and hand out the same ID.
+
+---
+
+## 8. "Create" Validation Tier for New One Pagers
 
 **Context:** Requirements §5 defines a lenient tier (only `productName` and `description` required) for saving drafts. Creating a One Pager also inserts a `one_pager_status` row whose storage keys are NOT NULL (`data_product`, `business_domain`, `data_product_type`, `owner_*`), and `dataProduct` cannot be renamed later (Requirements §16 #2).
 
@@ -268,7 +283,7 @@ If the structure needs to change in the future (e.g., to flatten further for clo
 
 ---
 
-## 8. Creator vs. Owner on One Pager Creation
+## 9. Creator vs. Owner on One Pager Creation
 
 **Context:** Requirements §4 stores the creator separately from the Data Product Owner, while Data_Model §3 said the authenticated user is inserted as `owner` in `one_pager_authorized_users` at creation. The two conflict when someone creates a One Pager for another Owner.
 
@@ -282,7 +297,7 @@ If the structure needs to change in the future (e.g., to flatten further for clo
 
 ---
 
-## 9. `dataProduct` Format and Uniqueness
+## 10. `dataProduct` Format and Uniqueness
 
 **Decision:** `dataProduct` must match `^[a-z][a-z0-9_]{1,62}$` (lowercase snake_case, 2–63 characters). Uniqueness is checked before an ID is reserved and re-checked after the `one_pager_status` row is inserted; if two creates race, the **lower OP ID wins** and the other is rolled back with an "already exists" error.
 
@@ -290,7 +305,7 @@ If the structure needs to change in the future (e.g., to flatten further for clo
 
 ---
 
-## 10. Write Order for Creating a One Pager
+## 11. Write Order for Creating a One Pager
 
 **Context:** Architecture §7 / Data_Model §5 require "Delta first, then YAML" for content saves. A create spans the volume and three Delta tables, and the Statement Execution API offers no multi-table transaction.
 
@@ -302,7 +317,7 @@ Deleting `change_log` rows is permitted only in this compensation path, for an O
 
 ---
 
-## 11. `structureDefinition` Value
+## 12. `structureDefinition` Value
 
 **Decision:** New documents and `one_pager_status.structure_definition` use **`structure_one_pager_v_1.json`** — a file name resolved inside `schemas/`. The schema files are shipped inside the `onepagerapp` wheel (`onepagerapp/schemas/`) so validation also works in the deployed app.
 
@@ -310,7 +325,7 @@ Deleting `change_log` rows is permitted only in this compensation path, for an O
 
 ---
 
-## 12. Serializer vs. Schema Mismatch for List Sections (Known Gap)
+## 13. Serializer vs. Schema Mismatch for List Sections (Known Gap)
 
 **Context:** `documents/serialization.py` and the fixtures use `businessRequirements: requirement/priority`, `dataSources: sourceName/sourceType` and a `dataElementPreview` list, while `structure_one_pager_v_1.json` defines `businessRequirements: id/description`, `dataSources: name/sourceSystem/description` and no `dataElementPreview`.
 

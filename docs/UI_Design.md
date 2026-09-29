@@ -119,7 +119,7 @@ Always rendered as `[colored dot] + [text label]`. Colors from `ref_*_statuses` 
 - **Metrics row:** Colored count cards for each OP status (counts from `ref_op_status` ordering). Clicking a card filters the table to that status.
 - **Filter bar:** Dropdowns/text inputs for each filter dimension. Filters combine with AND logic. "Clear filters" link resets all.
 - **Table:** Sortable columns. Click a row to navigate to Preview. Lock icon (🔒) shown next to locked items with the lock holder's initials.
-- **[+ New] button:** Visible only to Owner/SME group members. Opens the Editor with a blank document. Rendered as "➕ New" (Streamlit button labels are Markdown, so a leading "+" would become a bullet). Until the Owner/SME UC group names are decided, `can_create_one_pager()` allows any authenticated user ([Decision_Log.md](Decision_Log.md) §8, New_One_Pager_Plan D7).
+- **[+ New] button:** Visible only to Owner/SME group members. Opens the Editor with a blank document. Rendered as "➕ New" (Streamlit button labels are Markdown, so a leading "+" would become a bullet). Until the Owner/SME UC group names are decided, `can_create_one_pager()` allows any authenticated user ([Decision_Log.md](Decision_Log.md) §9, New_One_Pager_Plan D7).
 - **Pagination:** Page-based navigation below the table.
 
 #### States
