@@ -78,6 +78,7 @@ def main() -> None:
             st.Page("views/home.py", title="Home"),
             st.Page("views/registry.py", title="Registry"),
             st.Page("views/preview.py", title="Preview"),
+            st.Page("views/use_cases.py", title="Use Cases"),
         ]
     )
 
@@ -92,20 +93,23 @@ def main() -> None:
         )
         st.stop()
 
+    # Resolve the user before the page runs: pages read current_user for
+    # permission checks (e.g. who may manage Use Cases).
+    user_name = "unavailable"
+    if st.session_state.get("services_initialized"):
+        try:
+            user_name = get_logged_user(
+                st.session_state.data_access,
+                st.context.headers,
+            )
+            st.session_state.current_user = user_name
+        except Exception:
+            logger.exception("Failed to retrieve current user")
+
     pg.run()
 
     with st.sidebar:
         st.divider()
-        user_name = "unavailable"
-        if st.session_state.get("services_initialized"):
-            try:
-                user_name = get_logged_user(
-                    st.session_state.data_access,
-                    st.context.headers,
-                )
-                st.session_state.current_user = user_name
-            except Exception:
-                logger.exception("Failed to retrieve current user")
         st.caption(f"Logged user: {user_name}")
 
 if __name__ == "__main__":

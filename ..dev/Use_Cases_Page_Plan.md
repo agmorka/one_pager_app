@@ -129,3 +129,21 @@ The earlier draft (`use-cases-page-implementation-plan.md`, since removed) got t
 | Initials from `alice.brown@…` → `AB` | Conflicts with the documented `<initials>ADM@…` format | `extract_initials` per Requirements §2 (Phase 0 #5) |
 | Mock stores `reference_count` statically | Drifts from the actual references | Derived from an in-memory references set (step 10) |
 | Validation inside the view | Violates "thin views" (Project_Structure §2b) | Pure `validate_use_case_input` in core (step 7) |
+
+## 11. Implementation Status
+
+Implemented on branch `add_use_cases_page`, following the Phase 0 recommendations. Differences from the plan:
+
+| Step | Note |
+|---|---|
+| 5 | `execute_statement` also raises `StatementFailedError` when the warehouse reports a statement as FAILED / CANCELED / CLOSED. Before this, a failed write looked like an empty result. |
+| 7 | Rules live in `src/onepagerapp/use_cases.py`. `validate_use_case_input` returns `dict[field, message]` rather than `list[str]`, so messages can be tied to fields. |
+| 9 | `NotFoundError` lives in `data_access/base.py`. |
+| 16–17 | Checked in a real browser (Chromium, mock mode): validation errors, create, edit, deprecate confirm/cancel, restore, filter to empty and clear. `AppTest` can open a dialog but cannot submit a form inside it (Streamlit reruns only the dialog), so the automated smoke tests cover the list, filters, details, restore, read-only mode and the error state. |
+| 18 | `app.py` now resolves `current_user` **before** `pg.run()`. Before, it was set after the page rendered, so permission checks saw no user on the first render. |
+| 20–22, 24 | `tests/unit/test_use_cases.py`, `test_use_cases_mock.py`, `test_use_cases_lakehouse.py`, `test_use_cases_page.py`, `test_connection.py`. |
+| 23 | `tests/integration/test_use_cases_repository.py` — skipped unless `DATABRICKS_WAREHOUSE_ID` is set. |
+
+Found while implementing, not fixed here (outside this page's scope):
+- The Preview `LakehouseAccess` methods pass Statement API strings straight into `datetime` / `int` fields (`created_at`, `id`, …). `_parse_timestamp` / `_parse_bool` in `lakehouse.py` show the conversion.
+- `registry.py` "Clear all filters" (empty-after-filter state) sets widget state after the widgets are created, which Streamlit rejects. The page catches the exception and shows "Unexpected error", and the filter stays set (reproduced in mock mode). `use_cases.py` uses `on_click` callbacks instead. The Registry table header's empty last column also renders `****` as a horizontal rule.

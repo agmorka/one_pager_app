@@ -8,6 +8,8 @@ databaseChangeLog:
         file: ddl/ref_business_domains.sql
     - include:
         file: ddl/ref_data_product_types.sql
+    - include:
+        file: ddl/id_sequences.sql
     
     # Operational tables
     - include:
@@ -18,3 +20,9 @@ databaseChangeLog:
         file: ddl/review_comments.sql
     - include:
         file: ddl/locks.sql
+
+    # Use Case registry (references depend on one_pager_status and use_cases)
+    - include:
+        file: ddl/use_cases.sql
+    - include:
+        file: ddl/use_case_references.sql

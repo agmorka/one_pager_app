@@ -9,7 +9,14 @@ Per Backend_Design.md §5, all authenticated users can view any One Pager.
 Permission enforcement happens on state changes (approve, edit, etc.) in the service layer.
 """
 
+import re
 from dataclasses import dataclass
+
+# Corporate usernames look like "<initials>ADM@BECOC001.onmicrosoft.com"
+# (Requirements_and_Scope.md §2), e.g. "MJOADM@..." → "MJO".
+_CORPORATE_USERNAME = re.compile(r"^([A-Za-z]{2,4})ADM$", re.IGNORECASE)
+_PLAIN_INITIALS = re.compile(r"^[A-Za-z]{2,4}$")
+_NAME_SEPARATORS = re.compile(r"[.\-_ ]+")
 
 
 @dataclass
@@ -35,6 +42,58 @@ def can_view_one_pager(current_user: str | None) -> bool:
         
     Returns:
         True if user is authenticated, False otherwise.
+    """
+    return bool(current_user)
+
+
+def extract_initials(user: str | None) -> str:
+    """Derive a user's corporate initials from their Databricks identity.
+
+    Initials are what the Delta audit columns store (created_by,
+    last_updated_by). Moves to auth.py once that module exists.
+
+    Examples:
+        "MJOADM@BECOC001.onmicrosoft.com" -> "MJO"  (documented corporate format)
+        "mjo@bec.dk"                      -> "MJO"  (bare initials)
+        "local-dev-user@mock"             -> "LDU"  (fallback: first letters)
+        None / ""                         -> "??"
+
+    Args:
+        user: Username or email of the current user, or None.
+
+    Returns:
+        Upper-case initials, or "??" when nothing usable is available.
+    """
+    local_part = (user or "").split("@", 1)[0].strip()
+    corporate = _CORPORATE_USERNAME.match(local_part)
+    if corporate:
+        return corporate.group(1).upper()
+    if _PLAIN_INITIALS.match(local_part):
+        return local_part.upper()
+    tokens = [token for token in _NAME_SEPARATORS.split(local_part) if token]
+    if len(tokens) >= 2:  # noqa: PLR2004
+        return "".join(token[0] for token in tokens[:3]).upper()
+    if tokens:
+        return tokens[0][:3].upper()
+    return "??"
+
+
+def can_manage_use_cases(current_user: str | None) -> bool:
+    """Check if the current user can create, edit, deprecate or restore Use Cases.
+
+    Per Backend_Design.md §5/§9 only Owner/SME group members may manage the
+    shared Use Case registry; everyone else has read-only access.
+
+    v1 stub: group resolution (auth.py) does not exist yet, so every
+    authenticated user is allowed (see Decision_Log.md). All write actions on
+    the Use Cases page go through this function, so switching to the real
+    group check is a change here only.
+
+    Args:
+        current_user: Current user identifier or None if not authenticated.
+
+    Returns:
+        True if the user may manage Use Cases.
     """
     return bool(current_user)
 

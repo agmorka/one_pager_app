@@ -256,3 +256,17 @@ If the structure needs to change in the future (e.g., to flatten further for clo
 - To find orphaned files: list volume directories and cross-reference with Delta; any OP-ID present in the volume but absent from Delta is orphaned.
 - To recover a specific version: read `<OP-ID>/<OP-ID>_v<version>.yml` directly; all versions are retained immutably.
 
+
+---
+
+## 7. Use Case Registry Page (v1)
+
+**Context:** The Use Cases page ([UI_Design.md](UI_Design.md) §4.5) is the first page that writes to Delta. Implementing it surfaced three questions the design docs leave open or that the rest of the code base does not yet support. See `..dev/Use_Cases_Page_Plan.md` §3 for the full plan.
+
+**Decisions:**
+
+1. **Deprecated Use Cases can be restored.** [Backend_Design.md](Backend_Design.md) §9 only defines `deprecate_use_case`. Deprecation is a soft state (`deprecated` flag), so the page also offers **Restore**, which clears the flag. This lets a mistaken deprecation be undone without a manual database fix. Deprecation asks for confirmation and lists the referencing One Pagers; restore does not ask.
+2. **Write access is temporarily open to every authenticated user.** The docs restrict create/edit/deprecate to the Owner/SME group and make the page read-only for Approver, Admin and Viewer ([Requirements_and_Scope.md](Requirements_and_Scope.md) §9, [UI_Design.md](UI_Design.md) §2). UC group resolution (`auth.py`) does not exist yet, so `permissions.can_manage_use_cases()` is a v1 stub that allows any authenticated user. Every write action on the page goes through it, so enforcing the real rule is a change to that one function. [Backend_Design.md](Backend_Design.md) §15 open item #2 remains open.
+3. **User-supplied values are bound as SQL parameters.** `DatabricksConnection.execute_statement()` now accepts named parameters (`:name` markers), passed to the SQL Statement Execution API as bound values. All Use Case queries use them, and the Preview queries were moved from the unsupported `%s` form to named markers. `LIKE` wildcards in search text are escaped. Statements the warehouse reports as failed now raise `StatementFailedError` instead of looking like empty results.
+
+**ID generation:** `UC-###` IDs come from `id_sequences` via a compare-and-swap `UPDATE ... WHERE last_value = <read value>`. Success is decided by the statement's `num_affected_rows`, and conflicts are retried up to 5 times. Re-reading the counter to confirm success is not safe: two racing writers would both see the new value and hand out the same ID.
