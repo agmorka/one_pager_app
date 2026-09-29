@@ -19,9 +19,22 @@ import streamlit as st
 
 from adapters.session import current_session_id
 from onepagerapp.data_access.base import DataAccess, NotFoundError
-from onepagerapp.editing import open_for_edit, working_copy
+from onepagerapp.documents import OnePagerDocumentStore
+from onepagerapp.editing import (
+    MAX_SUMMARY_LENGTH,
+    SAVE_FAILED_MESSAGE,
+    SaveError,
+    open_for_edit,
+    save_draft,
+    working_copy,
+)
 from onepagerapp.locking import DEFAULT_LOCK_TTL, acquire_lock, release_lock
-from onepagerapp.models import CurrentUser, LockInfo, OnePagerDocument
+from onepagerapp.models import (
+    CurrentUser,
+    LockInfo,
+    OnePagerDocument,
+    ValidationError,
+)
 from onepagerapp.permissions import PermissionDeniedError
 from onepagerapp.validation import MAX_NAME_LENGTH, MAX_TEXT_LENGTH
 from onepagerapp.workflow import active_reference_values
@@ -35,6 +48,10 @@ SAVED_KEY = "edit_saved_document"
 DOCUMENT_KEY = "edit_document"
 ACTIVE_TAB_KEY = "edit_active_tab"
 BANNER_KEY = "edit_banner"
+FLASH_KEY = "edit_flash"
+ERRORS_KEY = "edit_errors"
+SUMMARY_KEY = "edit_change_summary"
+CLEAR_SUMMARY_KEY = "edit_clear_summary"
 
 SME_COLUMNS = ["name", "initials", "email", "team"]
 
@@ -120,23 +137,29 @@ def render_basics_tab(doc: OnePagerDocument, data_access: DataAccess) -> None:
     )
     col_domain, col_type = st.columns(2)
     with col_domain:
-        doc.business_domain = st.selectbox(
-            "Business Domain *",
-            options=_with_current(
-                _get_domain_options(data_access), doc.business_domain
-            ),
-            key=bound("edit_business_domain", doc.business_domain or None),
-            placeholder="Select…",
-        ) or ""
+        doc.business_domain = (
+            st.selectbox(
+                "Business Domain *",
+                options=_with_current(
+                    _get_domain_options(data_access), doc.business_domain
+                ),
+                key=bound("edit_business_domain", doc.business_domain or None),
+                placeholder="Select…",
+            )
+            or ""
+        )
     with col_type:
-        doc.data_product_type = st.selectbox(
-            "Product Type *",
-            options=_with_current(
-                _get_type_options(data_access), doc.data_product_type
-            ),
-            key=bound("edit_data_product_type", doc.data_product_type or None),
-            placeholder="Select…",
-        ) or ""
+        doc.data_product_type = (
+            st.selectbox(
+                "Product Type *",
+                options=_with_current(
+                    _get_type_options(data_access), doc.data_product_type
+                ),
+                key=bound("edit_data_product_type", doc.data_product_type or None),
+                placeholder="Select…",
+            )
+            or ""
+        )
     doc.description = st.text_area(
         "Description *",
         key=bound("edit_description", doc.description),
@@ -147,7 +170,8 @@ def render_basics_tab(doc: OnePagerDocument, data_access: DataAccess) -> None:
     col_name, col_initials = st.columns([3, 1])
     with col_name:
         doc.owner_name = st.text_input(
-            "Name *", key=bound("edit_owner_name", doc.owner_name),
+            "Name *",
+            key=bound("edit_owner_name", doc.owner_name),
             max_chars=MAX_NAME_LENGTH,
         )
     with col_initials:
@@ -163,10 +187,14 @@ def render_basics_tab(doc: OnePagerDocument, data_access: DataAccess) -> None:
             "Email *", key=bound("edit_owner_email", doc.owner_email), max_chars=254
         )
     with col_team:
-        doc.owner_team = st.text_input(
-            "Team", key=bound("edit_owner_team", doc.owner_team or ""),
-            max_chars=MAX_NAME_LENGTH,
-        ) or None
+        doc.owner_team = (
+            st.text_input(
+                "Team",
+                key=bound("edit_owner_team", doc.owner_team or ""),
+                max_chars=MAX_NAME_LENGTH,
+            )
+            or None
+        )
 
     st.subheader("Subject Matter Experts")
     st.caption("SMEs can edit this One Pager. Name, initials and email are required.")
@@ -345,15 +373,95 @@ def render_tab_bar(labels: dict[str, str]) -> str:
     )
 
 
-def render_bottom_bar(
-    data_access: DataAccess, one_pager_id: str, user: CurrentUser
+def _save(
+    data_access: DataAccess,
+    document_store: OnePagerDocumentStore,
+    one_pager_id: str,
+    user: CurrentUser,
 ) -> None:
+    """Run **Save Draft** and record the outcome for the next run."""
+    st.session_state[BANNER_KEY] = None
+    try:
+        with st.spinner("Saving..."):
+            result = save_draft(
+                data_access,
+                document_store,
+                one_pager_id,
+                st.session_state[DOCUMENT_KEY],
+                st.session_state.get(SUMMARY_KEY, ""),
+                user,
+                current_session_id(),
+                allowed_domains=_get_domain_options(data_access),
+                allowed_types=_get_type_options(data_access),
+            )
+    except (PermissionDeniedError, SaveError) as e:
+        st.session_state[BANNER_KEY] = str(e)
+        return
+    except Exception:
+        logger.exception(f"Unexpected error saving {one_pager_id}")
+        st.session_state[BANNER_KEY] = SAVE_FAILED_MESSAGE
+        return
+
+    if not result.ok:
+        st.session_state[ERRORS_KEY] = result.errors
+        return
+    st.session_state[ERRORS_KEY] = []
+    st.session_state[STATUS_ROW_KEY] = result.status_row
+    st.session_state[SAVED_KEY] = result.document
+    st.session_state[DOCUMENT_KEY] = working_copy(result.document)
+    st.session_state[CLEAR_SUMMARY_KEY] = True
+    st.session_state[FLASH_KEY] = f"Saved as v{result.version}."
+
+
+def render_errors(errors: list[ValidationError]) -> None:
+    """List the problems that prevented the last save."""
+    if not errors:
+        return
+    lines = [f"- **{error.field_path or 'Form'}:** {error.message}" for error in errors]
+    st.warning(
+        f"⚠ {len(errors)} issue(s) must be fixed before saving:\n\n" + "\n".join(lines)
+    )
+
+
+def render_bottom_bar(
+    data_access: DataAccess,
+    document_store: OnePagerDocumentStore,
+    one_pager_id: str,
+    user: CurrentUser,
+) -> None:
+    """Change summary, **Save Draft** and **Close editor** (UI_Design §4.2)."""
     st.divider()
-    if st.button("Close editor", key="edit_close"):
+    render_errors(st.session_state.get(ERRORS_KEY, []))
+    if st.session_state.pop(CLEAR_SUMMARY_KEY, False):
+        st.session_state[SUMMARY_KEY] = ""
+    st.text_input(
+        "Change summary *",
+        key=SUMMARY_KEY,
+        max_chars=MAX_SUMMARY_LENGTH,
+        placeholder="What did you change?",
+        help="Required to save. Becomes the change log entry for this version.",
+    )
+    col_save, col_close, _ = st.columns([1, 1, 4])
+    with col_save:
+        save_clicked = st.button(
+            "Save Draft", key="edit_save", type="primary", use_container_width=True
+        )
+    with col_close:
+        close_clicked = st.button(
+            "Close editor", key="edit_close", use_container_width=True
+        )
+    if save_clicked:
+        _save(data_access, document_store, one_pager_id, user)
+        st.rerun()
+    if close_clicked:
         close_editor(data_access, one_pager_id, user)
 
 
-def render_edit_mode(data_access: DataAccess, user: CurrentUser | None) -> None:
+def render_edit_mode(
+    data_access: DataAccess,
+    document_store: OnePagerDocumentStore,
+    user: CurrentUser | None,
+) -> None:
     """Render the Editor for the One Pager in ``editor_one_pager_id``."""
     one_pager_id = st.session_state.get("editor_one_pager_id")
     if not one_pager_id or user is None:
@@ -372,8 +480,11 @@ def render_edit_mode(data_access: DataAccess, user: CurrentUser | None) -> None:
     banner = st.session_state.get(BANNER_KEY)
     if banner:
         st.error(banner, icon="⚠️")
+    flash = st.session_state.pop(FLASH_KEY, None)
+    if flash:
+        st.success(flash)
 
     active = render_tab_bar({})
     TABS[active](doc, data_access)
 
-    render_bottom_bar(data_access, one_pager_id, user)
+    render_bottom_bar(data_access, document_store, one_pager_id, user)

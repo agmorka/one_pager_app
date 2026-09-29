@@ -38,7 +38,7 @@ The Editor has create mode and, from Phase 4, edit mode. Missing:
 | # | Feature |
 |---|---|
 | 2.1 | ~~Edit mode for an existing One Pager (open from Preview → Edit, pre-filled form)~~ **Done (Phase 4):** `editing.open_for_edit`, `adapters/edit_mode.py`; acquires the lock on open and on every re-run (heartbeat) |
-| 2.2 | **Save Draft** with lenient validation, a required change summary, a MINOR version bump, a new YAML version file and a change-log entry (Backend §7) |
+| 2.2 | ~~**Save Draft** with lenient validation, a required change summary, a MINOR version bump, a new YAML version file and a change-log entry (Backend §7)~~ **Done (Phase 4):** `editing.save_draft`; the caller's session must hold the edit lock; the status row update is conditional on the version the editor started from |
 | 2.3 | Editor tabs other than Basics: **Use Cases** (link existing / create new inline / unlink), **Business Requirements** (with automatic `BR-###` IDs), **Data Sources**, **Data Product Preview** (data element grid), **Classification** (with retention requirements), **Governance** (business concepts, CDE quality, CDE lineage), **Scope & Questions** (out of scope, open questions, assumptions), and **Review** (validation checklist, resolve comments, submit) |
 | 2.4 | Repeating-items pattern: add, edit and remove for array sections |
 | 2.5 | Validation error badges on tabs, plus a clickable validation summary |
@@ -214,7 +214,7 @@ Locking must exist before users can edit existing records, or two editors can ov
 | Order | Item | Why now |
 |---|---|---|
 | 17 | ~~2.1 Edit mode (pre-filled Basics)~~ **Done** | Uses permissions (4.2) and locking (5.1) |
-| 18 | 2.2 Save Draft (lenient validation, change summary, MINOR bump, new YAML version, change-log entry) | The first write path for existing records. Every tab saves through it |
+| 18 | ~~2.2 Save Draft (lenient validation, change summary, MINOR bump, new YAML version, change-log entry)~~ **Done** | The first write path for existing records. Every tab saves through it |
 | 19 | 2.7 Sync `one_pager_authorized_users` on save | Owner and SME changes on the Basics tab must update who may edit |
 | 20 | 2.4 Repeating-items pattern | A shared component used by most of the remaining tabs |
 | 21 | 2.3 Editor tabs in this order: Business Requirements, Use Cases (with 2.8 `link_use_case` / `unlink_use_case`), Data Sources, Data Product Preview, Classification, Governance, Scope & Questions | Simple arrays first. The Classification and Governance tabs rely on the conditional rules (3.3). The Review tab waits for Phase 6 |

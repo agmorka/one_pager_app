@@ -552,6 +552,24 @@ class MockDataAccess(DataAccess):
         row = self._status_rows.get(one_pager_id)
         return copy.copy(row) if row else None
 
+    def update_one_pager_status(
+        self, row: OnePagerStatusRow, *, expected_version: str, expected_status: str
+    ) -> bool:
+        current = self._status_rows.get(row.one_pager_id)
+        if (
+            current is None
+            or current.version != expected_version
+            or current.one_pager_status != expected_status
+        ):
+            return False
+        self._status_rows[row.one_pager_id] = replace(
+            row,
+            data_product=current.data_product,
+            created_by=current.created_by,
+            created_at=current.created_at,
+        )
+        return True
+
     # ========================================================================
     # Use Cases Page Methods
     # ========================================================================

@@ -171,3 +171,34 @@ def test__editor__close_releases_lock_and_opens_preview(
     assert switched == ["views/preview.py"]
     assert services["data_access"].get_lock("OP-0003") is None
     assert "edit_document" not in at.session_state
+
+
+@pytest.mark.unit
+def test__editor__save_draft_bumps_version(services: dict, switched: list[str]) -> None:
+    at = _editor(services).run()
+    at.text_input(key="edit_product_name").input("Customer Master v2")
+    at.text_input(key="edit_change_summary").input("Renamed the product")
+    at.run()
+
+    _button(at, "Save Draft").click().run()
+
+    assert not at.exception
+    assert "Saved as v0.2.0" in at.success[0].value
+    assert at.text_input(key="edit_change_summary").value == ""
+    row = services["data_access"].get_one_pager_status_row("OP-0003")
+    assert (row.version, row.product_name) == ("0.2.0", "Customer Master v2")
+    # Saving does not release the lock (Backend_Design.md §6).
+    assert services["data_access"].get_lock("OP-0003") is not None
+
+
+@pytest.mark.unit
+def test__editor__save_without_summary_shows_error(
+    services: dict, switched: list[str]
+) -> None:
+    at = _editor(services).run()
+    _button(at, "Save Draft").click().run()
+
+    assert not at.exception
+    assert "Describe what you changed." in at.warning[0].value
+    row = services["data_access"].get_one_pager_status_row("OP-0003")
+    assert row.version == "0.1.0"

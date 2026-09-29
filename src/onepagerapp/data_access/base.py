@@ -328,6 +328,22 @@ class DataAccess(ABC):
         """
         ...
 
+    @abstractmethod
+    def update_one_pager_status(
+        self, row: OnePagerStatusRow, *, expected_version: str, expected_status: str
+    ) -> bool:
+        """Replace the mutable columns of a ``one_pager_status`` row, conditionally.
+
+        The row is updated only if it still has ``expected_version`` and
+        ``expected_status`` (optimistic concurrency: a single statement, so a
+        concurrent save or transition cannot slip in between). ``one_pager_id``,
+        ``data_product``, ``created_by`` and ``created_at`` are never changed.
+
+        Returns:
+            True if exactly this row was updated, False if it had changed.
+        """
+        ...
+
     # ========================================================================
     # Use Cases Page Methods
     # ========================================================================

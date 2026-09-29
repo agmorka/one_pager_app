@@ -64,6 +64,14 @@ _ONE_PAGER_STATUS_COLUMNS = (
     "pending_pr",
 )
 
+# Columns a save or transition may change (never the key, the registered
+# data product name or the creation audit columns).
+_MUTABLE_STATUS_COLUMNS = tuple(
+    c
+    for c in _ONE_PAGER_STATUS_COLUMNS
+    if c not in ("one_pager_id", "data_product", "created_by", "created_at")
+)
+
 
 class LakehouseAccess(DataAccess):
     """Queries Delta tables via a SQL warehouse.
@@ -789,6 +797,32 @@ class LakehouseAccess(DataAccess):
         )
         rows = self._response_rows(response)
         return self._row_to_status_row(rows[0]) if rows else None
+
+    def update_one_pager_status(
+        self, row: OnePagerStatusRow, *, expected_version: str, expected_status: str
+    ) -> bool:
+        fqn = f"{self._fqn_prefix}.one_pager_status"
+        assignments = ", ".join(
+            "reviewed_at = CAST(:reviewed_at AS TIMESTAMP)"
+            if c == "reviewed_at"
+            else f"{c} = :{c}"
+            for c in _MUTABLE_STATUS_COLUMNS
+        )
+        parameters: dict[str, SqlParameterValue] = {
+            c: getattr(row, c) for c in _MUTABLE_STATUS_COLUMNS
+        }
+        parameters.update(
+            one_pager_id=row.one_pager_id,
+            expected_version=expected_version,
+            expected_status=expected_status,
+        )
+        response = self._connection.execute_statement(
+            f"UPDATE {fqn} SET {assignments} "  # noqa: S608
+            "WHERE one_pager_id = :one_pager_id AND version = :expected_version "
+            "AND one_pager_status = :expected_status",
+            parameters=parameters,
+        )
+        return self._affected_rows(response) == 1
 
     @classmethod
     def _row_to_status_row(cls, row: dict[str, Any]) -> OnePagerStatusRow:

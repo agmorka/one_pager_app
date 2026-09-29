@@ -84,7 +84,11 @@ def test__check_can_edit__denial_is_logged(
 def test__action_states__edit_enabled_for_owner_sme_of_draft() -> None:
     def edit(user: str, status: str, holder: str | None = None) -> bool:
         return get_action_states(
-            user, "MJO", status, holder is not None, holder,
+            user,
+            "MJO",
+            status,
+            holder is not None,
+            holder,
             authorized_initials={"MJO", "DPR"},
         )["edit"].enabled
 

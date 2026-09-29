@@ -244,7 +244,7 @@ document_store = st.session_state.document_store
 user: CurrentUser | None = st.session_state.get("current_user_info")
 
 if st.session_state.get("editor_mode") == "edit":
-    render_edit_mode(data_access, user)
+    render_edit_mode(data_access, document_store, user)
     st.stop()
 
 if st.session_state.get("editor_mode") != "create":

@@ -32,7 +32,13 @@ from typing import Any
 from jsonschema import Draft7Validator
 from jsonschema import ValidationError as SchemaError
 
-from onepagerapp.models import CurrentUser, NewOnePagerInput, PersonRef, ValidationError
+from onepagerapp.models import (
+    CurrentUser,
+    NewOnePagerInput,
+    OnePagerDocument,
+    PersonRef,
+    ValidationError,
+)
 
 # Schema version written into new documents and one_pager_status (D9). Resolved
 # as a file name inside the ``schemas`` directory.
@@ -113,6 +119,138 @@ def normalize_new_one_pager(data: NewOnePagerInput) -> NewOnePagerInput:
     )
 
 
+def _sanitize_value(value: object) -> object:
+    """Sanitize a document value: text is trimmed and stripped of HTML.
+
+    Lists drop items that end up empty; dicts drop keys whose value ends up
+    empty ("" / None / []), so blank optional fields are not stored.
+    """
+    if isinstance(value, str):
+        return sanitize_text(value)
+    if isinstance(value, list):
+        items = [_sanitize_value(item) for item in value]
+        return [item for item in items if item not in ("", None, [], {})]
+    if isinstance(value, dict):
+        cleaned = {key: _sanitize_value(item) for key, item in value.items()}
+        return {k: v for k, v in cleaned.items() if v not in ("", None, [])}
+    return value
+
+
+def _clean_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    cleaned = _sanitize_value(items)
+    return (
+        [item for item in cleaned if isinstance(item, dict)]
+        if isinstance(cleaned, list)
+        else []
+    )
+
+
+def _clean_strings(items: list[str]) -> list[str]:
+    return [sanitize_text(item) for item in items if sanitize_text(item)]
+
+
+def _clean_dict(value: dict[str, Any]) -> dict[str, Any]:
+    cleaned = _sanitize_value(value)
+    return cleaned if isinstance(cleaned, dict) else {}
+
+
+def person_from_dict(value: dict[str, Any]) -> PersonRef:
+    """Build a PersonRef from a document person dict (owner / SME item)."""
+    return PersonRef(
+        name=str(value.get("name") or ""),
+        initials=str(value.get("initials") or ""),
+        email=str(value.get("email") or ""),
+        team=value.get("team") or None,
+    )
+
+
+def normalize_document(document: OnePagerDocument) -> OnePagerDocument:
+    """Return a sanitized copy of an edited document (Architecture.md §8).
+
+    Every text value is trimmed and stripped of HTML, initials are upper-cased
+    and empty list items (e.g. a blank SME row) are dropped.
+    """
+    owner = _sanitize_person(
+        PersonRef(
+            name=document.owner_name,
+            initials=document.owner_initials,
+            email=document.owner_email,
+            team=document.owner_team,
+        )
+    )
+    smes = [
+        _sanitize_person(person_from_dict(s))
+        for s in document.smes
+        if isinstance(s, dict)
+    ]
+    return replace(
+        document,
+        product_name=sanitize_text(document.product_name),
+        business_domain=sanitize_text(document.business_domain),
+        data_product_type=sanitize_text(document.data_product_type),
+        description=sanitize_text(document.description),
+        owner_name=owner.name,
+        owner_initials=owner.initials,
+        owner_email=owner.email,
+        owner_team=owner.team,
+        business_problem_statement=sanitize_text(document.business_problem_statement),
+        smes=[
+            {k: v for k, v in vars(s).items() if v}
+            for s in smes
+            if not _is_blank_person(s)
+        ],
+        use_cases=_clean_items(document.use_cases),
+        business_requirements=_clean_items(document.business_requirements),
+        data_sources=_clean_items(document.data_sources),
+        data_product_preview=_clean_items(document.data_product_preview),
+        data_classification=_clean_dict(document.data_classification),
+        retention_requirements=_clean_items(document.retention_requirements),
+        data_governance_artifacts=_clean_dict(document.data_governance_artifacts),
+        out_of_scope=_clean_strings(document.out_of_scope),
+        open_questions=_clean_items(document.open_questions),
+        assumptions=_clean_strings(document.assumptions),
+    )
+
+
+def validate_edit_basics(
+    document: OnePagerDocument,
+    allowed_domains: list[str],
+    allowed_types: list[str],
+) -> list[ValidationError]:
+    """Check a (normalized) edited document beyond the lenient schema tier.
+
+    ``one_pager_status`` and ``one_pager_authorized_users`` need a Business
+    Domain, a Product Type, and a complete Owner / SME list on every save, so
+    these are checked on Save Draft too. A value that was valid when stored
+    stays allowed even if the reference value has since been deactivated.
+    """
+    errors: list[ValidationError] = []
+    if not document.business_domain:
+        errors.append(ValidationError("businessDomain", "Business Domain is required."))
+    elif document.business_domain not in allowed_domains:
+        errors.append(
+            ValidationError("businessDomain", "Select an active Business Domain.")
+        )
+    if not document.data_product_type:
+        errors.append(ValidationError("dataProductType", "Product Type is required."))
+    elif (
+        document.data_product_type not in allowed_types
+        or document.data_product_type not in DATA_PRODUCT_TYPES
+    ):
+        errors.append(
+            ValidationError("dataProductType", "Select an active Product Type.")
+        )
+    owner = PersonRef(
+        name=document.owner_name,
+        initials=document.owner_initials,
+        email=document.owner_email,
+        team=document.owner_team,
+    )
+    smes = [person_from_dict(s) for s in document.smes]
+    errors.extend(validate_owner_and_smes(owner, smes))
+    return errors
+
+
 # ============================================================================
 # Create tier
 # ============================================================================
@@ -189,18 +327,25 @@ def _validate_basics(
         )
 
 
-def _validate_people(
-    errors: list[ValidationError], data: NewOnePagerInput, creator: CurrentUser
-) -> None:
-    _validate_person(errors, "dataProductOwner", data.owner)
+def validate_owner_and_smes(
+    owner: PersonRef, smes: list[PersonRef]
+) -> list[ValidationError]:
+    """Validate the (normalized) Owner and SMEs.
+
+    Their initials grant edit access (``one_pager_authorized_users``), so every
+    person needs a name, valid initials and an email, and nobody may appear
+    twice.
+    """
+    errors: list[ValidationError] = []
+    _validate_person(errors, "dataProductOwner", owner)
 
     seen_initials: set[str] = set()
-    for i, sme in enumerate(data.smes):
+    for i, sme in enumerate(smes):
         path = f"smes[{i}]"
         _validate_person(errors, path, sme)
         if not sme.initials:
             continue
-        if sme.initials == data.owner.initials:
+        if sme.initials == owner.initials:
             errors.append(
                 ValidationError(
                     f"{path}.initials", "The Owner cannot also be listed as an SME."
@@ -211,8 +356,16 @@ def _validate_people(
                 ValidationError(f"{path}.initials", "This SME is listed twice.")
             )
         seen_initials.add(sme.initials)
+    return errors
+
+
+def _validate_people(
+    errors: list[ValidationError], data: NewOnePagerInput, creator: CurrentUser
+) -> None:
+    errors.extend(validate_owner_and_smes(data.owner, data.smes))
 
     # D3: the creator must keep edit access to the Draft they create.
+    seen_initials = {s.initials for s in data.smes if s.initials}
     if creator.initials not in {data.owner.initials, *seen_initials}:
         errors.append(
             ValidationError(

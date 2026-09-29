@@ -379,3 +379,32 @@ def test__get_one_pager_status_row__parses_full_row() -> None:
     assert params == {"one_pager_id": NASTY}
 
     assert _access(_FakeConnection()).get_one_pager_status_row("OP-1") is None
+
+
+@pytest.mark.unit
+def test__update_one_pager_status__conditional_update_with_bound_parameters() -> None:
+    conn = _FakeConnection(
+        [_response(list(_STATUS_ROW_VALUES), [list(_STATUS_ROW_VALUES.values())])]
+    )
+    row = _access(conn).get_one_pager_status_row("OP-0007")
+    row.product_name = NASTY
+
+    conn = _FakeConnection([_response(["num_affected_rows"], [["1"]])])
+    assert _access(conn).update_one_pager_status(
+        row, expected_version="0.1.0", expected_status="Draft"
+    )
+    statement, params = conn.calls[0]
+    assert statement.startswith("UPDATE cat.sch.one_pager_status SET ")
+    assert "version = :expected_version" in statement
+    assert "one_pager_status = :expected_status" in statement
+    assert "reviewed_at = CAST(:reviewed_at AS TIMESTAMP)" in statement
+    for immutable in ("data_product =", "created_by =", "created_at ="):
+        assert immutable not in statement
+    _assert_not_interpolated(statement)
+    assert params["product_name"] == NASTY
+    assert params["expected_version"] == "0.1.0"
+
+    conn = _FakeConnection([_response(["num_affected_rows"], [["0"]])])
+    assert not _access(conn).update_one_pager_status(
+        row, expected_version="0.1.0", expected_status="Draft"
+    )
