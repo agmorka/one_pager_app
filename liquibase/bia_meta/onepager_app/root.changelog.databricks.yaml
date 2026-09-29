@@ -8,10 +8,16 @@ databaseChangeLog:
         file: ddl/ref_business_domains.sql
     - include:
         file: ddl/ref_data_product_types.sql
+
+    # ID counters (OP-####, UC-###, BR-###)
+    - include:
+        file: ddl/id_sequences.sql
     
     # Operational tables
     - include:
         file: ddl/one_pager_status.sql
+    - include:
+        file: ddl/one_pager_authorized_users.sql
     - include:
         file: ddl/change_log.sql
     - include:

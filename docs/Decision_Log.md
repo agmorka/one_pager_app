@@ -256,3 +256,65 @@ If the structure needs to change in the future (e.g., to flatten further for clo
 - To find orphaned files: list volume directories and cross-reference with Delta; any OP-ID present in the volume but absent from Delta is orphaned.
 - To recover a specific version: read `<OP-ID>/<OP-ID>_v<version>.yml` directly; all versions are retained immutably.
 
+---
+
+## 7. "Create" Validation Tier for New One Pagers
+
+**Context:** Requirements §5 defines a lenient tier (only `productName` and `description` required) for saving drafts. Creating a One Pager also inserts a `one_pager_status` row whose storage keys are NOT NULL (`data_product`, `business_domain`, `data_product_type`, `owner_*`), and `dataProduct` cannot be renamed later (Requirements §16 #2).
+
+**Decision:** A dedicated **create tier** in `validation.py` = lenient tier + `dataProduct`, `businessDomain` (active `ref_business_domains` value), `dataProductType` (active `ref_data_product_types` value and schema enum), and `dataProductOwner.name/initials/email`. SMEs are optional, but each SME row needs name, initials and email. The Delta DDL stays strict.
+
+**Why:** These are exactly the fields the JSON Schema already lists as top-level `required`, so a document without them would not be schema-valid anyway; keeping the DDL strict preserves Registry filter quality. (Details: `..dev/New_One_Pager_Plan.md` D2.)
+
+---
+
+## 8. Creator vs. Owner on One Pager Creation
+
+**Context:** Requirements §4 stores the creator separately from the Data Product Owner, while Data_Model §3 said the authenticated user is inserted as `owner` in `one_pager_authorized_users` at creation. The two conflict when someone creates a One Pager for another Owner.
+
+**Decision:**
+- The Owner fields are pre-filled with the current user and are editable.
+- `one_pager_status.created_by` stores the creator's initials; YAML `createdBy` the creator's display name.
+- `one_pager_authorized_users` is populated **from the document** (`dataProductOwner` → `owner`, `smes` → `sme`), never from the creator.
+- Validation requires the creator's initials to appear as Owner or SME, so the creator keeps edit access. The Owner may not also be an SME; SME initials are unique.
+
+**Why:** Keeps `one_pager_authorized_users` an exact mirror of the document (Backend_Design §11) and prevents Drafts that nobody present can edit. Silently adding the creator would grant edit rights nobody asked for.
+
+---
+
+## 9. `dataProduct` Format and Uniqueness
+
+**Decision:** `dataProduct` must match `^[a-z][a-z0-9_]{1,62}$` (lowercase snake_case, 2–63 characters). Uniqueness is checked before an ID is reserved and re-checked after the `one_pager_status` row is inserted; if two creates race, the **lower OP ID wins** and the other is rolled back with an "already exists" error.
+
+**Why:** The value is the unique key and the Git folder name (`<data_product>/<OP-ID>.yml`, Architecture §6), so it must be path-safe; existing names (`person`, `customer_master`) are already snake_case. Delta does not enforce `UNIQUE`, so the application must, deterministically.
+
+---
+
+## 10. Write Order for Creating a One Pager
+
+**Context:** Architecture §7 / Data_Model §5 require "Delta first, then YAML" for content saves. A create spans the volume and three Delta tables, and the Statement Execution API offers no multi-table transaction.
+
+**Decision:** For **creation only**, the order is: reserve the OP ID → write `OP-####_v0.1.0.yml` → insert `one_pager_authorized_users` → insert the `creation` `change_log` entry → insert `one_pager_status` **last**. If a Delta step fails, the rows already inserted for that OP ID are deleted (compensation) and the user sees "Create failed — your changes are preserved, please retry." The YAML file is left as an unreferenced orphan (detectable via §6 "Disaster recovery"); the OP ID is a harmless gap.
+
+Deleting `change_log` rows is permitted only in this compensation path, for an OP ID whose status row never became visible. The append-only rule is unchanged for every created One Pager.
+
+**Why:** The `one_pager_status` row is what makes a One Pager visible in the Registry and Preview; writing it last makes every partial failure invisible to users. "Delta first" would leave a visible row pointing to a missing document.
+
+---
+
+## 11. `structureDefinition` Value
+
+**Decision:** New documents and `one_pager_status.structure_definition` use **`structure_one_pager_v_1.json`** — a file name resolved inside `schemas/`. The schema files are shipped inside the `onepagerapp` wheel (`onepagerapp/schemas/`) so validation also works in the deployed app.
+
+**Why:** Matches the real repository layout and every existing fixture document; the previously documented `structure_one_pager/structure_one_pager_v_1.json` path does not exist. Validating against the version named in each document (Data_Model §6) keeps working: new schema versions are added as new files in `schemas/`.
+
+---
+
+## 12. Serializer vs. Schema Mismatch for List Sections (Known Gap)
+
+**Context:** `documents/serialization.py` and the fixtures use `businessRequirements: requirement/priority`, `dataSources: sourceName/sourceType` and a `dataElementPreview` list, while `structure_one_pager_v_1.json` defines `businessRequirements: id/description`, `dataSources: name/sourceSystem/description` and no `dataElementPreview`.
+
+**Decision:** The JSON Schema is the source of truth (Requirements §5). Creating a One Pager writes none of these lists, so the create feature leaves them unchanged. The Editor feature must align the serializer, `OnePagerDocument` and the fixtures with the schema **before** those editor tabs are built.
+
+**Why:** Keeps the create change small without breaking Preview rendering of existing fixtures, and records the gap so it is not forgotten.
+

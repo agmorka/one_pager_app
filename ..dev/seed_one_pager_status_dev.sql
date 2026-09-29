@@ -1,4 +1,4 @@
--- DEV seed data for one_pager_status table
+-- DEV seed data for one_pager_status, one_pager_authorized_users and id_sequences
 -- Run manually in Databricks SQL Editor
 -- Update <catalog> and <schema> placeholders to match your environment (e.g., onepager_dev, onepager_app)
 
@@ -14,35 +14,50 @@ VALUES
         'OP-0001', 'customer_master', 'Customer Master', 'Core Banking', 'Foundational',
         'Approved', 'Active', '1.0.0', 'Jane Doe', 'JD', 'jane.doe@bank.com', 'Data Engineering',
         'JD', CURRENT_TIMESTAMP(), CURRENT_TIMESTAMP(), 'JD',
-        CURRENT_TIMESTAMP(), 'AB', 'structure_one_pager/structure_one_pager_v_1.json', false
+        CURRENT_TIMESTAMP(), 'AB', 'structure_one_pager_v_1.json', false
     ),
     (
         'OP-0002', 'account_master', 'Account Master', 'Core Banking', 'Foundational',
         'In Review', 'In Development', '0.5.0', 'John Smith', 'JS', 'john.smith@bank.com', 'Data Engineering',
         'JS', CURRENT_TIMESTAMP() - INTERVAL 7 DAY, CURRENT_TIMESTAMP() - INTERVAL 2 DAY, 'JS',
-        NULL, NULL, 'structure_one_pager/structure_one_pager_v_1.json', false
+        NULL, NULL, 'structure_one_pager_v_1.json', false
     ),
     (
         'OP-0003', 'transaction_detail', 'Transaction Detail', 'Payments', 'Integrated',
         'Draft', 'In Definition', '0.1.0', 'Alice Brown', 'AB', 'alice.brown@bank.com', 'Analytics',
         'AB', CURRENT_TIMESTAMP() - INTERVAL 1 DAY, CURRENT_TIMESTAMP() - INTERVAL 1 DAY, 'AB',
-        NULL, NULL, 'structure_one_pager/structure_one_pager_v_1.json', false
+        NULL, NULL, 'structure_one_pager_v_1.json', false
     ),
     (
         'OP-0004', 'payment_events', 'Payment Events Stream', 'Payments', 'Augmented',
         'Ready for Review', 'Ready for Development', '0.3.0', 'Michael Chen', 'MC', 'michael.chen@bank.com', 'Data Engineering',
         'MC', CURRENT_TIMESTAMP() - INTERVAL 5 DAY, CURRENT_TIMESTAMP() - INTERVAL 1 DAY, 'MC',
-        NULL, NULL, 'structure_one_pager/structure_one_pager_v_1.json', false
+        NULL, NULL, 'structure_one_pager_v_1.json', false
     ),
     (
         'OP-0005', 'risk_indicators', 'Risk Indicators', 'Risk & Compliance', 'Integrated',
         'Approved', 'Active', '2.1.0', 'Sarah Wilson', 'SW', 'sarah.wilson@bank.com', 'Risk Analytics',
         'SW', CURRENT_TIMESTAMP() - INTERVAL 30 DAY, CURRENT_TIMESTAMP() - INTERVAL 10 DAY, 'SW',
-        CURRENT_TIMESTAMP() - INTERVAL 10 DAY, 'AB', 'structure_one_pager/structure_one_pager_v_1.json', false
+        CURRENT_TIMESTAMP() - INTERVAL 10 DAY, 'AB', 'structure_one_pager_v_1.json', false
     ),
     (
         'OP-0006', 'customer_behavior', 'Customer Behavior Analytics', 'Customer', 'Augmented',
         'Draft Update', 'In Enhancement', '1.2.1', 'Robert Martinez', 'RM', 'robert.martinez@bank.com', 'Analytics',
         'RM', CURRENT_TIMESTAMP() - INTERVAL 60 DAY, CURRENT_TIMESTAMP() - INTERVAL 3 DAY, 'RM',
-        CURRENT_TIMESTAMP() - INTERVAL 5 DAY, 'JD', 'structure_one_pager/structure_one_pager_v_1.json', false
+        CURRENT_TIMESTAMP() - INTERVAL 5 DAY, 'JD', 'structure_one_pager_v_1.json', false
     );
+
+-- Authorized users (Owner of each seeded One Pager) so permission checks work
+INSERT INTO <catalog>.onepager_app.one_pager_authorized_users
+(one_pager_id, user_initials, user_name, user_email, user_team, role)
+VALUES
+    ('OP-0001', 'JD', 'Jane Doe',        'jane.doe@bank.com',        'Data Engineering', 'owner'),
+    ('OP-0002', 'JS', 'John Smith',      'john.smith@bank.com',      'Data Engineering', 'owner'),
+    ('OP-0003', 'AB', 'Alice Brown',     'alice.brown@bank.com',     'Analytics',        'owner'),
+    ('OP-0004', 'MC', 'Michael Chen',    'michael.chen@bank.com',    'Data Engineering', 'owner'),
+    ('OP-0005', 'SW', 'Sarah Wilson',    'sarah.wilson@bank.com',    'Risk Analytics',   'owner'),
+    ('OP-0006', 'RM', 'Robert Martinez', 'robert.martinez@bank.com', 'Analytics',        'owner');
+
+-- Move the OP counter past the seeded IDs (New_One_Pager_Plan D14) so newly
+-- created One Pagers start at OP-0007.
+UPDATE <catalog>.onepager_app.id_sequences SET last_value = 6 WHERE id_type = 'OP';

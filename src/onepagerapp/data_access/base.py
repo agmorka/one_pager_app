@@ -5,10 +5,12 @@ from abc import ABC, abstractmethod
 import pandas as pd
 
 from onepagerapp.models import (
+    AuthorizedUser,
     ChangeLogEntry,
     LockInfo,
     OnePagerDocument,
     OnePagerHeader,
+    OnePagerStatusRow,
     PreviewData,
     RegistryFilter,
     RegistryPage,
@@ -183,5 +185,69 @@ class DataAccess(ABC):
             
         Returns:
             LockInfo if locked, None if not locked.
+        """
+        ...
+
+    # ========================================================================
+    # Create One Pager Methods
+    # ========================================================================
+
+    @abstractmethod
+    def get_sequence_value(self, id_type: str) -> int:
+        """Return the last assigned value of an ``id_sequences`` counter.
+
+        Raises:
+            RuntimeError: If the counter row does not exist.
+        """
+        ...
+
+    @abstractmethod
+    def compare_and_set_sequence(self, id_type: str, expected: int, new: int) -> bool:
+        """Set the counter to ``new`` only if it still equals ``expected``.
+
+        Returns:
+            True if exactly this call advanced the counter, False if another
+            writer changed it first (the caller retries).
+        """
+        ...
+
+    @abstractmethod
+    def get_one_pager_ids_for_data_product(self, data_product: str) -> list[str]:
+        """Return the IDs of all One Pagers registered for a data product.
+
+        Used for the uniqueness pre-check and post-insert re-check, because
+        Delta does not enforce the logical UNIQUE constraint on data_product.
+        Sorted ascending.
+        """
+        ...
+
+    @abstractmethod
+    def get_authorized_users(self, one_pager_id: str) -> list[AuthorizedUser]:
+        """Return the Owner/SME rows of ``one_pager_authorized_users``."""
+        ...
+
+    @abstractmethod
+    def insert_authorized_users(self, users: list[AuthorizedUser]) -> None:
+        """Insert rows into ``one_pager_authorized_users``."""
+        ...
+
+    @abstractmethod
+    def append_change_log(self, entry: ChangeLogEntry) -> None:
+        """Append a ``change_log`` entry. ``entry.id`` is ignored (identity)."""
+        ...
+
+    @abstractmethod
+    def insert_one_pager_status(self, row: OnePagerStatusRow) -> None:
+        """Insert the ``one_pager_status`` row (makes the One Pager visible)."""
+        ...
+
+    @abstractmethod
+    def delete_one_pager_records(self, one_pager_id: str) -> None:
+        """Compensation for a failed create ONLY (New_One_Pager_Plan D5).
+
+        Deletes the ``one_pager_status``, ``one_pager_authorized_users`` and
+        ``change_log`` rows of a One Pager whose creation did not complete.
+        Must never be used for a One Pager that was successfully created —
+        the change log is otherwise append-only.
         """
         ...

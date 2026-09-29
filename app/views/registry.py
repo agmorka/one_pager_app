@@ -24,6 +24,7 @@ from adapters.theme import (
     get_op_status_colors,
 )
 from onepagerapp.models import RegistryFilter
+from onepagerapp.permissions import can_create_one_pager
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +192,23 @@ def _render_filter_bar(op_status_colors: dict, dp_status_colors: dict,
     return filter_product_name, filter_op_status, filter_dp_status, filter_owner, filter_domain, filter_type
 
 
+def _navigate_to_create() -> None:
+    """Open the Editor in create mode with a blank form ([+ New])."""
+    # Drop any leftover form state so the new document starts blank.
+    for key in [k for k in st.session_state if str(k).startswith("create_")]:
+        del st.session_state[key]
+    st.session_state["editor_mode"] = "create"
+    st.switch_page("views/editor.py")
+
+
+def _render_new_button(key: str) -> None:
+    """Render [+ New] for users allowed to create One Pagers (UI_Design §4.1)."""
+    if can_create_one_pager(st.session_state.get("current_user_info")):
+        # Button labels are Markdown; a leading "+" would render as a bullet.
+        if st.button("➕ New", key=key, type="primary", help="Create a new One Pager"):
+            _navigate_to_create()
+
+
 def _navigate_to_preview(one_pager_id: str) -> None:
     """Navigate to the Preview page for a specific One Pager.
 
@@ -295,10 +313,11 @@ def _render_page_state_populated(registry_page, total_pages: int, current_page: 
 
 def _render_page_state_empty_no_filters() -> None:
     """Render page state when no One Pagers exist and no filters are applied."""
-    st.info(
-        "📋 **No One Pagers yet.** "
-        "Start creating One Pagers to see them here."
-    )
+    if can_create_one_pager(st.session_state.get("current_user_info")):
+        st.info("📋 **No One Pagers yet** — create the first one.")
+        _render_new_button("registry_new_empty")
+    else:
+        st.info("📋 **No One Pagers found.**")
 
 
 def _render_page_state_empty_with_filters() -> None:
@@ -318,8 +337,13 @@ def _render_page_state_empty_with_filters() -> None:
 # Registry Page
 # ============================================================================
 
-# Page title and description
-st.title("One Pager Registry")
+# Page title and description, with [+ New] on the right
+title_col, new_col = st.columns([6, 1])
+with title_col:
+    st.title("One Pager Registry")
+with new_col:
+    st.markdown("")
+    _render_new_button("registry_new")
 st.markdown("Browse, search, and filter all One Pagers.")
 st.markdown("")
 st.markdown("")

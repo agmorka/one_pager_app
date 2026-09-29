@@ -2,18 +2,22 @@
 
 import logging
 from datetime import datetime
+from typing import Any
 
 import pandas as pd
+from databricks.sdk.service.sql import StatementResponse
 
 from onepagerapp.config import AppConfig
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.data_access.connection import DatabricksConnection
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import (
+    AuthorizedUser,
     ChangeLogEntry,
     LockInfo,
     OnePagerDocument,
     OnePagerHeader,
+    OnePagerStatusRow,
     PreviewData,
     RegistryFilter,
     RegistryPage,
@@ -22,6 +26,47 @@ from onepagerapp.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+_ONE_PAGER_STATUS_COLUMNS = (
+    "one_pager_id",
+    "data_product",
+    "product_name",
+    "business_domain",
+    "data_product_type",
+    "one_pager_status",
+    "data_product_status",
+    "version",
+    "owner_name",
+    "owner_initials",
+    "owner_email",
+    "owner_team",
+    "created_by",
+    "created_at",
+    "last_updated_at",
+    "last_updated_by",
+    "reviewed_at",
+    "reviewed_by",
+    "structure_definition",
+    "pending_pr",
+)
+
+
+def _to_datetime(value: object) -> datetime:
+    """Parse a TIMESTAMP value returned by the Statement Execution API.
+
+    The API returns timestamps as ISO-8601 strings (e.g. "2026-09-20T14:30:00Z").
+    """
+    if isinstance(value, datetime):
+        return value
+    return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+
+def _rows(response: StatementResponse) -> list[dict[str, Any]]:
+    """Convert a StatementResponse into a list of column -> value dicts."""
+    schema = response.manifest.schema if response.manifest else None
+    columns = [str(col.name) for col in (schema.columns if schema else None) or []]
+    data = (response.result.data_array if response.result else None) or []
+    return [dict(zip(columns, row, strict=False)) for row in data]
 
 
 class LakehouseAccess(DataAccess):
@@ -341,11 +386,13 @@ class LakehouseAccess(DataAccess):
             f"version, one_pager_status, data_product_status, "
             f"created_at, last_updated_at, last_updated_by "
             f"FROM {fqn} "
-            f"WHERE one_pager_id = %s"
+            f"WHERE one_pager_id = :one_pager_id"
         )
         
         try:
-            response = self._connection.execute_statement(query, parameters=[one_pager_id])
+            response = self._connection.execute_statement(
+                query, parameters={"one_pager_id": one_pager_id}
+            )
             
             schema = response.manifest.schema if response.manifest else None
             columns = [col.name for col in (schema.columns if schema else None) or []]
@@ -366,8 +413,8 @@ class LakehouseAccess(DataAccess):
                 version=row_dict["version"],
                 one_pager_status=row_dict["one_pager_status"],
                 data_product_status=row_dict["data_product_status"],
-                created_at=row_dict["created_at"],
-                last_updated_at=row_dict["last_updated_at"],
+                created_at=_to_datetime(row_dict["created_at"]),
+                last_updated_at=_to_datetime(row_dict["last_updated_at"]),
                 last_updated_by=row_dict["last_updated_by"],
             )
         except Exception as e:
@@ -387,12 +434,14 @@ class LakehouseAccess(DataAccess):
             f"id, one_pager_id, version, event_type, author_initials, author_name, "
             f"summary, from_status, to_status, status_field, created_at "
             f"FROM {fqn} "
-            f"WHERE one_pager_id = %s "
+            f"WHERE one_pager_id = :one_pager_id "
             f"ORDER BY created_at DESC"
         )
         
         try:
-            response = self._connection.execute_statement(query, parameters=[one_pager_id])
+            response = self._connection.execute_statement(
+                query, parameters={"one_pager_id": one_pager_id}
+            )
             
             schema = response.manifest.schema if response.manifest else None
             columns = [col.name for col in (schema.columns if schema else None) or []]
@@ -402,14 +451,14 @@ class LakehouseAccess(DataAccess):
             for row in rows:
                 row_dict = dict(zip(columns, row, strict=False))
                 entries.append(ChangeLogEntry(
-                    id=row_dict["id"],
+                    id=int(row_dict["id"]),
                     one_pager_id=row_dict["one_pager_id"],
                     version=row_dict["version"],
                     event_type=row_dict["event_type"],
                     author_initials=row_dict["author_initials"],
                     author_name=row_dict["author_name"],
                     summary=row_dict["summary"],
-                    created_at=row_dict["created_at"],
+                    created_at=_to_datetime(row_dict["created_at"]),
                     from_status=row_dict.get("from_status"),
                     to_status=row_dict.get("to_status"),
                     status_field=row_dict.get("status_field"),
@@ -429,12 +478,14 @@ class LakehouseAccess(DataAccess):
             f"id, one_pager_id, version, section, reviewer_initials, reviewer_name, "
             f"comment, resolved, resolved_by, created_at, resolved_at "
             f"FROM {fqn} "
-            f"WHERE one_pager_id = %s "
+            f"WHERE one_pager_id = :one_pager_id "
             f"ORDER BY created_at ASC"
         )
         
         try:
-            response = self._connection.execute_statement(query, parameters=[one_pager_id])
+            response = self._connection.execute_statement(
+                query, parameters={"one_pager_id": one_pager_id}
+            )
             
             schema = response.manifest.schema if response.manifest else None
             columns = [col.name for col in (schema.columns if schema else None) or []]
@@ -444,7 +495,7 @@ class LakehouseAccess(DataAccess):
             for row in rows:
                 row_dict = dict(zip(columns, row, strict=False))
                 comments.append(ReviewComment(
-                    id=row_dict["id"],
+                    id=int(row_dict["id"]),
                     one_pager_id=row_dict["one_pager_id"],
                     version=row_dict["version"],
                     section=row_dict.get("section"),
@@ -452,9 +503,13 @@ class LakehouseAccess(DataAccess):
                     reviewer_name=row_dict["reviewer_name"],
                     comment=row_dict["comment"],
                     resolved=bool(row_dict.get("resolved", False)),
-                    created_at=row_dict["created_at"],
+                    created_at=_to_datetime(row_dict["created_at"]),
                     resolved_by=row_dict.get("resolved_by"),
-                    resolved_at=row_dict.get("resolved_at"),
+                    resolved_at=(
+                        _to_datetime(row_dict["resolved_at"])
+                        if row_dict.get("resolved_at")
+                        else None
+                    ),
                 ))
             
             return comments
@@ -471,11 +526,13 @@ class LakehouseAccess(DataAccess):
             f"one_pager_id, locked_by_initials, locked_by_name, session_id, "
             f"acquired_at, last_heartbeat, expires_at "
             f"FROM {fqn} "
-            f"WHERE one_pager_id = %s"
+            f"WHERE one_pager_id = :one_pager_id"
         )
         
         try:
-            response = self._connection.execute_statement(query, parameters=[one_pager_id])
+            response = self._connection.execute_statement(
+                query, parameters={"one_pager_id": one_pager_id}
+            )
             
             schema = response.manifest.schema if response.manifest else None
             columns = [col.name for col in (schema.columns if schema else None) or []]
@@ -492,10 +549,158 @@ class LakehouseAccess(DataAccess):
                 locked_by_initials=row_dict["locked_by_initials"],
                 locked_by_name=row_dict["locked_by_name"],
                 session_id=row_dict["session_id"],
-                acquired_at=row_dict["acquired_at"],
-                last_heartbeat=row_dict["last_heartbeat"],
-                expires_at=row_dict["expires_at"],
+                acquired_at=_to_datetime(row_dict["acquired_at"]),
+                last_heartbeat=_to_datetime(row_dict["last_heartbeat"]),
+                expires_at=_to_datetime(row_dict["expires_at"]),
             )
         except Exception as e:
             logger.error(f"Failed to fetch lock for {one_pager_id}: {e}")
             raise RuntimeError(f"Failed to fetch lock: {e}") from e
+
+    # ========================================================================
+    # Create One Pager Methods
+    # ========================================================================
+
+    def get_sequence_value(self, id_type: str) -> int:
+        """Read the last assigned value of an id_sequences counter."""
+        fqn = f"{self._fqn_prefix}.id_sequences"
+        response = self._connection.execute_statement(
+            f"SELECT last_value FROM {fqn} WHERE id_type = :id_type",  # noqa: S608
+            parameters={"id_type": id_type},
+        )
+        rows = _rows(response)
+        if not rows:
+            msg = (
+                f"id_sequences has no row for {id_type}. "
+                "Please ensure the Liquibase migrations have been applied."
+            )
+            raise RuntimeError(msg)
+        return int(rows[0]["last_value"])
+
+    def compare_and_set_sequence(self, id_type: str, expected: int, new: int) -> bool:
+        """Advance the counter only if it still holds ``expected``.
+
+        Success is decided by the UPDATE's ``num_affected_rows`` (exactly 1).
+        A re-read of the counter is not sufficient: if another writer advanced
+        it from the same ``expected`` value, a re-read would also show ``new``.
+        A Delta concurrent-modification conflict is reported as False so the
+        caller retries.
+        """
+        fqn = f"{self._fqn_prefix}.id_sequences"
+        try:
+            response = self._connection.execute_statement(
+                f"UPDATE {fqn} SET last_value = :new "  # noqa: S608
+                "WHERE id_type = :id_type AND last_value = :expected",
+                parameters={"new": new, "id_type": id_type, "expected": expected},
+            )
+        except RuntimeError as e:
+            if "concurrent" in str(e).lower():
+                logger.info(f"Concurrent update on id_sequences ({id_type}): {e}")
+                return False
+            raise
+        rows = _rows(response)
+        if not rows or "num_affected_rows" not in rows[0]:
+            msg = "UPDATE on id_sequences did not report num_affected_rows"
+            raise RuntimeError(msg)
+        return int(rows[0]["num_affected_rows"]) == 1
+
+    def get_one_pager_ids_for_data_product(self, data_product: str) -> list[str]:
+        fqn = f"{self._fqn_prefix}.one_pager_status"
+        response = self._connection.execute_statement(
+            f"SELECT one_pager_id FROM {fqn} "  # noqa: S608
+            "WHERE data_product = :data_product ORDER BY one_pager_id",
+            parameters={"data_product": data_product},
+        )
+        return [str(r["one_pager_id"]) for r in _rows(response)]
+
+    def get_authorized_users(self, one_pager_id: str) -> list[AuthorizedUser]:
+        fqn = f"{self._fqn_prefix}.one_pager_authorized_users"
+        response = self._connection.execute_statement(
+            f"SELECT one_pager_id, user_initials, user_name, user_email, "  # noqa: S608
+            f"user_team, role FROM {fqn} WHERE one_pager_id = :one_pager_id "
+            "ORDER BY role, user_initials",
+            parameters={"one_pager_id": one_pager_id},
+        )
+        return [
+            AuthorizedUser(
+                one_pager_id=r["one_pager_id"],
+                user_initials=r["user_initials"],
+                user_name=r["user_name"],
+                user_email=r["user_email"],
+                user_team=r.get("user_team"),
+                role=r["role"],
+            )
+            for r in _rows(response)
+        ]
+
+    def insert_authorized_users(self, users: list[AuthorizedUser]) -> None:
+        if not users:
+            return
+        fqn = f"{self._fqn_prefix}.one_pager_authorized_users"
+        values = []
+        parameters: dict[str, object] = {}
+        for i, user in enumerate(users):
+            values.append(
+                f"(:id_{i}, :initials_{i}, :name_{i}, :email_{i}, :team_{i}, :role_{i})"
+            )
+            parameters.update(
+                {
+                    f"id_{i}": user.one_pager_id,
+                    f"initials_{i}": user.user_initials,
+                    f"name_{i}": user.user_name,
+                    f"email_{i}": user.user_email,
+                    f"team_{i}": user.user_team,
+                    f"role_{i}": user.role,
+                }
+            )
+        self._connection.execute_statement(
+            f"INSERT INTO {fqn} "  # noqa: S608
+            "(one_pager_id, user_initials, user_name, user_email, user_team, role) "
+            f"VALUES {', '.join(values)}",
+            parameters=parameters,
+        )
+
+    def append_change_log(self, entry: ChangeLogEntry) -> None:
+        fqn = f"{self._fqn_prefix}.change_log"
+        self._connection.execute_statement(
+            f"INSERT INTO {fqn} "  # noqa: S608
+            "(one_pager_id, version, event_type, author_initials, author_name, "
+            "summary, from_status, to_status, status_field, created_at) VALUES "
+            "(:one_pager_id, :version, :event_type, :author_initials, :author_name, "
+            ":summary, :from_status, :to_status, :status_field, :created_at)",
+            parameters={
+                "one_pager_id": entry.one_pager_id,
+                "version": entry.version,
+                "event_type": entry.event_type,
+                "author_initials": entry.author_initials,
+                "author_name": entry.author_name,
+                "summary": entry.summary,
+                "from_status": entry.from_status,
+                "to_status": entry.to_status,
+                "status_field": entry.status_field,
+                "created_at": entry.created_at,
+            },
+        )
+
+    def insert_one_pager_status(self, row: OnePagerStatusRow) -> None:
+        fqn = f"{self._fqn_prefix}.one_pager_status"
+        columns = ", ".join(_ONE_PAGER_STATUS_COLUMNS)
+        markers = ", ".join(f":{c}" for c in _ONE_PAGER_STATUS_COLUMNS)
+        # NULL parameters are untyped; cast the nullable TIMESTAMP explicitly.
+        markers = markers.replace(
+            ":reviewed_at", "CAST(:reviewed_at AS TIMESTAMP)"
+        )
+        self._connection.execute_statement(
+            f"INSERT INTO {fqn} ({columns}) VALUES ({markers})",  # noqa: S608
+            parameters={c: getattr(row, c) for c in _ONE_PAGER_STATUS_COLUMNS},
+        )
+
+    def delete_one_pager_records(self, one_pager_id: str) -> None:
+        # Status row first so the One Pager disappears from the Registry even
+        # if one of the later deletes fails.
+        for table in ("one_pager_status", "one_pager_authorized_users", "change_log"):
+            self._connection.execute_statement(
+                f"DELETE FROM {self._fqn_prefix}.{table} "  # noqa: S608
+                "WHERE one_pager_id = :one_pager_id",
+                parameters={"one_pager_id": one_pager_id},
+            )

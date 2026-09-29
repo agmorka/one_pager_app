@@ -4,6 +4,10 @@ Reads and writes ``{base}/{id}/{id}_v{version}.yml`` where ``base`` comes from
 ONE_PAGER_APP_VOLUME_PATH. The current version is supplied by the caller (from
 the one_pager_status table); a highest-version fallback is used only when no
 version is given.
+
+An optional ``write_path`` redirects writes to a separate folder that is read
+before ``base_path``. ``local-mock`` mode uses it with a temporary directory so
+the version-controlled fixtures are never modified.
 """
 
 import logging
@@ -20,7 +24,9 @@ logger = logging.getLogger(__name__)
 class OnePagerDocumentStore:
     """Reads and writes One Pager YAML documents at a configured base path."""
 
-    def __init__(self, base_path: str | Path) -> None:
+    def __init__(
+        self, base_path: str | Path, write_path: str | Path | None = None
+    ) -> None:
         if not base_path:
             msg = (
                 "One Pager document store requires a base path "
@@ -28,6 +34,14 @@ class OnePagerDocumentStore:
             )
             raise RuntimeError(msg)
         self._base_path = Path(base_path)
+        self._write_path = Path(write_path) if write_path else None
+
+    @property
+    def _read_paths(self) -> list[Path]:
+        """Folders searched on read, most specific first."""
+        if self._write_path is None:
+            return [self._base_path]
+        return [self._write_path, self._base_path]
 
     def read(
         self, one_pager_id: str, version: str | None = None
@@ -46,8 +60,9 @@ class OnePagerDocumentStore:
             RuntimeError: If the file exists but cannot be read or parsed.
         """
         if version:
-            path = self._file_for(one_pager_id, version)
-            if not path.exists():
+            path = self._existing_file_for(one_pager_id, version)
+            if path is None:
+                path = self._file_for(one_pager_id, version)
                 logger.info(
                     f"Document for {one_pager_id} v{version} not found at {path}"
                 )
@@ -69,17 +84,19 @@ class OnePagerDocumentStore:
         """Write a One Pager document as ``{id}_v{version}.yml``.
 
         Regenerates YAML from the document's structured fields and updates
-        ``raw_content`` to match. Returns the written path.
+        ``raw_content`` to match. Returns the written path. Version files are
+        immutable (Decision_Log §6): an existing file is never overwritten.
 
         Raises:
-            RuntimeError: If the file cannot be written.
+            RuntimeError: If the file already exists or cannot be written.
         """
-        op_dir = self._dir_for(one_pager_id)
-        path = self._file_for(one_pager_id, version)
+        op_dir = self._dir_for(one_pager_id, self._write_root)
+        path = self._file_for(one_pager_id, version, self._write_root)
         content = document_to_yaml(document)
         try:
             op_dir.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
+            with path.open("x", encoding="utf-8") as f:
+                f.write(content)
         except OSError as e:
             logger.error(f"Failed to write document {path}: {e}")
             raise RuntimeError(
@@ -88,25 +105,45 @@ class OnePagerDocumentStore:
         document.raw_content = content
         return path
 
+    def exists(self, one_pager_id: str, version: str) -> bool:
+        """Whether the given version file exists in any read location."""
+        return self._existing_file_for(one_pager_id, version) is not None
+
     def list_ids(self) -> list[str]:
-        """List One Pager IDs (subdirectories) available at the base path."""
-        if not self._base_path.exists():
-            return []
-        return sorted(p.name for p in self._base_path.iterdir() if p.is_dir())
+        """List One Pager IDs (subdirectories) available in all read locations."""
+        ids: set[str] = set()
+        for root in self._read_paths:
+            if root.exists():
+                ids.update(p.name for p in root.iterdir() if p.is_dir())
+        return sorted(ids)
 
-    def _dir_for(self, one_pager_id: str) -> Path:
-        return self._base_path / one_pager_id
+    @property
+    def _write_root(self) -> Path:
+        return self._write_path or self._base_path
 
-    def _file_for(self, one_pager_id: str, version: str) -> Path:
-        return self._dir_for(one_pager_id) / f"{one_pager_id}_v{version}.yml"
+    def _dir_for(self, one_pager_id: str, root: Path | None = None) -> Path:
+        return (root or self._base_path) / one_pager_id
+
+    def _file_for(
+        self, one_pager_id: str, version: str, root: Path | None = None
+    ) -> Path:
+        return self._dir_for(one_pager_id, root) / f"{one_pager_id}_v{version}.yml"
+
+    def _existing_file_for(self, one_pager_id: str, version: str) -> Path | None:
+        for root in self._read_paths:
+            path = self._file_for(one_pager_id, version, root)
+            if path.exists():
+                return path
+        return None
 
     def _latest_file(self, one_pager_id: str) -> Path | None:
-        op_dir = self._dir_for(one_pager_id)
-        try:
-            candidates = list(op_dir.glob(f"{one_pager_id}_v*.yml"))
-        except OSError as e:
-            logger.warning(f"Cannot list {op_dir}: {e}")
-            return None
+        candidates: list[Path] = []
+        for root in self._read_paths:
+            op_dir = self._dir_for(one_pager_id, root)
+            try:
+                candidates.extend(op_dir.glob(f"{one_pager_id}_v*.yml"))
+            except OSError as e:
+                logger.warning(f"Cannot list {op_dir}: {e}")
         if not candidates:
             return None
         return max(candidates, key=lambda p: _version_key(p, one_pager_id))
