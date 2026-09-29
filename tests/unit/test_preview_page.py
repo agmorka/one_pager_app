@@ -313,3 +313,16 @@ def test__preview__reject_opens_the_dialog(
 
     assert not at.exception
     assert at.text_area(key="preview_reject_reason")  # the dialog is open
+
+
+@pytest.mark.unit
+def test__preview__approve_opens_the_dialog(
+    tmp_path: Path, switched: list[str]
+) -> None:
+    at = _app(_review_services(tmp_path)).run()
+    assert not at.button(key="preview_approve").disabled
+    at.button(key="preview_approve").click().run()
+
+    assert not at.exception
+    assert any("v1.0.0" in m.value for m in at.markdown)  # the dialog is open
+    assert any("Ready for Development" in m.value for m in at.markdown)

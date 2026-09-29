@@ -11,6 +11,7 @@ from collections.abc import Collection
 import streamlit as st
 
 from onepagerapp.data_access.base import DataAccess
+from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import CurrentUser
 from onepagerapp.permissions import PermissionDeniedError
 from onepagerapp.state_machine import Actor, InvalidTransitionError
@@ -19,6 +20,7 @@ from onepagerapp.workflow import (
     CommentRequiredError,
     ConfirmationRequiredError,
     TransitionError,
+    approve_one_pager,
     cancel_one_pager,
     change_data_product_status,
     reject_one_pager,
@@ -97,5 +99,30 @@ def reject_and_report(
     st.session_state.pop(REVIEW_MODE_KEY, None)
     st.session_state[FLASH_KEY] = (
         f"{one_pager_id} was rejected and is back in Draft for its Owner."
+    )
+    return None
+
+
+def approve_and_report(
+    data_access: DataAccess,
+    document_store: OnePagerDocumentStore,
+    one_pager_id: str,
+    user: CurrentUser,
+    roles: Collection[Actor],
+) -> str | None:
+    """Approve the One Pager; return a user-facing error, or None on success."""
+    try:
+        row = approve_one_pager(
+            data_access, document_store, one_pager_id, user, roles=roles
+        )
+    except (PermissionDeniedError, InvalidTransitionError, TransitionError) as e:
+        return str(e)
+    except Exception:
+        logger.exception(f"Failed to approve {one_pager_id}")
+        return TRANSITION_FAILED_MESSAGE
+    st.session_state.pop(REVIEW_MODE_KEY, None)
+    st.session_state[FLASH_KEY] = (
+        f"{one_pager_id} was approved as v{row.version}. The Data Product is "
+        f"now {row.data_product_status}."
     )
     return None

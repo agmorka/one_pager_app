@@ -38,12 +38,18 @@ from onepagerapp.permissions import (
 from adapters.theme import get_op_status_colors, get_dp_status_colors, DEFAULT_BADGE_COLOR
 from adapters.workflow_actions import (
     REVIEW_MODE_KEY,
+    approve_and_report,
     cancel_and_report,
     change_dp_status_and_report,
     reject_and_report,
 )
 from onepagerapp.state_machine import IN_REVIEW, Actor, TransitionRule
-from onepagerapp.workflow import MAX_COMMENT_LENGTH, data_product_options
+from onepagerapp.documents import OnePagerDocumentStore
+from onepagerapp.workflow import (
+    MAX_COMMENT_LENGTH,
+    data_product_options,
+    plan_approval,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -625,6 +631,39 @@ def confirm_reject(
         st.rerun()
 
 
+@st.dialog("Approve this One Pager?")
+def confirm_approve(
+    data_access: DataAccess,
+    document_store: OnePagerDocumentStore,
+    one_pager_id: str,
+    user: CurrentUser,
+    roles: frozenset[Actor],
+) -> None:
+    """Shows what the approval does (version, DP status) before it is made."""
+    row = data_access.get_one_pager_status_row(one_pager_id)
+    if row is None:
+        st.error(f"One Pager {one_pager_id} not found.")
+        return
+    plan = plan_approval(row)
+    st.write(f"The One Pager becomes **Approved** as version **v{plan.version}**.")
+    if plan.data_product_status:
+        st.write(
+            f"The Data Product status changes from **{row.data_product_status}** "
+            f"to **{plan.data_product_status}**."
+        )
+    col_confirm, col_back = st.columns(2)
+    if col_confirm.button("Approve", type="primary", use_container_width=True):
+        error = approve_and_report(
+            data_access, document_store, one_pager_id, user, roles
+        )
+        if error:
+            st.error(error, icon="⚠️")
+            return
+        st.rerun()
+    if col_back.button("Cancel", key="preview_approve_back", use_container_width=True):
+        st.rerun()
+
+
 def in_review_mode(one_pager_id: str, status: str, roles: frozenset[Actor]) -> bool:
     """Opened from the Review queue by an Approver while it is In Review."""
     return (
@@ -747,6 +786,14 @@ def render_action_bar(
         confirm_cancel(data_access, header.one_pager_id, user)
     elif clicked == "reject":
         confirm_reject(data_access, header.one_pager_id, user, roles)
+    elif clicked == "approve":
+        confirm_approve(
+            data_access,
+            st.session_state.document_store,
+            header.one_pager_id,
+            user,
+            roles,
+        )
     elif clicked == "change_dp_status":
         row = data_access.get_one_pager_status_row(header.one_pager_id)
         options = (

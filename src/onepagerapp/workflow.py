@@ -51,12 +51,16 @@ from onepagerapp.permissions import (
     is_owner_or_sme,
 )
 from onepagerapp.state_machine import (
+    APPROVED,
     DP_CANCELLED,
     DP_STATUS_FIELD,
     DRAFT,
+    IN_DEFINITION,
+    IN_ENHANCEMENT,
     IN_REVIEW,
     OP_CANCELLED,
     OP_STATUS_FIELD,
+    READY_FOR_DEVELOPMENT,
     READY_FOR_REVIEW,
     TRANSITIONS,
     Actor,
@@ -447,6 +451,7 @@ def apply_transitions(  # noqa: PLR0913 - every argument is part of the change
     now: datetime | None = None,
     note: str | None = None,
     reviewed: bool = False,
+    version: str | None = None,
 ) -> OnePagerStatusRow:
     """Execute one user action made of one or more status transitions.
 
@@ -468,6 +473,8 @@ def apply_transitions(  # noqa: PLR0913 - every argument is part of the change
         note: Text appended to every change-log summary (e.g. a comment).
         reviewed: The action is a review decision (Approve / Reject): sets
             ``reviewed_at`` and ``reviewed_by`` (Data_Model.md §3).
+        version: New document version (Approve); the change-log entries are
+            written for it. By default the version does not change.
 
     Returns:
         The stored status row.
@@ -485,6 +492,8 @@ def apply_transitions(  # noqa: PLR0913 - every argument is part of the change
     if reviewed:
         new_row.reviewed_at = now
         new_row.reviewed_by = user.initials
+    if version:
+        new_row.version = version
     entries = [_transition_entry(rule, new_row, user, now, note) for rule in rules]
     action = rules[0].action if rules else "transition"
 
@@ -976,3 +985,191 @@ def reject_one_pager(  # noqa: PLR0913 - every argument is part of the action
                 one_pager_id=one_pager_id,
             )
         raise
+
+
+def next_major(version: str) -> str:
+    """Version of an approval (Requirements_and_Scope.md §7).
+
+    The first approval gives ``1.0.0`` (from any ``0.x.y``); every later one
+    the next MAJOR: ``1.2.0`` -> ``2.0.0``.
+
+    Raises:
+        ValueError: If ``version`` is not MAJOR.MINOR.PATCH.
+
+    """
+    parts = version.split(".")
+    if len(parts) != 3 or not all(p.isdigit() for p in parts):  # noqa: PLR2004
+        msg = f"Invalid version {version!r}"
+        raise ValueError(msg)
+    return f"{int(parts[0]) + 1}.0.0"
+
+
+@dataclass
+class ApprovalPlan:
+    """What an approval will do: the new version and the transitions."""
+
+    version: str
+    rules: list[TransitionRule]
+
+    @property
+    def data_product_status(self) -> str | None:
+        """The DP status the approval sets, or None if it stays as it is."""
+        dp = [r for r in self.rules if r.status_field == DP_STATUS_FIELD]
+        return dp[0].to_status if dp else None
+
+
+def plan_approval(row: OnePagerStatusRow) -> ApprovalPlan:
+    """Version and transitions of approving ``row`` (Backend_Design.md §2-3).
+
+    OP ``In Review`` → ``Approved``, plus the system DP transition: ``Ready
+    for Development`` on the first approval (the DP is still ``In
+    Definition``), ``In Enhancement`` on a re-approval. A DP that is already
+    ``In Enhancement`` (updated again before development started) keeps it.
+
+    Raises:
+        InvalidTransitionError: The One Pager is not ``In Review``.
+
+    """
+    rules = [get_rule(OP_STATUS_FIELD, row.one_pager_status, APPROVED)]
+    dp_target = (
+        READY_FOR_DEVELOPMENT
+        if row.data_product_status == IN_DEFINITION
+        else IN_ENHANCEMENT
+    )
+    if row.data_product_status != dp_target:
+        rules.append(get_rule(DP_STATUS_FIELD, row.data_product_status, dp_target))
+    return ApprovalPlan(version=next_major(row.version), rules=rules)
+
+
+def _approved_document(  # noqa: PLR0913 - every argument ends up in the file
+    document: OnePagerDocument,
+    row: OnePagerStatusRow,
+    plan: ApprovalPlan,
+    approved_row: OnePagerStatusRow,
+    user: CurrentUser,
+    now: datetime,
+) -> OnePagerDocument:
+    """Build the approved version file: operational fields from Delta."""
+    timestamp = now.isoformat(timespec="seconds")
+    return replace(
+        document,
+        structure_definition=row.structure_definition,
+        data_product=row.data_product,
+        one_pager_status=approved_row.one_pager_status,
+        data_product_status=approved_row.data_product_status,
+        version=plan.version,
+        change_log=[
+            *document.change_log,
+            *(
+                {
+                    "version": plan.version,
+                    "date": timestamp,
+                    "author": user.display_name,
+                    "summary": rule.summary,
+                }
+                for rule in plan.rules
+            ),
+        ],
+        raw_content="",
+    )
+
+
+def _discard_if_unreferenced(
+    data_access: DataAccess,
+    document_store: OnePagerDocumentStore,
+    one_pager_id: str,
+    version: str,
+) -> None:
+    """Remove a version file after a failed action, unless the row points to it.
+
+    If rolling back the status row failed too, the row may still reference
+    the file; then it must stay.
+    """
+    try:
+        current = data_access.get_one_pager_status_row(one_pager_id)
+    except Exception:
+        logger.exception(f"Re-reading {one_pager_id} after a failed action failed")
+        return
+    if current is not None and current.version != version:
+        document_store.discard_unreferenced(one_pager_id, version)
+
+
+def approve_one_pager(  # noqa: PLR0913 - every argument is part of the action
+    data_access: DataAccess,
+    document_store: OnePagerDocumentStore,
+    one_pager_id: str,
+    user: CurrentUser,
+    *,
+    roles: Collection[Actor],
+    now: datetime | None = None,
+) -> OnePagerStatusRow:
+    """Approve a One Pager (Backend_Design.md §8, without Git until Phase 8).
+
+    Only an Approver who is not Owner/SME of the One Pager may approve it.
+    The version becomes ``1.0.0`` or the next MAJOR; the DP status changes as
+    in ``plan_approval``; one change-log entry per status change is written.
+
+    Write order as for a save: the approved version file first (nothing
+    references it yet), then the status row and the change log in one
+    ``apply_transitions``; if that fails the file is discarded again, so a
+    failed approval changes nothing.
+
+    Raises:
+        NotFoundError: No One Pager with this ID.
+        PermissionDeniedError: Not an Approver, or Owner/SME of this One Pager.
+        InvalidTransitionError: The One Pager is not ``In Review``.
+        TransitionError: Storing failed; nothing changed.
+
+    """
+    now = now or datetime.now(UTC)
+    row, _ = _check_review_decision(
+        data_access, one_pager_id, APPROVED, user, roles, "approve"
+    )
+    plan = plan_approval(row)
+    approved_row = plan_transitions(row, plan.rules)
+
+    document = data_access.read_document(one_pager_id, row.version)
+    if document is None:
+        msg = f"The document of {one_pager_id} v{row.version} could not be found."
+        raise TransitionError(msg)
+    approved = _approved_document(document, row, plan, approved_row, user, now)
+
+    # A file for this version can only be left over from an approval that
+    # failed before the status row pointed to it.
+    document_store.discard_unreferenced(one_pager_id, plan.version)
+    try:
+        document_store.write(one_pager_id, approved, plan.version)
+    except RuntimeError as e:
+        logger.exception(f"Writing the approved {one_pager_id} failed")
+        log_event(
+            "approve",
+            Outcome.FAILED,
+            user=user.initials,
+            one_pager_id=one_pager_id,
+            step="write_document",
+        )
+        raise TransitionError(TRANSITION_FAILED_MESSAGE) from e
+
+    try:
+        new_row = apply_transitions(
+            data_access,
+            row,
+            plan.rules,
+            user,
+            now=now,
+            reviewed=True,
+            version=plan.version,
+        )
+    except Exception:
+        _discard_if_unreferenced(
+            data_access, document_store, one_pager_id, plan.version
+        )
+        raise
+    log_event(
+        "approve",
+        Outcome.SUCCESS,
+        user=user.initials,
+        one_pager_id=one_pager_id,
+        version=plan.version,
+    )
+    return new_row

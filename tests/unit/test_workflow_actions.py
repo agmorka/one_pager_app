@@ -130,3 +130,30 @@ def test__reject__self_review_is_reported(
         data_access, "OP-0002", owner, "No", frozenset({Actor.APPROVER})
     )
     assert error == "You cannot review a One Pager on which you are Owner or SME."
+
+
+@pytest.mark.unit
+def test__approve__reports_the_new_version(
+    actions: ModuleType, data_access: MockDataAccess, tmp_path: Path
+) -> None:
+    from onepagerapp.state_machine import Actor  # noqa: PLC0415
+
+    store = OnePagerDocumentStore(FIXTURES_DIR, write_path=tmp_path / "approve")
+    approver = resolve_current_user("cjo@bec.dk")
+    st.session_state["preview_review_mode"] = "OP-0002"
+
+    error = actions.approve_and_report(
+        data_access, store, "OP-0002", approver, frozenset({Actor.APPROVER})
+    )
+
+    assert error is None
+    assert st.session_state["preview_flash"] == (
+        "OP-0002 was approved as v1.0.0. The Data Product is now "
+        "Ready for Development."
+    )
+    assert "preview_review_mode" not in st.session_state
+
+    error = actions.approve_and_report(
+        data_access, store, "OP-0002", approver, frozenset({Actor.APPROVER})
+    )
+    assert error == "The One Pager is Approved, not In Review."
