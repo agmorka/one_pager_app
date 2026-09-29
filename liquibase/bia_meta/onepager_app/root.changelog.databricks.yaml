@@ -1,0 +1,20 @@
+databaseChangeLog:
+    # Reference tables (no dependencies)
+    - include:
+        file: ddl/ref_op_status.sql
+    - include:
+        file: ddl/ref_dp_status.sql
+    - include:
+        file: ddl/ref_business_domains.sql
+    - include:
+        file: ddl/ref_data_product_types.sql
+    
+    # Operational tables
+    - include:
+        file: ddl/one_pager_status.sql
+    - include:
+        file: ddl/change_log.sql
+    - include:
+        file: ddl/review_comments.sql
+    - include:
+        file: ddl/locks.sql

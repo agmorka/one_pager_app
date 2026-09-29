@@ -1,0 +1,1 @@
+FROM docker-local.artifactory.intra.bec.dk:443/databricks-local:0.1.4

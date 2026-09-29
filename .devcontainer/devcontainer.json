@@ -1,0 +1,71 @@
+{
+    "name": "One Pager App Dev Container",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "context": ".",
+        "args": {
+            "HTTPS_PROXY": "http://bluecoat-vip.bec.dk:80",
+            "HTTP_PROXY": "http://bluecoat-vip.bec.dk:80",
+            "https_proxy": "http://bluecoat-vip.bec.dk:80",
+            "http_proxy": "http://bluecoat-vip.bec.dk:80"
+        }
+    },
+    "remoteUser": "vscode",
+    "containerEnv": {
+        "UV_PROJECT_ENVIRONMENT": "/home/vscode/.venv",
+        "UV_CACHE_DIR": "/home/vscode/.cache/uv",
+        "PYTHONPYCACHEPREFIX": "/home/vscode/.cache/pycache",
+        "HTTPS_PROXY": "http://bluecoat-vip.bec.dk:80",
+        "HTTP_PROXY": "http://bluecoat-vip.bec.dk:80",
+        "https_proxy": "http://bluecoat-vip.bec.dk:80",
+        "http_proxy": "http://bluecoat-vip.bec.dk:80"
+    },
+    "postStartCommand": "bash .devcontainer/postStartCommand.sh",
+    "customizations": {
+        "vscode": {
+            "settings": {
+                "python.defaultInterpreterPath": "/home/vscode/.venv/bin/python",
+                // Terminal settings
+                "terminal.integrated.defaultProfile.linux": "bash",
+                "terminal.integrated.inheritEnv": true,
+                "terminal.integrated.profiles.linux": {
+                    "bash": {
+                        "path": "bash",
+                        "icon": "terminal-bash"
+                    }
+                },
+                "files.eol": "\n", // Use LF line endings
+                "files.autoSave": "onFocusChange", // Automatically save files when focus changes
+                "[python]": {
+                    // Python tests settings
+                    "testing.unittestEnabled": false,
+                    "testing.nosetestsEnabled": false,
+                    "testing.pytestEnabled": true,
+                    "testing.pytestArgs": [
+                        "tests"
+                    ],
+                    "testing.autoTestDiscoverOnSaveEnabled": true,
+                    "testing.autoTestDiscoverOnSavePattern": "**/*.py",
+                    // Edition settings
+                    "editor.formatOnSave": true,
+                    "editor.defaultFormatter": "charliermarsh.ruff",
+                    "editor.codeActionsOnSave": {
+                        "source.organizeImports.ruff": "explicit", // Use Ruff for import sorting
+                        "source.fixAll.ruff": "explicit" // Run Ruff auto-fixes on save
+                    }
+                },
+                "jupyter.interactiveWindow.cellMarker.codeRegex": "^# COMMAND ----------|^# Databricks notebook source|^(#\\s*%%|#\\s*\\<codecell\\>|#\\s*In\\[\\d*?\\]|#\\s*In\\[ \\])",
+                "jupyter.interactiveWindow.cellMarker.default": "# COMMAND ----------"
+            },
+            "extensions": [
+                // "charliermarsh.ruff",
+                "ms-python.python",
+                "redhat.vscode-yaml",
+                "ms-python.python"
+                // "janisdd.vscode-edit-csv",
+                // "mechatroner.rainbow-csv",
+                // "tamasfe.even-better-toml"
+            ]
+        }
+    }
+}
