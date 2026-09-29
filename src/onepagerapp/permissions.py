@@ -18,7 +18,6 @@ from onepagerapp.models import AuthorizedUser, CurrentUser, LockInfo
 from onepagerapp.state_machine import (
     APPROVED,
     DP_STATUS_FIELD,
-    DRAFT,
     DRAFT_UPDATE,
     OP_CANCELLED,
     OP_STATUS_FIELD,
@@ -26,6 +25,7 @@ from onepagerapp.state_machine import (
     Actor,
     TransitionRule,
     guard_failure,
+    reject_target,
     transitions_from,
 )
 
@@ -203,11 +203,11 @@ IMPLEMENTED_ACTIONS: frozenset[str] = frozenset(
         "approve",
         "add_comment",
         "resolve_comment",
+        "update",
     }
 )
 
 COMING_SOON = {
-    "update": "Update arrives with the review workflow",
     "cancel": "Cancel coming soon",
     "change_dp_status": "Change DP Status coming soon",
     "export_pdf": "Export PDF coming soon",
@@ -261,9 +261,11 @@ def get_action_states(  # noqa: PLR0913 - the context of one Preview page
         "edit": _edit_state(
             current_user_initials, one_pager_status, authorized_initials, holder
         ),
-        "update": context.rule_state(OP_STATUS_FIELD, DRAFT_UPDATE),
+        "update": context.rule_state(OP_STATUS_FIELD, DRAFT_UPDATE, "owner_update"),
         "approve": context.rule_state(OP_STATUS_FIELD, APPROVED),
-        "reject": context.rule_state(OP_STATUS_FIELD, DRAFT),
+        "reject": context.rule_state(
+            OP_STATUS_FIELD, reject_target(data_product_status), "approver_reject"
+        ),
         "cancel": context.rule_state(OP_STATUS_FIELD, OP_CANCELLED),
         "change_dp_status": context.dp_change_state(),
         "add_comment": context.rule_state(OP_STATUS_FIELD, APPROVED),
@@ -302,11 +304,17 @@ class _ActionContext:
             is_owner_or_sme=self.owner_or_sme,
         )
 
-    def rule_state(self, status_field: str, to_status: str) -> ActionState:
-        """State of the user action that moves ``status_field`` to ``to_status``."""
+    def rule_state(
+        self, status_field: str, to_status: str, action: str | None = None
+    ) -> ActionState:
+        """State of the user action that moves ``status_field`` to ``to_status``.
+
+        ``action`` pins the rule's action name where two actions share a
+        target status (Update and a rejected update both give Draft Update).
+        """
         current = self.op_status if status_field == OP_STATUS_FIELD else self.dp_status
         rule = TRANSITIONS.get((status_field, current, to_status))
-        if rule is None or rule.is_system:
+        if rule is None or rule.is_system or (action and rule.action != action):
             return ActionState(enabled=False, visible=False)
         reason = self._failure(rule)
         if reason:

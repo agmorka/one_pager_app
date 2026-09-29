@@ -75,7 +75,7 @@ The application tracks two independent status fields:
 | `Draft` → `Ready for Review` → `In Review` | Owner ("Submit for Review" — a single user action that moves the document atomically through `Ready for Review` to `In Review`; `Ready for Review` is a transient intermediate state visible in the change log but the user never rests in it) |
 | `Draft Update` → `Ready for Review` → `In Review` | Owner (same atomic submission as above) |
 | `In Review` → `Approved` | Approver (must not be listed as Owner or SME on the same One Pager — segregation of duties) |
-| `In Review` → `Draft`, with a mandatory comment | Approver (same segregation-of-duties constraint applies) |
+| `In Review` → `Draft`, with a mandatory comment (→ `Draft Update` when the review was of an update, see [Decision_Log.md](Decision_Log.md) §16) | Approver (same segregation-of-duties constraint applies) |
 | `Approved` → `Draft Update` | Owner (via the "Update" action, see §5) |
 | `Draft` / `Ready for Review` / `In Review` → `Cancelled` (only while Data Product status is `In Definition`) | Owner (own One Pager) or Admin |
 
@@ -115,8 +115,8 @@ The application enforces these transition rules and re-validates field completen
 | One Pager status | Valid Data Product status |
 |---|---|
 | `Draft` | `In Definition` |
-| `Ready for Review` | `In Definition` |
-| `In Review` | `In Definition` |
+| `Ready for Review` | `In Definition`; during the review of an update the preserved post-approval status ([Decision_Log.md](Decision_Log.md) §16) |
+| `In Review` | `In Definition`; during the review of an update the preserved post-approval status ([Decision_Log.md](Decision_Log.md) §16) |
 | `Approved` (first time) | `Ready for Development` (set automatically) |
 | `Approved` (re-approval after a Draft Update cycle) | `In Enhancement` (set automatically), or any status the Data Product has since progressed to via Owner actions: `In Development`, `Active`, or `Deprecated` |
 | `Draft Update` | Same value it had before entering `Draft Update` (preserved) |

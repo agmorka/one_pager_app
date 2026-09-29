@@ -30,6 +30,7 @@ from onepagerapp.workflow import (
     cancel_one_pager,
     change_data_product_status,
     reject_one_pager,
+    start_update,
 )
 
 logger = logging.getLogger(__name__)
@@ -172,4 +173,26 @@ def resolve_comment_and_report(
     except Exception:
         logger.exception(f"Failed to resolve comment {comment_id} of {one_pager_id}")
         return COMMENT_FAILED_MESSAGE
+    return None
+
+
+def update_and_report(
+    data_access: DataAccess, one_pager_id: str, user: CurrentUser
+) -> str | None:
+    """Start an update of an approved One Pager; return an error or None."""
+    try:
+        start_update(data_access, one_pager_id, user, confirmed=True)
+    except (
+        PermissionDeniedError,
+        InvalidTransitionError,
+        ConfirmationRequiredError,
+        TransitionError,
+    ) as e:
+        return str(e)
+    except Exception:
+        logger.exception(f"Failed to start an update of {one_pager_id}")
+        return TRANSITION_FAILED_MESSAGE
+    st.session_state[FLASH_KEY] = (
+        f"{one_pager_id} is now in Draft Update. Choose Edit to change it."
+    )
     return None

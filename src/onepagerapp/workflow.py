@@ -56,6 +56,7 @@ from onepagerapp.state_machine import (
     DP_CANCELLED,
     DP_STATUS_FIELD,
     DRAFT,
+    DRAFT_UPDATE,
     IN_DEFINITION,
     IN_ENHANCEMENT,
     IN_REVIEW,
@@ -70,6 +71,7 @@ from onepagerapp.state_machine import (
     check_combination,
     get_rule,
     guard_failure,
+    reject_target,
     serialize_state_machine,
     transitions_from,
 )
@@ -922,6 +924,9 @@ def reject_one_pager(  # noqa: PLR0913 - every argument is part of the action
 ) -> OnePagerStatusRow:
     """Reject a One Pager: ``In Review`` → ``Draft``, with a mandatory comment.
 
+    A rejected update (the Data Product was approved before) returns to
+    ``Draft Update`` instead, keeping its DP status (Decision_Log.md §16).
+
     Only an Approver who is not Owner/SME of the One Pager may reject it. The
     comment is stored in ``review_comments`` (document level, unresolved) and
     appended to the change-log summary (Requirements_and_Scope.md §7). The
@@ -938,8 +943,10 @@ def reject_one_pager(  # noqa: PLR0913 - every argument is part of the action
 
     """
     now = now or datetime.now(UTC)
+    current = data_access.get_one_pager_status_row(one_pager_id)
+    target = reject_target(current.data_product_status) if current else DRAFT
     row, rule = _check_review_decision(
-        data_access, one_pager_id, DRAFT, user, roles, "reject"
+        data_access, one_pager_id, target, user, roles, "reject"
     )
     comment = sanitize_text(comment)[:MAX_COMMENT_LENGTH]
     if rule.requires_comment and not comment:
@@ -1173,3 +1180,71 @@ def approve_one_pager(  # noqa: PLR0913 - every argument is part of the action
         version=plan.version,
     )
     return new_row
+
+
+# ============================================================================
+# Update (Requirements_and_Scope.md §5, Backend_Design.md §2, §6)
+# ============================================================================
+
+
+def start_update(
+    data_access: DataAccess,
+    one_pager_id: str,
+    user: CurrentUser,
+    *,
+    confirmed: bool = False,
+    now: datetime | None = None,
+) -> OnePagerStatusRow:
+    """Update an approved One Pager: ``Approved`` → ``Draft Update``.
+
+    Only its Owner/SMEs may, after confirming. The approved version is the
+    working copy: it is read from the volume (from Git once Phase 8 lands),
+    and because version files are immutable the next Save Draft writes
+    ``MAJOR.1.0`` beside it, so the approved file itself is never changed.
+    The version and the Data Product status stay as they are. No edit lock is
+    taken: it is acquired when the Owner opens the Editor (Backend_Design §6).
+
+    Raises:
+        NotFoundError: No One Pager with this ID.
+        PermissionDeniedError: The user is not Owner/SME of the One Pager.
+        InvalidTransitionError: The One Pager is not ``Approved``.
+        ConfirmationRequiredError: The update was not confirmed.
+        TransitionError: The approved document cannot be read, or storing
+            failed; nothing changed.
+
+    """
+    row = data_access.get_one_pager_status_row(one_pager_id)
+    if row is None:
+        msg = f"One Pager {one_pager_id} not found."
+        raise NotFoundError(msg)
+    owner_or_sme = is_owner_or_sme(user, data_access.get_authorized_users(one_pager_id))
+    if not owner_or_sme:
+        log_permission_denied("update", user=user.initials, one_pager_id=one_pager_id)
+        msg = "Only the Owner or an SME can update this One Pager."
+        raise PermissionDeniedError(msg)
+    rule = get_rule(OP_STATUS_FIELD, row.one_pager_status, DRAFT_UPDATE)
+    failure = guard_failure(
+        rule,
+        actors=set(),
+        one_pager_status=row.one_pager_status,
+        data_product_status=row.data_product_status,
+        is_owner_or_sme=owner_or_sme,
+    )
+    if failure:
+        raise InvalidTransitionError(failure)
+    if rule.requires_confirmation and not confirmed:
+        msg = "Confirm that you want to start an update of this One Pager."
+        raise ConfirmationRequiredError(msg)
+
+    try:
+        approved = data_access.read_document(one_pager_id, row.version)
+    except RuntimeError as e:
+        logger.exception(f"Reading the approved {one_pager_id} failed")
+        raise TransitionError(TRANSITION_FAILED_MESSAGE) from e
+    if approved is None:
+        msg = (
+            f"The approved version v{row.version} of {one_pager_id} could not be "
+            "found, so it cannot be updated."
+        )
+        raise TransitionError(msg)
+    return apply_transitions(data_access, row, [rule], user, now=now)

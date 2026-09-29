@@ -51,6 +51,7 @@ from adapters.workflow_actions import (
     change_dp_status_and_report,
     reject_and_report,
     resolve_comment_and_report,
+    update_and_report,
 )
 from onepagerapp.review import MAX_COMMENT_LENGTH, SECTION_LABELS, section_label
 from onepagerapp.state_machine import IN_REVIEW, Actor, TransitionRule
@@ -635,6 +636,26 @@ def confirm_cancel(data_access: DataAccess, one_pager_id: str, user: CurrentUser
         st.rerun()
 
 
+@st.dialog("Update this One Pager?")
+def confirm_update(
+    data_access: DataAccess, one_pager_id: str, user: CurrentUser
+) -> None:
+    """[Update] confirmation dialog (UI_Design.md §4.4)."""
+    st.write(
+        "This will create a working copy for editing. The current approved "
+        "version remains in Git until you complete the review cycle. Proceed?"
+    )
+    col_confirm, col_back = st.columns(2)
+    if col_confirm.button("Confirm", type="primary", use_container_width=True):
+        error = update_and_report(data_access, one_pager_id, user)
+        if error:
+            st.error(error, icon="⚠️")
+            return
+        st.rerun()
+    if col_back.button("Cancel", key="preview_update_back", use_container_width=True):
+        st.rerun()
+
+
 @st.dialog("Reject this One Pager?")
 def confirm_reject(
     data_access: DataAccess,
@@ -850,6 +871,8 @@ def render_action_bar(
         open_editor(header.one_pager_id)
     elif clicked == "cancel":
         confirm_cancel(data_access, header.one_pager_id, user)
+    elif clicked == "update":
+        confirm_update(data_access, header.one_pager_id, user)
     elif clicked == "reject":
         confirm_reject(data_access, header.one_pager_id, user, roles)
     elif clicked == "add_comment":

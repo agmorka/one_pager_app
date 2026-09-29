@@ -24,7 +24,7 @@ Features the docs themselves mark as future work (Version History / version comp
 | 1.2 | ~~**Submit for Review**: atomic `Draft`/`Draft Update` → `Ready for Review` → `In Review`, with strict validation and rollback~~ **Done (Phase 5):** `workflow.submit_for_review`, the Editor's **Submit for Review** (disabled while there are unsaved changes); releases the lock | Req §6, Backend §2 |
 | 1.3 | ~~**Approve** (`In Review` → `Approved`): version set to `1.0.0` or next MAJOR, automatic DP status change, two change-log entries~~ **Done (Phase 6):** `workflow.approve_one_pager` writes the approved version file, then the status row and both change-log entries; **Approve** in Preview shows the resulting version and DP status first. The Git PR (and `pending_pr`) follows in Phase 8 | Req §6–7, Backend §8 |
 | 1.4 | ~~**Reject** (`In Review` → `Draft`) with a mandatory comment, stored in `review_comments`~~ **Done (Phase 6):** `workflow.reject_one_pager`; the comment is a document-level, unresolved review comment and is appended to the change-log summary; sets `reviewed_at` / `reviewed_by` | Req §6, Backend §2, §13 |
-| 1.5 | **Update** (`Approved` → `Draft Update`): read the approved YAML and write a working copy, with a confirmation dialog | Req §5, Backend §2, UI §4.4 |
+| 1.5 | ~~**Update** (`Approved` → `Draft Update`): read the approved YAML and write a working copy, with a confirmation dialog~~ **Done (Phase 6):** `workflow.start_update`, **Update** in Preview with the confirmation dialog of UI §4.4. The approved version file (read from the volume) is the working copy; the next Save Draft writes `MAJOR.1.0` beside it. No lock is taken until the Editor opens. A rejected update returns to `Draft Update` (Decision_Log §16) | Req §5, Backend §2, UI §4.4 |
 | 1.6 | ~~**Cancel** (`Draft`/`Ready for Review`/`In Review` → `Cancelled`, which also sets DP to `Cancelled`), by the Owner/SME or an Admin~~ **Done (Phase 5):** `workflow.cancel_one_pager`, **Cancel One Pager** in Preview with a confirmation dialog; releases any active lock | Req §6 |
 | 1.7 | ~~Owner-initiated **DP status transitions**: start development, activate, deprecate (with confirmation)~~ **Done (Phase 5):** `workflow.change_data_product_status`, **Change DP Status** menu in Preview (only valid targets; Deprecate asks for confirmation). Only while the One Pager is `Approved`: in `Draft Update` the DP status is preserved (Req §6) | Req §6, Backend §3 |
 | 1.8 | ~~System-driven DP transitions (`Ready for Development` on first approval, `In Enhancement` on re-approval, `Cancelled` on cancel)~~ **Done:** cancel part in Phase 5, approval part in Phase 6 (`workflow.plan_approval`; a DP already `In Enhancement` keeps it) | Req §6, Backend §3 |
@@ -135,7 +135,7 @@ There is no `git_integration.py`.
 | # | Feature |
 |---|---|
 | 12.1 | ~~Content sections that are not rendered: **Governance artifacts**, **Out of Scope**, **Open Questions** and **Assumptions**. `OnePagerDocument` does not model these fields either. Use Case IDs (`UC-###`) and BR IDs are not shown.~~ **Done (Phase 1):** modelled in `OnePagerDocument` (v2 schema) and rendered in Preview |
-| 12.2 | Role- and status-dependent actions: Edit, Update, Change DP Status dropdown, Approve, Reject, Cancel, Add Comment, Resolve, Release lock, Export PDF. **Partly done (Phase 5):** the Preview action bar only shows the actions that apply to the user's role and the statuses; Edit and Release lock work |
+| 12.2 | Role- and status-dependent actions: Edit, Update, Change DP Status dropdown, Approve, Reject, Cancel, Add Comment, Resolve, Release lock, Export PDF. **Partly done (Phase 5):** the Preview action bar only shows the actions that apply to the user's role and the statuses; Edit and Release lock work. **Phase 6:** every action works except Export PDF (Phase 9) |
 | 12.3 | ~~Error states show raw exception text (`st.error(f"... {e}")`). The docs require a friendly message and a Retry button, with no internals shown.~~ **Done (Phase 0)** |
 | 12.4 | ~~Opening Preview without an ID silently defaults to `OP-0001`~~ **Done (Phase 0):** Preview asks the user to pick a One Pager from the Registry |
 
@@ -232,7 +232,7 @@ Locking must exist before users can edit existing records, or two editors can ov
 | 28 | ~~1.6 Cancel, with 1.8 (cancel part) DP → `Cancelled`~~ **Done** | Simple transition that also exercises the system DP transitions |
 | 29 | ~~1.7 Owner-initiated DP transitions (start development, activate, deprecate)~~ **Done** | Uses the same state machine. Only reachable after Approve, but can be unit-tested now |
 
-### Phase 6: Review and approval (approver side)
+### Phase 6: Review and approval (approver side) — ✅ done
 
 | Order | Item | Why now |
 |---|---|---|
@@ -241,7 +241,7 @@ Locking must exist before users can edit existing records, or two editors can ov
 | 32 | ~~1.3 Approve (version `1.0.0` / next MAJOR, two change-log entries), 1.8 (approval part) DP → `Ready for Development` / `In Enhancement`~~ **Done** | Uses segregation of duties (1.10) |
 | 33 | ~~6.2 Section-level review comments, 6.3 Owner resolves comments~~ **Done** | Builds on the comment storage from Reject |
 | 34 | ~~2.3 Editor Review tab (checklist, resolve comments, submit)~~ **Done** | Needs Submit, comments and the strict tier |
-| 35 | 1.5 Update (`Approved` → `Draft Update`) | Needs approved records. Reads the approved YAML from the volume for now. Phase 8 switches it to Git |
+| 35 | ~~1.5 Update (`Approved` → `Draft Update`)~~ **Done** | Needs approved records. Reads the approved YAML from the volume for now. Phase 8 switches it to Git |
 
 At the end of Phase 6 the full lifecycle works end to end, without Git.
 

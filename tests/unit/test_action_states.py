@@ -120,3 +120,12 @@ def test__resolve_comment_for_owner_while_reworking(op: str, *, enabled: bool) -
     viewer = _states(op, "In Definition", user="XYZ")["resolve_comment"]
     assert not viewer.visible
     assert not viewer.enabled
+
+
+@pytest.mark.unit
+def test__reject_of_an_update_is_offered_to_approvers() -> None:
+    approver = _states("In Review", "Active", user="APP", roles=(Actor.APPROVER,))
+    assert {"approve", "reject", "add_comment"} <= _visible(approver)
+    assert approver["reject"].enabled
+    # Update is the Owner's action on Approved, never offered in review.
+    assert not approver["update"].visible

@@ -429,7 +429,7 @@ def test__preview__change_dp_status_opens_menu(
     at = _app("preview.py", {**services, "preview_one_pager_id": "OP-0001"}).run()
     assert {"preview_update", "preview_change_dp_status"} <= _action_keys(at)
     assert not at.button(key="preview_change_dp_status").disabled
-    assert at.button(key="preview_update").disabled  # arrives in Phase 6
+    assert not at.button(key="preview_update").disabled
 
     at.button(key="preview_change_dp_status").click().run()
 
@@ -531,3 +531,33 @@ def test__editor__review_tab_submits_when_complete(
     assert switched == ["views/preview.py"]
     row = services["data_access"].get_one_pager_status_row("OP-0003")
     assert row.one_pager_status == "In Review"
+
+
+@pytest.mark.unit
+def test__preview__update_asks_for_confirmation(
+    services: dict, switched: list[str]
+) -> None:
+    # OP-0001: Approved / Ready for Development, owned by Alice.
+    at = _app("preview.py", {**services, "preview_one_pager_id": "OP-0001"}).run()
+    at.button(key="preview_update").click().run()
+
+    assert not at.exception
+    assert any("working copy for editing" in m.value for m in at.markdown)
+    row = services["data_access"].get_one_pager_status_row("OP-0001")
+    assert row.one_pager_status == "Approved"  # nothing happens before Confirm
+
+
+@pytest.mark.unit
+def test__editor__opens_approved_version_after_update(
+    services: dict, switched: list[str]
+) -> None:
+    from onepagerapp.workflow import start_update  # noqa: PLC0415
+
+    alice = services["current_user_info"]
+    start_update(services["data_access"], "OP-0001", alice, confirmed=True)
+
+    at = _editor(services, "OP-0001").run()
+
+    assert not at.exception
+    assert at.title[0].value == "Editing: Person Master Data (OP-0001)"
+    assert services["data_access"].get_lock("OP-0001").locked_by_initials == "AB"

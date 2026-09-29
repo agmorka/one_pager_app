@@ -190,3 +190,17 @@ def test__add_comment__reports_errors_and_success(
     assert error == (
         "Comments are resolved while the One Pager is being reworked (Draft)."
     )
+
+
+@pytest.mark.unit
+def test__update__reports_success_and_errors(
+    actions: ModuleType, data_access: MockDataAccess, alice: CurrentUser
+) -> None:
+    assert actions.update_and_report(data_access, "OP-0001", alice) is None
+    assert "Draft Update" in st.session_state["preview_flash"]
+    assert data_access.get_one_pager_status_row("OP-0001").one_pager_status == (
+        "Draft Update"
+    )
+
+    error = actions.update_and_report(data_access, "OP-0001", alice)
+    assert error == "One Pager status cannot change from Draft Update to Draft Update."
