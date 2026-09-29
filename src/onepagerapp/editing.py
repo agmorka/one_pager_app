@@ -219,18 +219,19 @@ def validate_change_summary(summary: str) -> list[ValidationError]:
     return []
 
 
-def require_lock(
+def require_lock(  # noqa: PLR0913 - the lock identity plus the audited action
     data_access: DataAccess,
     one_pager_id: str,
     user: CurrentUser,
     session_id: str,
     now: datetime | None = None,
+    action: str = "save_draft",
 ) -> None:
     """Raise ``LockNotHeldError`` unless this user and session hold the lock."""
     lock = get_active_lock(data_access, one_pager_id, now)
     if lock is None or not is_held_by(lock, user, session_id):
         log_event(
-            "save_draft",
+            action,
             Outcome.EDIT_REJECTED,
             user=user.initials,
             one_pager_id=one_pager_id,

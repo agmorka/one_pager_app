@@ -21,7 +21,7 @@ Features the docs themselves mark as future work (Version History / version comp
 | # | Feature | Doc ref |
 |---|---|---|
 | 1.1 | ~~Generic `TRANSITIONS` state machine (a single source of truth for allowed transitions)~~ **Done (Phase 5):** `state_machine.TRANSITIONS`, executed by `workflow.apply_transitions` (one conditional status update, one change-log insert, rollback on failure) | Backend §2 |
-| 1.2 | **Submit for Review**: atomic `Draft`/`Draft Update` → `Ready for Review` → `In Review`, with strict validation and rollback | Req §6, Backend §2 |
+| 1.2 | ~~**Submit for Review**: atomic `Draft`/`Draft Update` → `Ready for Review` → `In Review`, with strict validation and rollback~~ **Done (Phase 5):** `workflow.submit_for_review`, the Editor's **Submit for Review** (disabled while there are unsaved changes); releases the lock | Req §6, Backend §2 |
 | 1.3 | **Approve** (`In Review` → `Approved`): version set to `1.0.0` or next MAJOR, automatic DP status change, two change-log entries | Req §6–7, Backend §8 |
 | 1.4 | **Reject** (`In Review` → `Draft`) with a mandatory comment, stored in `review_comments` | Req §6, Backend §2, §13 |
 | 1.5 | **Update** (`Approved` → `Draft Update`): read the approved YAML and write a working copy, with a confirmation dialog | Req §5, Backend §2, UI §4.4 |
@@ -74,7 +74,7 @@ The Editor has create mode and, from Phase 4, edit mode. Missing:
 |---|---|
 | 5.1 | ~~Acquire a lock when the editor opens (same user and session, same user in another tab, other user, expired lock)~~ **Done (Phase 3):** `locking.acquire_lock`; the editor calls it from Phase 4 (2.1) |
 | 5.2 | ~~Heartbeat on each re-run, with automatic expiry after 30 minutes~~ **Done (Phase 3):** `acquire_lock` / `heartbeat`, TTL from `ONE_PAGER_APP_LOCK_TTL_SECONDS` |
-| 5.3 | Release the lock on submit, cancel or manual release (the **Release my lock** button in Preview). **Manual release done (Phase 3):** `locking.release_lock`; submit and cancel call it in Phase 5 |
+| 5.3 | Release the lock on submit, cancel or manual release (the **Release my lock** button in Preview). **Manual release done (Phase 3):** `locking.release_lock`. **Submit done (Phase 5)**; cancel follows in step 28 |
 | 5.4 | ~~Log an event when an expired lock is overridden~~ **Done (Phase 3)** |
 | 5.5 | ~~Lock icon and holder initials in the **Registry** table~~ **Done (Phase 3)** |
 
@@ -228,7 +228,7 @@ Locking must exist before users can edit existing records, or two editors can ov
 | 24 | ~~1.1 `TRANSITIONS` state machine, 1.9 valid OP/DP combinations~~ **Done** | The single source of truth that every transition below uses |
 | 25 | ~~9.2 Serialized transitions for the Help page~~ **Done** | Trivial once 1.1 exists |
 | 26 | ~~4.3 Real `get_action_states`, 12.2 action buttons in Preview (Edit first)~~ **Done** | Buttons turn on one at a time as each transition lands |
-| 27 | 1.2 Submit for Review (atomic, strict validation, rollback, releases lock) | Needs strict validation (3.2) and locking (5.3) |
+| 27 | ~~1.2 Submit for Review (atomic, strict validation, rollback, releases lock)~~ **Done** | Needs strict validation (3.2) and locking (5.3) |
 | 28 | 1.6 Cancel, with 1.8 (cancel part) DP → `Cancelled` | Simple transition that also exercises the system DP transitions |
 | 29 | 1.7 Owner-initiated DP transitions (start development, activate, deprecate) | Uses the same state machine. Only reachable after Approve, but can be unit-tested now |
 

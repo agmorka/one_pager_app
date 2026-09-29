@@ -35,8 +35,8 @@ from onepagerapp.editing import (
     MAX_SUMMARY_LENGTH,
     SAVE_FAILED_MESSAGE,
     SaveError,
-    open_for_edit,
     has_unsaved_changes,
+    open_for_edit,
     save_draft,
     submission_issues,
     working_copy,
@@ -49,8 +49,14 @@ from onepagerapp.models import (
     ValidationError,
 )
 from onepagerapp.permissions import PermissionDeniedError
+from onepagerapp.state_machine import InvalidTransitionError
 from onepagerapp.validation import MAX_NAME_LENGTH, MAX_TEXT_LENGTH
-from onepagerapp.workflow import active_reference_values
+from onepagerapp.workflow import (
+    TRANSITION_FAILED_MESSAGE,
+    TransitionError,
+    active_reference_values,
+    submit_for_review,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -515,13 +521,13 @@ SECTION_TABS: dict[str, str] = {
 
 
 def tab_for_path(field_path: str) -> str | None:
-    """The editor tab holding a field (``smes[1].email`` → Basics)."""
+    """Return the editor tab holding a field (``smes[1].email`` → Basics)."""
     section = re.split(r"[.\[]", field_path, maxsplit=1)[0]
     return SECTION_TABS.get(section)
 
 
 def describe_path(field_path: str) -> str:
-    """Readable field location: ``dataSources[0].name`` → "item 1 › name"."""
+    """Return a readable field location, e.g. "item 1", "name" joined by a chevron."""
     parts = re.split(r"\.", field_path)[1:] if "." in field_path else []
     first = re.search(r"\[(\d+)\]", field_path.split(".", 1)[0])
     labels = [f"item {int(first.group(1)) + 1}"] if first else []
@@ -531,7 +537,7 @@ def describe_path(field_path: str) -> str:
             labels.append(match.group(1))
             if match.group(2) is not None:
                 labels.append(f"item {int(match.group(2)) + 1}")
-    return " › ".join(labels)
+    return " \u203a ".join(labels)  # single right-pointing angle quotation mark
 
 
 def issues_by_tab(errors: list[ValidationError]) -> dict[str, list[ValidationError]]:
@@ -577,8 +583,11 @@ def render_tab_bar() -> str:
 
 
 def render_badges(issues: dict[str, list[ValidationError]]) -> None:
-    """Red badge per tab with issues (not in the radio labels: changing a
-    widget's options would reset it)."""
+    """Show a red badge per tab with issues.
+
+    The badges are not in the radio labels: changing a widget's options would
+    reset it and lose the selected tab.
+    """
     badges = [
         tab_label(tab, len(errors)) for tab, errors in issues.items() if tab in TABS
     ]
@@ -589,7 +598,7 @@ def render_badges(issues: dict[str, list[ValidationError]]) -> None:
 def render_issue_summary(
     title: str, issues: dict[str, list[ValidationError]], key: str
 ) -> None:
-    """Validation summary; each issue is a button that opens its tab."""
+    """Render the validation summary; each issue is a button that opens its tab."""
     count = sum(len(v) for v in issues.values())
     if not count:
         return
@@ -650,6 +659,37 @@ def _save(
     st.session_state[FLASH_KEY] = f"Saved as v{result.version}."
 
 
+def _submit(data_access: DataAccess, one_pager_id: str, user: CurrentUser) -> None:
+    """Run **Submit for Review**; on success leave the editor for Preview."""
+    st.session_state[BANNER_KEY] = None
+    try:
+        with st.spinner("Submitting for review..."):
+            result = submit_for_review(
+                data_access, one_pager_id, user, current_session_id()
+            )
+    except (PermissionDeniedError, TransitionError, InvalidTransitionError) as e:
+        st.session_state[BANNER_KEY] = str(e)
+        return
+    except Exception:
+        logger.exception(f"Unexpected error submitting {one_pager_id}")
+        st.session_state[BANNER_KEY] = TRANSITION_FAILED_MESSAGE
+        return
+    if not result.ok:
+        st.session_state[BANNER_KEY] = (
+            f"Submit for Review is blocked by {len(result.errors)} issue(s). "
+            "Fix them (see the summary below), save, and submit again."
+        )
+        return
+    clear_edit_state()
+    st.session_state.pop("editor_mode", None)
+    st.session_state.pop("editor_one_pager_id", None)
+    st.session_state["preview_one_pager_id"] = one_pager_id
+    st.session_state["preview_flash"] = (
+        f"{one_pager_id} was submitted for review and is now In Review."
+    )
+    st.switch_page("views/preview.py")
+
+
 def render_bottom_bar(
     data_access: DataAccess,
     document_store: OnePagerDocumentStore,
@@ -667,10 +707,24 @@ def render_bottom_bar(
         placeholder="What did you change?",
         help="Required to save. Becomes the change log entry for this version.",
     )
-    col_save, col_close, _ = st.columns([1, 1, 4])
+    dirty = is_dirty()
+    col_save, col_submit, col_close, _ = st.columns([1, 1.3, 1, 2.7])
     with col_save:
         save_clicked = st.button(
             "Save Draft", key="edit_save", type="primary", use_container_width=True
+        )
+    with col_submit:
+        submit_clicked = st.button(
+            "Submit for Review",
+            key="edit_submit",
+            disabled=dirty,
+            help="Save your changes first."
+            if dirty
+            else (
+                "Runs the full validation, then sends the One Pager to review. "
+                "Releases your lock."
+            ),
+            use_container_width=True,
         )
     with col_close:
         close_clicked = st.button(
@@ -678,6 +732,9 @@ def render_bottom_bar(
         )
     if save_clicked:
         _save(data_access, document_store, one_pager_id, user)
+        st.rerun()
+    if submit_clicked:
+        _submit(data_access, one_pager_id, user)
         st.rerun()
     if close_clicked:
         if is_dirty():

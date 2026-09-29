@@ -358,3 +358,36 @@ def test__preview__actions_follow_role_and_status(
     assert not viewer.exception
     assert _action_keys(viewer) == {"preview_export_pdf"}
     assert any("Waiting for an Approver" in c.value for c in viewer.caption)
+
+
+@pytest.mark.unit
+def test__editor__submit_for_review(services: dict, switched: list[str]) -> None:
+    from tests.unit.test_editing_links import fill_all_sections  # noqa: PLC0415
+
+    at = _editor(services).run()
+    fill_all_sections(at.session_state["edit_document"])
+    at.text_input(key="edit_change_summary").input("Complete").run()
+    assert at.button(key="edit_submit").disabled  # unsaved changes
+    _button(at, "Save Draft").click().run()
+    assert not at.button(key="edit_submit").disabled
+
+    at.button(key="edit_submit").click().run()
+
+    assert not at.exception
+    assert switched == ["views/preview.py"]
+    assert "now In Review" in at.session_state["preview_flash"]
+    row = services["data_access"].get_one_pager_status_row("OP-0003")
+    assert row.one_pager_status == "In Review"
+    assert services["data_access"].get_lock("OP-0003") is None
+
+
+@pytest.mark.unit
+def test__editor__submit_blocked_by_validation(
+    services: dict, switched: list[str]
+) -> None:
+    at = _editor(services).run()
+    at.button(key="edit_submit").click().run()
+
+    assert not at.exception
+    assert switched == []
+    assert "Submit for Review is blocked" in at.error[0].value
