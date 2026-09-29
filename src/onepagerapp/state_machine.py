@@ -428,3 +428,70 @@ def _actor_message(rule: TransitionRule) -> str:
     }
     who = " or ".join(names[a] for a in rule.actors if a in names)
     return f"Only {who} can do this."
+
+
+# ============================================================================
+# Serialization for the Help page (Backend_Design.md §14)
+# ============================================================================
+
+_ACTOR_NAMES = {
+    Actor.OWNER_SME: "Owner/SME",
+    Actor.APPROVER: "Approver",
+    Actor.ADMIN: "Admin",
+    Actor.SYSTEM: "System",
+}
+
+
+def _conditions(rule: TransitionRule) -> list[str]:
+    conditions: list[str] = []
+    if rule.requires_strict_validation:
+        conditions.append("Strict validation passes")
+    if rule.requires_op_status:
+        conditions.append(f"One Pager is {' or '.join(rule.requires_op_status)}")
+    if rule.requires_dp_status:
+        conditions.append(f"Data Product is {' or '.join(rule.requires_dp_status)}")
+    if rule.segregation_of_duties:
+        conditions.append("Reviewer is not Owner/SME of this One Pager")
+    if rule.requires_comment:
+        conditions.append("A comment is required")
+    if rule.requires_confirmation:
+        conditions.append("Asks for confirmation")
+    return conditions
+
+
+def serialize_transition(rule: TransitionRule) -> dict[str, object]:
+    """Return one transition as plain data (JSON-serializable)."""
+    return {
+        "status_field": rule.status_field,
+        "from_status": rule.from_status,
+        "to_status": rule.to_status,
+        "action": rule.action,
+        "label": rule.label,
+        "who": [_ACTOR_NAMES[a] for a in rule.actors],
+        "system": rule.is_system,
+        "conditions": _conditions(rule),
+        "summary": rule.summary,
+    }
+
+
+def serialize_state_machine() -> dict[str, list[dict[str, object]]]:
+    """Return the transitions and valid combinations as plain data (Help page).
+
+    Returns:
+        ``one_pager_transitions`` and ``data_product_transitions`` (in the
+        order of Backend_Design.md §2-3) and ``valid_combinations`` (one entry
+        per One Pager status, Requirements_and_Scope.md §6).
+
+    """
+    return {
+        "one_pager_transitions": [
+            serialize_transition(r) for r in _RULES if r.status_field == OP_STATUS_FIELD
+        ],
+        "data_product_transitions": [
+            serialize_transition(r) for r in _RULES if r.status_field == DP_STATUS_FIELD
+        ],
+        "valid_combinations": [
+            {"one_pager_status": op, "data_product_statuses": list(dps)}
+            for op, dps in VALID_COMBINATIONS.items()
+        ],
+    }

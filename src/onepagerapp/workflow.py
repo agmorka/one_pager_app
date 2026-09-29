@@ -46,6 +46,7 @@ from onepagerapp.state_machine import (
     InvalidTransitionError,
     TransitionRule,
     check_combination,
+    serialize_state_machine,
 )
 from onepagerapp.validation import (
     CURRENT_STRUCTURE_DEFINITION,
@@ -536,3 +537,12 @@ def _undo_transition(
             user=user.initials,
             one_pager_id=previous.one_pager_id,
         )
+
+
+def get_workflow_reference() -> dict[str, list[dict[str, object]]]:
+    """Transitions and valid OP/DP combinations for the Help page (Backend §14).
+
+    Rendered from ``TRANSITIONS`` / ``VALID_COMBINATIONS``, so the Help page
+    always describes the rules the application enforces.
+    """
+    return serialize_state_machine()

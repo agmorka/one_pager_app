@@ -110,7 +110,7 @@ There is no `git_integration.py`.
 | # | Feature |
 |---|---|
 | 9.1 | Help page (`6_Help.py`): lifecycle explanation, OP/DP state diagrams, valid-combinations table, roles, workflow quick reference, badge legend |
-| 9.2 | Service method that returns the serialized transitions for the Help page (Backend §14) |
+| 9.2 | ~~Service method that returns the serialized transitions for the Help page (Backend §14)~~ **Done (Phase 5):** `workflow.get_workflow_reference` |
 
 ## 10. Admin page (UI §4.7)
 
@@ -226,7 +226,7 @@ Locking must exist before users can edit existing records, or two editors can ov
 | Order | Item | Why now |
 |---|---|---|
 | 24 | ~~1.1 `TRANSITIONS` state machine, 1.9 valid OP/DP combinations~~ **Done** | The single source of truth that every transition below uses |
-| 25 | 9.2 Serialized transitions for the Help page | Trivial once 1.1 exists |
+| 25 | ~~9.2 Serialized transitions for the Help page~~ **Done** | Trivial once 1.1 exists |
 | 26 | 4.3 Real `get_action_states`, 12.2 action buttons in Preview (Edit first) | Buttons turn on one at a time as each transition lands |
 | 27 | 1.2 Submit for Review (atomic, strict validation, rollback, releases lock) | Needs strict validation (3.2) and locking (5.3) |
 | 28 | 1.6 Cancel, with 1.8 (cancel part) DP → `Cancelled` | Simple transition that also exercises the system DP transitions |
