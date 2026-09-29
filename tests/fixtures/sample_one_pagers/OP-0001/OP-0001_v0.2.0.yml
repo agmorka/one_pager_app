@@ -1,0 +1,77 @@
+structureDefinition: "structure_one_pager_v_1.json"
+dataProduct: "person"
+productName: "Person Master Data"
+businessDomain: "Customer"
+dataProductType: "Foundational"
+onePagerStatus: "Draft"
+dataProductStatus: "In Definition"
+version: "0.2.0"
+
+dataProductOwner:
+  name: "Alice Brown"
+  initials: "AB"
+  email: "alice.brown@company.com"
+  team: "Data Platform"
+
+smes:
+  - name: "Charlie Davis"
+    initials: "CD"
+    email: "charlie.davis@company.com"
+    team: "Analytics"
+
+description: |
+  The Person Master Data product provides a unified, authoritative view of all individuals 
+  (employees, customers, prospects) across the organization. This foundational dataset 
+  serves as the basis for customer analytics, reporting, and operational systems.
+
+businessProblemStatement: |
+  Person data is scattered across 15+ different source systems with no single source of truth. 
+  This creates data quality issues, duplicates, and inconsistent customer identification across 
+  analytics and operations. We need one authoritative person dataset that all downstream systems 
+  can trust, with real-time updates from source systems and a clear data lineage.
+
+useCases:
+  - persona: "Analytics Manager"
+    goal: "Understand customer lifetime value trends"
+    scenario: "Aggregate spending, engagement, and product usage without duplicate records"
+    decisionEnabled: "Identify high-value customer segments for targeted marketing"
+    priority: "Must Have"
+  - persona: "Compliance Officer"
+    goal: "Fulfill GDPR data subject access requests quickly"
+    scenario: "Query Person dataset with unique ID and get all attributes in one place"
+    decisionEnabled: "Respond to GDPR requests within 30 days"
+    priority: "Must Have"
+
+businessRequirements:
+  - requirement: "Person records must be updated within 4 hours of source system changes"
+    priority: "Must Have"
+  - requirement: "Person data must be available 99.5% of the time"
+    priority: "Must Have"
+
+dataSources:
+  - sourceName: "SAP ERP"
+    sourceType: "Enterprise System"
+    description: "Employee and vendor master data"
+  - sourceName: "Salesforce CRM"
+    sourceType: "SaaS Application"
+    description: "Customer and prospect contact information"
+
+dataClassification:
+  classificationLevel: "Internal"
+  containsPII: true
+  containsSensitiveData: false
+  retentionRequirements: "Active person records: 7 years after last interaction"
+
+dataElementPreview:
+  - elementName: "person_id"
+    dataType: "STRING"
+    description: "Unique person identifier"
+    isCriticalDataElement: true
+  - elementName: "person_name"
+    dataType: "STRING"
+    description: "Full name"
+    isCriticalDataElement: false
+  - elementName: "customer_segment"
+    dataType: "STRING"
+    description: "Customer classification (Premium, Standard, Prospect)"
+    isCriticalDataElement: true

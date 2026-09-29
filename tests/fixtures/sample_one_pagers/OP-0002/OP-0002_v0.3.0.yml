@@ -1,0 +1,80 @@
+structureDefinition: "structure_one_pager_v_1.json"
+dataProduct: "order"
+productName: "Order Master Data"
+businessDomain: "Sales"
+dataProductType: "Foundational"
+onePagerStatus: "In Review"
+dataProductStatus: "In Definition"
+version: "0.3.0"
+
+dataProductOwner:
+  name: "Bob Smith"
+  initials: "BS"
+  email: "bob.smith@company.com"
+  team: "Sales Analytics"
+
+smes:
+  - name: "Diana Prince"
+    initials: "DP"
+    email: "diana.prince@company.com"
+    team: "Finance"
+
+description: |
+  The Order Master Data product provides a comprehensive, unified view of all customer orders 
+  across sales channels, fulfillment networks, and time periods. It integrates order header 
+  (order details, timing, customer, payment) with line items and fulfillment tracking.
+
+businessProblemStatement: |
+  Order data is fragmented across e-commerce, point-of-sale, and ERP systems. Order reconciliation 
+  takes weeks, reporting is inconsistent, and revenue attribution is unreliable. We need a 
+  single authoritative order dataset with complete lineage from capture to fulfillment.
+
+useCases:
+  - persona: "Finance Director"
+    goal: "Reconcile revenue across channels and time periods"
+    scenario: "Query unified order data by date range, channel, product, and customer"
+    decisionEnabled: "Close accounting books on time with full audit trail"
+    priority: "Must Have"
+  - persona: "Operations Manager"
+    goal: "Track fulfillment status and predict delivery dates"
+    scenario: "See order status, warehouse inventory, and shipping progress in one view"
+    decisionEnabled: "Proactively communicate delivery estimates to customers"
+    priority: "Must Have"
+
+businessRequirements:
+  - requirement: "Orders captured within 15 minutes of transaction"
+    priority: "Must Have"
+  - requirement: "Support 1000+ orders per second throughput"
+    priority: "High"
+
+dataSources:
+  - sourceName: "Shopify"
+    sourceType: "E-commerce Platform"
+    description: "Online sales orders"
+  - sourceName: "SAP ERP"
+    sourceType: "Enterprise System"
+    description: "B2B and contract orders"
+
+dataClassification:
+  classificationLevel: "Internal"
+  containsPII: true
+  containsSensitiveData: true
+  retentionRequirements: "Order records retained for 7 years (audit/tax compliance)"
+
+dataElementPreview:
+  - elementName: "order_id"
+    dataType: "STRING"
+    description: "Unique order identifier"
+    isCriticalDataElement: true
+  - elementName: "order_date"
+    dataType: "TIMESTAMP"
+    description: "When order was placed"
+    isCriticalDataElement: false
+  - elementName: "customer_id"
+    dataType: "STRING"
+    description: "Reference to Person master"
+    isCriticalDataElement: true
+  - elementName: "total_amount"
+    dataType: "DECIMAL"
+    description: "Total order value"
+    isCriticalDataElement: true

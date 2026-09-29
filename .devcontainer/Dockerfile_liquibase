@@ -1,0 +1,2 @@
+FROM docker-local.artifactory.intra.bec.dk:443/liquibase-local:0.0.2
+ENV JAVA_OPTS="-Dcatalog.name=dev_bia"

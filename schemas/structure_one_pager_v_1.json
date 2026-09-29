@@ -1,0 +1,150 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "One Pager Structure Definition v1",
+  "description": "Schema for Data Product One Pager documents.",
+  "type": "object",
+  "required": [
+    "structureDefinition",
+    "dataProduct",
+    "productName",
+    "description",
+    "businessDomain",
+    "dataProductType",
+    "onePagerStatus",
+    "dataProductStatus",
+    "version",
+    "dataProductOwner"
+  ],
+  "properties": {
+    "structureDefinition": {
+      "type": "string",
+      "description": "Schema version this document follows."
+    },
+    "dataProduct": {
+      "type": "string",
+      "description": "Registered unique name of the Data Product."
+    },
+    "productName": {
+      "type": "string",
+      "description": "Human-readable product name.",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string",
+      "description": "Description of the Data Product.",
+      "minLength": 1
+    },
+    "businessDomain": {
+      "type": "string",
+      "description": "Business domain."
+    },
+    "dataProductType": {
+      "type": "string",
+      "enum": ["Foundational", "Integrated", "Augmented"]
+    },
+    "onePagerStatus": {
+      "type": "string",
+      "enum": ["Draft", "Ready for Review", "In Review", "Approved", "Draft Update", "Cancelled"]
+    },
+    "dataProductStatus": {
+      "type": "string",
+      "enum": ["In Definition", "Ready for Development", "In Development", "Active", "In Enhancement", "Deprecated", "Cancelled"]
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "dataProductOwner": {
+      "type": "object",
+      "required": ["name", "initials", "email"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "initials": { "type": "string", "minLength": 1 },
+        "email": { "type": "string", "format": "email" },
+        "team": { "type": "string" }
+      }
+    },
+    "smes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "initials", "email"],
+        "properties": {
+          "name": { "type": "string" },
+          "initials": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "team": { "type": "string" }
+        }
+      }
+    },
+    "businessProblemStatement": {
+      "type": "string"
+    },
+    "dataClassification": {
+      "type": "object",
+      "properties": {
+        "classificationLevel": { "type": "string" },
+        "containsPII": { "type": "boolean" },
+        "containsSensitiveData": { "type": "boolean" },
+        "retentionRequirements": { "type": "string" }
+      }
+    },
+    "isCriticalDataElement": {
+      "type": "boolean"
+    },
+    "cdeCriticalityTiering": {
+      "type": "string"
+    },
+    "useCases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "useCaseId": { "type": "string" },
+          "persona": { "type": "string" },
+          "goal": { "type": "string" },
+          "scenario": { "type": "string" },
+          "decisionEnabled": { "type": "string" },
+          "priority": { "type": "string", "enum": ["Must Have", "High", "Medium", "Low"] }
+        }
+      }
+    },
+    "businessRequirements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "description"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^BR-\\d{3,}$" },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "dataSources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "sourceSystem": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "createdBy": { "type": "string" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "lastUpdated": { "type": "string", "format": "date-time" },
+    "changeLog": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "version": { "type": "string" },
+          "date": { "type": "string", "format": "date-time" },
+          "author": { "type": "string" },
+          "summary": { "type": "string" }
+        }
+      }
+    }
+  }
+}

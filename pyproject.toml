@@ -1,0 +1,139 @@
+[project]
+name = "onepagerapp"
+description = "One Pager Application — manage Data Product One Pagers through their lifecycle"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "databricks-sdk==0.67.0",
+    "pydantic==2.10.6",
+    "pyyaml==6.0.1",
+    "streamlit==1.38.0",
+    "itables==2.1.5",
+]
+authors = [{name="BEC"}]
+readme = "README.md"
+dynamic = ["version"]
+
+
+[dependency-groups]
+dev = [
+    "pytest==8.3.4",
+    "pytest-cov==6.2.1", 
+    "ruff==0.12.5",
+    "mypy==1.15.0"
+]
+
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/onepagerapp"]
+
+[tool.hatch.version]
+path = "src/onepagerapp/__version.py"
+
+
+# Additional index for the uv tool
+[[tool.uv.index]]
+url = "https://artifactory.intra.bec.dk:443/artifactory/api/pypi/bec-pypi-approved/simple"
+default = true
+
+
+# Tests and coverage report settings
+[tool.pytest.ini_options]
+addopts = "--cov-report=term --junitxml=test_results.xml --cov-report=xml:coverage.xml --cov=src/onepagerapp -ra -vv"
+testpaths = "tests"
+pythonpath = ["src"]
+markers = [
+    "unit: unit tests",
+    "integration: integration tests",
+]
+
+[tool.coverage.run]
+source = ["src/onepagerapp"]
+omit = [
+  "src/onepagerapp/__*.py",
+  "src/onepagerapp/**/__*.py"
+  ]
+
+
+
+# Ruff settings
+[tool.ruff]
+line-length = 88
+indent-width = 4
+respect-gitignore = true
+show-fixes = true
+include = [
+  "src/**/*.py", 
+  "tests/**/*.py"
+  ]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+  # Documentation rules
+  "D100", # Missing docstring in public module
+  "D101", # Missing docstring in public class
+  "D102", # Missing docstring in public method
+  "D103", # Missing docstring in public function
+  "D104", # Missing docstring in public package
+  "D105", # Missing docstring in magic method
+  "D106", # Missing docstring in public nested class
+  # Style preferences
+  "G004",   # Logging statement uses f-string (modern practice)
+  "COM812", # Trailing comma missing (conflicts with formatter)
+]
+fixable = [
+  "COM", # flake8-commas
+  "I",   # isort
+  "E",   # pycodestyle errors  
+  "W",   # pycodestyle warnings
+]
+unfixable = ["F841"]  # Don't auto-remove unused variables (might be intentional)
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+docstring-code-format = true
+docstring-code-line-length = 88
+
+[tool.ruff.lint.per-file-ignores]
+"src/onepagerapp/onepagerapp_core/data_access/factory.py" = ["PLC0415"]
+"src/onepagerapp/pages/*" = [
+  "INP001", # File is part of an implicit namespace package. Add an `__init__.py`.
+  "N999",   # "Invalid module name"
+]
+"tests/*" = [
+  "ARG001",  # Unused function arguments (pytest fixtures)
+  "B018",    # Found useless expression (test setup)
+  "C901",    # Function is too complex
+  "ERA001",  # Found commented-out code (common during test development)
+  "FBT001",  # Boolean positional argument in function definition
+  "FBT002",  # Boolean default positional argument in function definition
+  "FBT003",  # Boolean positional value in function call
+  "PLR0913", # Too many arguments to function call
+  "PLR0915", # Too many statements in function
+  "PLR2004", # Magic values are common in tests
+  "S101",    # Use of `assert` detected (expected in tests)
+  "SLF001",  # Private member accessed (testing private methods)
+  "T201",    # print found (debugging in tests)
+]
+"notebooks/*" = [
+  "E402", # Module imports not at top (common in notebooks)
+  "T201", # Print statements are normal in notebooks
+]
+
+
+# Mypy settings
+[tool.mypy]
+files = ["src/onepagerapp/onepagerapp_core"]
+plugins = ["pydantic.mypy"]
+
+strict = true
+ignore_missing_imports = true
+
+incremental = true
+cache_dir = ".mypy_cache"

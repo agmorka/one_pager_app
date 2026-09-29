@@ -1,0 +1,41 @@
+bundle:
+  name: OnePagerApp
+
+artifacts:
+  default:
+    type: whl
+    build: uv build
+    path: .
+
+variables:
+  service-principal:
+    description: "Id of service principal to run as"
+    default: ""
+  directory_path:
+    description: "Directory path for the bundle"
+    default: "/LakehouseX/${bundle.name}"
+
+include:
+  - resources/*/*.yml
+  - resources/*.yml
+
+targets:
+  dev:
+    mode: production
+    workspace:
+      root_path: ${var.directory_path}  
+
+  int:
+    mode: production
+    workspace:
+      root_path: ${var.directory_path}  
+
+  uat:
+    mode: production
+    workspace:
+      root_path: ${var.directory_path}  
+
+  prd:
+    mode: production
+    workspace:
+      root_path: ${var.directory_path}  

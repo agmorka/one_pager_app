@@ -1,0 +1,13 @@
+command: [
+  "streamlit",
+  "run",
+  "app.py"
+]
+
+env:
+  - name: STREAMLIT_BROWSER_GATHER_USAGE_STATS
+    value: "false"
+  - name: ONE_PAGER_APP_VOLUME_PATH
+    valueFrom: one-pager-registry-volume
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: serverless-starter-warehouse
