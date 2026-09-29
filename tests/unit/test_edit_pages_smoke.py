@@ -199,7 +199,7 @@ def test__editor__save_without_summary_shows_error(
     _button(at, "Save Draft").click().run()
 
     assert not at.exception
-    assert "Describe what you changed." in at.warning[0].value
+    assert any("Describe what you changed." in m.value for m in at.markdown)
     row = services["data_access"].get_one_pager_status_row("OP-0003")
     assert row.version == "0.1.0"
 
@@ -309,3 +309,29 @@ def test__editor__classification_updates_document(
         "containsSensitiveData": False,
     }
     assert "Required" in at.info[0].value
+
+
+@pytest.mark.unit
+def test__editor__badges_and_summary_link_to_tabs(
+    services: dict, switched: list[str]
+) -> None:
+    at = _editor(services).run()
+
+    badges = next(c.value for c in at.caption if "Needs attention" in c.value)
+    assert "Use Cases 🔴 1" in badges
+    assert "Basics" not in badges
+    issue = next(b for b in at.button if b.key.startswith("edit_issue_submit_Data S"))
+    assert issue.label == "This field is required."
+
+    issue.click().run()
+
+    assert at.radio(key="edit_active_tab").value == "Data Sources"
+    assert at.button(key="edit_ds_add")
+
+
+@pytest.mark.unit
+def test__editor__badges_follow_input(services: dict, switched: list[str]) -> None:
+    at = _tab(_editor(services).run(), "Business Problem")
+    at.text_area(key="edit_problem").input("Scattered data").run()
+    badges = next(c.value for c in at.caption if "Needs attention" in c.value)
+    assert "Business Problem" not in badges

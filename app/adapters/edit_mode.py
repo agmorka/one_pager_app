@@ -11,6 +11,7 @@ re-run, which is the lock heartbeat (Backend_Design.md §6).
 """
 
 import logging
+import re
 from collections.abc import Callable
 from datetime import UTC, timedelta
 
@@ -36,6 +37,7 @@ from onepagerapp.editing import (
     SaveError,
     open_for_edit,
     save_draft,
+    submission_issues,
     working_copy,
 )
 from onepagerapp.locking import DEFAULT_LOCK_TTL, acquire_lock, release_lock
@@ -363,20 +365,128 @@ def render_header(doc: OnePagerDocument) -> None:
     st.caption(f"🔒 Locked by you{_lock_expiry(st.session_state.get('edit_lock'))}")
 
 
-def render_tab_bar(labels: dict[str, str]) -> str:
-    """Horizontal tab bar; ``labels`` maps tab name → displayed label."""
+# Top-level document key → editor tab (UI_Design.md §4.2).
+SECTION_TABS: dict[str, str] = {
+    "structureDefinition": "Basics",
+    "dataProduct": "Basics",
+    "productName": "Basics",
+    "businessDomain": "Basics",
+    "dataProductType": "Basics",
+    "description": "Basics",
+    "onePagerStatus": "Basics",
+    "dataProductStatus": "Basics",
+    "version": "Basics",
+    "dataProductOwner": "Basics",
+    "smes": "Basics",
+    "businessProblemStatement": "Business Problem",
+    "useCases": "Use Cases",
+    "businessRequirements": "Business Requirements",
+    "dataSources": "Data Sources",
+    "dataProductPreview": "Data Product Preview",
+    "dataElementPreview": "Data Product Preview",
+    "dataClassification": "Classification",
+    "retentionRequirements": "Classification",
+    "dataGovernanceArtifacts": "Governance",
+    "outOfScope": "Scope & Questions",
+    "openQuestions": "Scope & Questions",
+    "assumptions": "Scope & Questions",
+}
+
+
+def tab_for_path(field_path: str) -> str | None:
+    """The editor tab holding a field (``smes[1].email`` → Basics)."""
+    section = re.split(r"[.\[]", field_path, maxsplit=1)[0]
+    return SECTION_TABS.get(section)
+
+
+def describe_path(field_path: str) -> str:
+    """Readable field location: ``dataSources[0].name`` → "item 1 › name"."""
+    parts = re.split(r"\.", field_path)[1:] if "." in field_path else []
+    first = re.search(r"\[(\d+)\]", field_path.split(".", 1)[0])
+    labels = [f"item {int(first.group(1)) + 1}"] if first else []
+    for part in parts:
+        match = re.match(r"^([^\[]+)(?:\[(\d+)\])?$", part)
+        if match:
+            labels.append(match.group(1))
+            if match.group(2) is not None:
+                labels.append(f"item {int(match.group(2)) + 1}")
+    return " › ".join(labels)
+
+
+def issues_by_tab(errors: list[ValidationError]) -> dict[str, list[ValidationError]]:
+    """Group validation errors by editor tab, in tab order; unknown → "Form"."""
+    grouped: dict[str, list[ValidationError]] = {}
+    for error in errors:
+        grouped.setdefault(tab_for_path(error.field_path) or "Form", []).append(error)
+    order = [*TABS, "Form"]
+    return {tab: grouped[tab] for tab in order if tab in grouped}
+
+
+def tab_label(name: str, issue_count: int) -> str:
+    """Tab label with a red badge when the tab has issues."""
+    return f"{name} 🔴 {issue_count}" if issue_count else name
+
+
+def _go_to_tab(tab: str) -> None:
+    st.session_state[ACTIVE_TAB_KEY] = tab
+
+
+def active_tab() -> str:
     if st.session_state.get(ACTIVE_TAB_KEY) not in TABS:
         st.session_state[ACTIVE_TAB_KEY] = next(iter(TABS))
+    return str(st.session_state[ACTIVE_TAB_KEY])
+
+
+def render_tab_bar() -> str:
+    """Horizontal tab bar; returns the active tab.
+
+    It is drawn before the tab content: a tab that re-runs the page must not
+    do so before the bar exists in that run, or the selection would be lost.
+    """
+    active_tab()
     return str(
         st.radio(
             "Section",
             options=list(TABS),
-            format_func=lambda name: labels.get(name, name),
             key=ACTIVE_TAB_KEY,
             horizontal=True,
             label_visibility="collapsed",
         )
     )
+
+
+def render_badges(issues: dict[str, list[ValidationError]]) -> None:
+    """Red badge per tab with issues (not in the radio labels: changing a
+    widget's options would reset it)."""
+    badges = [
+        tab_label(tab, len(errors)) for tab, errors in issues.items() if tab in TABS
+    ]
+    if badges:
+        st.caption("Needs attention: " + " · ".join(badges))
+
+
+def render_issue_summary(
+    title: str, issues: dict[str, list[ValidationError]], key: str
+) -> None:
+    """Validation summary; each issue is a button that opens its tab."""
+    count = sum(len(v) for v in issues.values())
+    if not count:
+        return
+    with st.expander(f"⚠ {count} {title}", expanded=key == "save"):
+        for tab, errors in issues.items():
+            st.markdown(f"**{tab}**")
+            for i, error in enumerate(errors):
+                where = describe_path(error.field_path)
+                text = f"{where}: {error.message}" if where else error.message
+                if tab in TABS:
+                    st.button(
+                        text,
+                        key=f"edit_issue_{key}_{tab}_{i}",
+                        on_click=_go_to_tab,
+                        args=(tab,),
+                    )
+                else:
+                    st.write(text)
 
 
 def _save(
@@ -419,16 +529,6 @@ def _save(
     st.session_state[FLASH_KEY] = f"Saved as v{result.version}."
 
 
-def render_errors(errors: list[ValidationError]) -> None:
-    """List the problems that prevented the last save."""
-    if not errors:
-        return
-    lines = [f"- **{error.field_path or 'Form'}:** {error.message}" for error in errors]
-    st.warning(
-        f"⚠ {len(errors)} issue(s) must be fixed before saving:\n\n" + "\n".join(lines)
-    )
-
-
 def render_bottom_bar(
     data_access: DataAccess,
     document_store: OnePagerDocumentStore,
@@ -437,7 +537,6 @@ def render_bottom_bar(
 ) -> None:
     """Change summary, **Save Draft** and **Close editor** (UI_Design §4.2)."""
     st.divider()
-    render_errors(st.session_state.get(ERRORS_KEY, []))
     if st.session_state.pop(CLEAR_SUMMARY_KEY, False):
         st.session_state[SUMMARY_KEY] = ""
     st.text_input(
@@ -490,7 +589,22 @@ def render_edit_mode(
     if flash:
         st.success(flash)
 
-    active = render_tab_bar({})
+    active = render_tab_bar()
+    # Placed above the tab but filled after it, so the badges reflect the
+    # input of this run.
+    badge_line = st.container()
     TABS[active](doc, data_access)
 
+    save_errors = issues_by_tab(st.session_state.get(ERRORS_KEY, []))
+    submit_issues = issues_by_tab(
+        submission_issues(doc, st.session_state[STATUS_ROW_KEY])
+    )
+    with badge_line:
+        render_badges(submit_issues)
+
+    st.divider()
+    render_issue_summary("issue(s) must be fixed before saving", save_errors, "save")
+    render_issue_summary(
+        "issue(s) remaining before Submit for Review", submit_issues, "submit"
+    )
     render_bottom_bar(data_access, document_store, one_pager_id, user)

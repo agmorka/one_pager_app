@@ -48,6 +48,7 @@ from onepagerapp.validation import (
     sanitize_text,
     validate_edit_basics,
     validate_lenient,
+    validate_strict,
 )
 
 logger = logging.getLogger(__name__)
@@ -262,6 +263,44 @@ def prepare_saved_document(  # noqa: PLR0913 - every argument ends up in the fil
         ],
         raw_content="",
     )
+
+
+def with_operational_fields(
+    document: OnePagerDocument, row: OnePagerStatusRow
+) -> OnePagerDocument:
+    """Copy of a document whose operational fields match the status row."""
+    return replace(
+        document,
+        structure_definition=row.structure_definition,
+        data_product=row.data_product,
+        one_pager_status=row.one_pager_status,
+        data_product_status=row.data_product_status,
+        version=row.version,
+    )
+
+
+def submission_issues(
+    document: OnePagerDocument, row: OnePagerStatusRow
+) -> list[ValidationError]:
+    """Everything that blocks Submit for Review (strict tier, Backend_Design §4).
+
+    Runs on the normalized document with its operational fields taken from
+    the status row, plus the Owner/SME checks, so the editor can show what
+    is left to do while the user is still editing.
+    """
+    document = with_operational_fields(normalize_document(document), row)
+    owner_errors = [
+        e
+        for e in validate_edit_basics(
+            document,
+            allowed_domains=[document.business_domain],
+            allowed_types=[document.data_product_type],
+        )
+        if e.field_path.startswith(("dataProductOwner", "smes"))
+    ]
+    strict = validate_strict(document_to_dict(document))
+    seen = {(e.field_path, e.message) for e in strict}
+    return strict + [e for e in owner_errors if (e.field_path, e.message) not in seen]
 
 
 def _saved_status_row(
