@@ -64,6 +64,14 @@ _ONE_PAGER_STATUS_COLUMNS = (
     "pending_pr",
 )
 
+# Columns a save or transition may change (never the key, the registered
+# data product name or the creation audit columns).
+_MUTABLE_STATUS_COLUMNS = tuple(
+    c
+    for c in _ONE_PAGER_STATUS_COLUMNS
+    if c not in ("one_pager_id", "data_product", "created_by", "created_at")
+)
+
 
 class LakehouseAccess(DataAccess):
     """Queries Delta tables via a SQL warehouse.
@@ -753,6 +761,33 @@ class LakehouseAccess(DataAccess):
             },
         )
 
+    def append_change_log_entries(self, entries: list[ChangeLogEntry]) -> None:
+        if not entries:
+            return
+        fqn = f"{self._fqn_prefix}.change_log"
+        columns = (
+            "one_pager_id",
+            "version",
+            "event_type",
+            "author_initials",
+            "author_name",
+            "summary",
+            "from_status",
+            "to_status",
+            "status_field",
+            "created_at",
+        )
+        values = []
+        parameters: dict[str, SqlParameterValue] = {}
+        for i, entry in enumerate(entries):
+            values.append("(" + ", ".join(f":{c}_{i}" for c in columns) + ")")
+            parameters.update({f"{c}_{i}": getattr(entry, c) for c in columns})
+        self._connection.execute_statement(
+            f"INSERT INTO {fqn} ({', '.join(columns)}) "  # noqa: S608
+            f"VALUES {', '.join(values)}",
+            parameters=parameters,
+        )
+
     def insert_one_pager_status(self, row: OnePagerStatusRow) -> None:
         fqn = f"{self._fqn_prefix}.one_pager_status"
         columns = ", ".join(_ONE_PAGER_STATUS_COLUMNS)
@@ -775,6 +810,108 @@ class LakehouseAccess(DataAccess):
                 "WHERE one_pager_id = :one_pager_id",
                 parameters={"one_pager_id": one_pager_id},
             )
+
+    # ========================================================================
+    # Edit / Workflow Methods
+    # ========================================================================
+
+    def get_one_pager_status_row(self, one_pager_id: str) -> OnePagerStatusRow | None:
+        fqn = f"{self._fqn_prefix}.one_pager_status"
+        response = self._connection.execute_statement(
+            f"SELECT {', '.join(_ONE_PAGER_STATUS_COLUMNS)} FROM {fqn} "  # noqa: S608
+            "WHERE one_pager_id = :one_pager_id",
+            parameters={"one_pager_id": one_pager_id},
+        )
+        rows = self._response_rows(response)
+        return self._row_to_status_row(rows[0]) if rows else None
+
+    def update_authorized_users(self, users: list[AuthorizedUser]) -> None:
+        fqn = f"{self._fqn_prefix}.one_pager_authorized_users"
+        for user in users:
+            self._connection.execute_statement(
+                f"UPDATE {fqn} SET user_name = :user_name, "  # noqa: S608
+                "user_email = :user_email, user_team = :user_team, role = :role "
+                "WHERE one_pager_id = :one_pager_id AND user_initials = :user_initials",
+                parameters={
+                    "one_pager_id": user.one_pager_id,
+                    "user_initials": user.user_initials,
+                    "user_name": user.user_name,
+                    "user_email": user.user_email,
+                    "user_team": user.user_team,
+                    "role": user.role,
+                },
+            )
+
+    def delete_authorized_users(
+        self, one_pager_id: str, user_initials: list[str]
+    ) -> None:
+        if not user_initials:
+            return
+        fqn = f"{self._fqn_prefix}.one_pager_authorized_users"
+        markers = ", ".join(f":initials_{i}" for i in range(len(user_initials)))
+        parameters: dict[str, SqlParameterValue] = {
+            f"initials_{i}": initials for i, initials in enumerate(user_initials)
+        }
+        parameters["one_pager_id"] = one_pager_id
+        self._connection.execute_statement(
+            f"DELETE FROM {fqn} WHERE one_pager_id = :one_pager_id "  # noqa: S608
+            f"AND user_initials IN ({markers})",
+            parameters=parameters,
+        )
+
+    def update_one_pager_status(
+        self, row: OnePagerStatusRow, *, expected_version: str, expected_status: str
+    ) -> bool:
+        fqn = f"{self._fqn_prefix}.one_pager_status"
+        assignments = ", ".join(
+            "reviewed_at = CAST(:reviewed_at AS TIMESTAMP)"
+            if c == "reviewed_at"
+            else f"{c} = :{c}"
+            for c in _MUTABLE_STATUS_COLUMNS
+        )
+        parameters: dict[str, SqlParameterValue] = {
+            c: getattr(row, c) for c in _MUTABLE_STATUS_COLUMNS
+        }
+        parameters.update(
+            one_pager_id=row.one_pager_id,
+            expected_version=expected_version,
+            expected_status=expected_status,
+        )
+        response = self._connection.execute_statement(
+            f"UPDATE {fqn} SET {assignments} "  # noqa: S608
+            "WHERE one_pager_id = :one_pager_id AND version = :expected_version "
+            "AND one_pager_status = :expected_status",
+            parameters=parameters,
+        )
+        return self._affected_rows(response) == 1
+
+    @classmethod
+    def _row_to_status_row(cls, row: dict[str, Any]) -> OnePagerStatusRow:
+        def optional_timestamp(value: object) -> datetime | None:
+            return None if value in (None, "") else cls._parse_timestamp(value)
+
+        return OnePagerStatusRow(
+            one_pager_id=str(row["one_pager_id"]),
+            data_product=str(row["data_product"]),
+            product_name=str(row["product_name"]),
+            business_domain=str(row["business_domain"]),
+            data_product_type=str(row["data_product_type"]),
+            one_pager_status=str(row["one_pager_status"]),
+            data_product_status=str(row["data_product_status"]),
+            version=str(row["version"]),
+            owner_name=str(row["owner_name"]),
+            owner_initials=str(row["owner_initials"]),
+            owner_email=str(row["owner_email"]),
+            owner_team=row.get("owner_team"),
+            created_by=str(row["created_by"]),
+            created_at=cls._parse_timestamp(row["created_at"]),
+            last_updated_at=cls._parse_timestamp(row["last_updated_at"]),
+            last_updated_by=str(row["last_updated_by"]),
+            reviewed_at=optional_timestamp(row.get("reviewed_at")),
+            reviewed_by=row.get("reviewed_by"),
+            structure_definition=str(row["structure_definition"]),
+            pending_pr=cls._parse_bool(row.get("pending_pr")),
+        )
 
     # ========================================================================
     # Use Cases Page Methods
@@ -938,6 +1075,34 @@ class LakehouseAccess(DataAccess):
             msg = f"Failed to fetch Use Case references: {e}"
             raise RuntimeError(msg) from e
         return [str(row["one_pager_id"]) for row in rows]
+
+    def get_linked_use_case_ids(self, one_pager_id: str) -> list[str]:
+        response = self._connection.execute_statement(
+            f"SELECT use_case_id FROM {self._fqn_prefix}.use_case_references "  # noqa: S608
+            "WHERE one_pager_id = :one_pager_id ORDER BY use_case_id",
+            parameters={"one_pager_id": one_pager_id},
+        )
+        return [str(row["use_case_id"]) for row in self._response_rows(response)]
+
+    def add_use_case_reference(self, one_pager_id: str, use_case_id: str) -> None:
+        # MERGE keeps the (one_pager_id, use_case_id) key unique; Delta does
+        # not enforce the primary key.
+        self._connection.execute_statement(
+            f"MERGE INTO {self._fqn_prefix}.use_case_references t "  # noqa: S608
+            "USING (SELECT :one_pager_id AS one_pager_id, "
+            ":use_case_id AS use_case_id) s "
+            "ON t.one_pager_id = s.one_pager_id AND t.use_case_id = s.use_case_id "
+            "WHEN NOT MATCHED THEN INSERT (one_pager_id, use_case_id) "
+            "VALUES (s.one_pager_id, s.use_case_id)",
+            parameters={"one_pager_id": one_pager_id, "use_case_id": use_case_id},
+        )
+
+    def remove_use_case_reference(self, one_pager_id: str, use_case_id: str) -> None:
+        self._connection.execute_statement(
+            f"DELETE FROM {self._fqn_prefix}.use_case_references "  # noqa: S608
+            "WHERE one_pager_id = :one_pager_id AND use_case_id = :use_case_id",
+            parameters={"one_pager_id": one_pager_id, "use_case_id": use_case_id},
+        )
 
     @staticmethod
     def _use_case_parameters(data: UseCaseInput) -> dict[str, SqlParameterValue]:

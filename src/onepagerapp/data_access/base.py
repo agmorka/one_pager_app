@@ -300,6 +300,15 @@ class DataAccess(ABC):
         ...
 
     @abstractmethod
+    def append_change_log_entries(self, entries: list[ChangeLogEntry]) -> None:
+        """Append several ``change_log`` entries in one statement (all or none).
+
+        Used when one action changes more than one status (Submit, Cancel,
+        Approve), so the audit trail never shows half of it.
+        """
+        ...
+
+    @abstractmethod
     def insert_one_pager_status(self, row: OnePagerStatusRow) -> None:
         """Insert the ``one_pager_status`` row (makes the One Pager visible)."""
         ...
@@ -312,6 +321,50 @@ class DataAccess(ABC):
         ``change_log`` rows of a One Pager whose creation did not complete.
         Must never be used for a One Pager that was successfully created —
         the change log is otherwise append-only.
+        """
+        ...
+
+    # ========================================================================
+    # Edit / Workflow Methods
+    # ========================================================================
+
+    @abstractmethod
+    def get_one_pager_status_row(self, one_pager_id: str) -> OnePagerStatusRow | None:
+        """Return the full ``one_pager_status`` row, or None if it does not exist.
+
+        Read fresh on every call (never cached): the editor and the workflow
+        transitions decide on its status and version.
+        """
+        ...
+
+    @abstractmethod
+    def update_authorized_users(self, users: list[AuthorizedUser]) -> None:
+        """Update name, email, team and role of existing authorized-user rows.
+
+        Rows are matched on (``one_pager_id``, ``user_initials``).
+        """
+        ...
+
+    @abstractmethod
+    def delete_authorized_users(
+        self, one_pager_id: str, user_initials: list[str]
+    ) -> None:
+        """Delete the authorized-user rows of these initials for a One Pager."""
+        ...
+
+    @abstractmethod
+    def update_one_pager_status(
+        self, row: OnePagerStatusRow, *, expected_version: str, expected_status: str
+    ) -> bool:
+        """Replace the mutable columns of a ``one_pager_status`` row, conditionally.
+
+        The row is updated only if it still has ``expected_version`` and
+        ``expected_status`` (optimistic concurrency: a single statement, so a
+        concurrent save or transition cannot slip in between). ``one_pager_id``,
+        ``data_product``, ``created_by`` and ``created_at`` are never changed.
+
+        Returns:
+            True if exactly this row was updated, False if it had changed.
         """
         ...
 
@@ -346,6 +399,21 @@ class DataAccess(ABC):
     @abstractmethod
     def get_use_case_references(self, use_case_id: str) -> list[str]:
         """List the IDs of the One Pagers referencing a Use Case (sorted)."""
+        ...
+
+    @abstractmethod
+    def get_linked_use_case_ids(self, one_pager_id: str) -> list[str]:
+        """List the Use Case IDs a One Pager references (sorted)."""
+        ...
+
+    @abstractmethod
+    def add_use_case_reference(self, one_pager_id: str, use_case_id: str) -> None:
+        """Insert a ``use_case_references`` row (no-op if it already exists)."""
+        ...
+
+    @abstractmethod
+    def remove_use_case_reference(self, one_pager_id: str, use_case_id: str) -> None:
+        """Delete a ``use_case_references`` row (no-op if it does not exist)."""
         ...
 
     @abstractmethod

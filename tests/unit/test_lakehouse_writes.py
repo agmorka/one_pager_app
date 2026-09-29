@@ -337,3 +337,159 @@ def test__get_locks__empty_page_runs_no_query() -> None:
     conn = _FakeConnection()
     assert _access(conn).get_locks([]) == []
     assert conn.calls == []
+
+
+_STATUS_ROW_VALUES = {
+    "one_pager_id": "OP-0007",
+    "data_product": "p",
+    "product_name": "P",
+    "business_domain": "Customer",
+    "data_product_type": "Foundational",
+    "one_pager_status": "Draft",
+    "data_product_status": "In Definition",
+    "version": "0.2.0",
+    "owner_name": "A",
+    "owner_initials": "AB",
+    "owner_email": "a@b.dk",
+    "owner_team": None,
+    "created_by": "AB",
+    "created_at": "2026-09-29T10:00:00Z",
+    "last_updated_at": "2026-09-29T10:00:00Z",
+    "last_updated_by": "AB",
+    "reviewed_at": None,
+    "reviewed_by": None,
+    "structure_definition": "structure_one_pager_v_2.json",
+    "pending_pr": "false",
+}
+
+
+@pytest.mark.unit
+def test__get_one_pager_status_row__parses_full_row() -> None:
+    conn = _FakeConnection(
+        [_response(list(_STATUS_ROW_VALUES), [list(_STATUS_ROW_VALUES.values())])]
+    )
+    row = _access(conn).get_one_pager_status_row(NASTY)
+
+    assert row.version == "0.2.0"
+    assert row.created_at == NOW
+    assert row.reviewed_at is None
+    assert row.pending_pr is False
+    statement, params = conn.calls[0]
+    _assert_not_interpolated(statement)
+    assert params == {"one_pager_id": NASTY}
+
+    assert _access(_FakeConnection()).get_one_pager_status_row("OP-1") is None
+
+
+@pytest.mark.unit
+def test__update_one_pager_status__conditional_update_with_bound_parameters() -> None:
+    conn = _FakeConnection(
+        [_response(list(_STATUS_ROW_VALUES), [list(_STATUS_ROW_VALUES.values())])]
+    )
+    row = _access(conn).get_one_pager_status_row("OP-0007")
+    row.product_name = NASTY
+
+    conn = _FakeConnection([_response(["num_affected_rows"], [["1"]])])
+    assert _access(conn).update_one_pager_status(
+        row, expected_version="0.1.0", expected_status="Draft"
+    )
+    statement, params = conn.calls[0]
+    assert statement.startswith("UPDATE cat.sch.one_pager_status SET ")
+    assert "version = :expected_version" in statement
+    assert "one_pager_status = :expected_status" in statement
+    assert "reviewed_at = CAST(:reviewed_at AS TIMESTAMP)" in statement
+    for immutable in ("data_product =", "created_by =", "created_at ="):
+        assert immutable not in statement
+    _assert_not_interpolated(statement)
+    assert params["product_name"] == NASTY
+    assert params["expected_version"] == "0.1.0"
+
+    conn = _FakeConnection([_response(["num_affected_rows"], [["0"]])])
+    assert not _access(conn).update_one_pager_status(
+        row, expected_version="0.1.0", expected_status="Draft"
+    )
+
+
+@pytest.mark.unit
+def test__authorized_users_update_and_delete__bound_parameters() -> None:
+    conn = _FakeConnection()
+    access = _access(conn)
+    access.update_authorized_users(
+        [AuthorizedUser("OP-0001", NASTY, NASTY, "a@b.dk", "sme")]
+    )
+    access.delete_authorized_users("OP-0001", ["AB", NASTY])
+    access.delete_authorized_users("OP-0001", [])
+
+    assert len(conn.calls) == 2
+    update, params = conn.calls[0]
+    assert update.startswith("UPDATE cat.sch.one_pager_authorized_users SET")
+    assert params["user_initials"] == NASTY
+    delete, params = conn.calls[1]
+    assert "user_initials IN (:initials_0, :initials_1)" in delete
+    assert params == {
+        "initials_0": "AB",
+        "initials_1": NASTY,
+        "one_pager_id": "OP-0001",
+    }
+    for statement, _ in conn.calls:
+        _assert_not_interpolated(statement)
+
+
+@pytest.mark.unit
+def test__use_case_reference_writes__bound_parameters() -> None:
+    conn = _FakeConnection([_response(["use_case_id"], [["UC-001"], ["UC-002"]])])
+    access = _access(conn)
+    assert access.get_linked_use_case_ids(NASTY) == ["UC-001", "UC-002"]
+    access.add_use_case_reference(NASTY, "UC-003")
+    access.remove_use_case_reference(NASTY, "UC-001")
+
+    merge, params = conn.calls[1]
+    assert merge.startswith("MERGE INTO cat.sch.use_case_references t")
+    assert "WHEN NOT MATCHED THEN INSERT" in merge
+    assert params == {"one_pager_id": NASTY, "use_case_id": "UC-003"}
+    delete, _ = conn.calls[2]
+    assert delete.startswith("DELETE FROM cat.sch.use_case_references")
+    for statement, _ in conn.calls:
+        _assert_not_interpolated(statement)
+
+
+@pytest.mark.unit
+def test__append_change_log_entries__single_insert() -> None:
+    conn = _FakeConnection()
+    entries = [
+        ChangeLogEntry(
+            0,
+            "OP-1",
+            "0.1.0",
+            "status_transition",
+            "AB",
+            "A",
+            NASTY,
+            NOW,
+            "Draft",
+            "Ready for Review",
+            "one_pager_status",
+        ),
+        ChangeLogEntry(
+            0,
+            "OP-1",
+            "0.1.0",
+            "status_transition",
+            "AB",
+            "A",
+            "s",
+            NOW,
+            "Ready for Review",
+            "In Review",
+            "one_pager_status",
+        ),
+    ]
+    _access(conn).append_change_log_entries(entries)
+    _access(conn).append_change_log_entries([])
+
+    [(statement, params)] = conn.calls
+    assert statement.startswith("INSERT INTO cat.sch.change_log")
+    assert ":summary_0" in statement
+    assert ":summary_1" in statement
+    assert params["summary_0"] == NASTY
+    _assert_not_interpolated(statement)

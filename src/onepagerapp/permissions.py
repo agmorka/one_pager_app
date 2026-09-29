@@ -1,18 +1,39 @@
-"""Permission and workflow authorization checks (v1 stub).
+"""Permission and workflow authorization checks.
 
-This module defines read-only permission checks and a stub for action button authorization.
-v1 renders all state-changing actions as disabled buttons with "coming soon" tooltips.
-
-Full enforcement will be implemented when the service layer (workflow.py, locking.py) exists.
+Per-record edit access (``check_can_edit``) is checked against the
+``one_pager_authorized_users`` rows of a One Pager (Backend_Design.md §5).
+Coarse roles from Unity Catalog groups are not resolved yet (Phase 2), so
+group checks still allow every authenticated user.
 
 Per Backend_Design.md §5, all authenticated users can view any One Pager.
 Permission enforcement happens on state changes (approve, edit, etc.) in the service layer.
 """
 
+from collections.abc import Collection
 from dataclasses import dataclass
 
+from onepagerapp.audit import log_permission_denied
 from onepagerapp.auth import initials_from_username
-from onepagerapp.models import CurrentUser, LockInfo
+from onepagerapp.models import AuthorizedUser, CurrentUser, LockInfo
+from onepagerapp.state_machine import (
+    APPROVED,
+    DP_STATUS_FIELD,
+    DRAFT,
+    DRAFT_UPDATE,
+    OP_CANCELLED,
+    OP_STATUS_FIELD,
+    TRANSITIONS,
+    Actor,
+    TransitionRule,
+    guard_failure,
+    transitions_from,
+)
+
+# One Pager statuses whose content may be edited (Requirements_and_Scope.md §5).
+EDITABLE_STATUSES = ("Draft", "Draft Update")
+
+# one_pager_authorized_users roles that grant edit access.
+AUTHORIZED_ROLES = ("owner", "sme")
 
 
 class PermissionDeniedError(Exception):
@@ -26,10 +47,13 @@ class ActionState:
     Attributes:
         enabled: Whether the button should be clickable.
         tooltip: Hover text (reason if disabled, blank if enabled).
+        visible: Whether the action applies to this user and status at all;
+            the Preview page does not show actions that do not apply.
     """
 
     enabled: bool
     tooltip: str = ""
+    visible: bool = True
 
 
 def can_view_one_pager(current_user: str | None) -> bool:
@@ -56,6 +80,62 @@ def can_create_one_pager(user: CurrentUser | None) -> bool:
     group check later only changes this function.
     """
     return bool(user and user.username and user.initials)
+
+
+def is_owner_or_sme(
+    user: CurrentUser | None, authorized_users: list[AuthorizedUser]
+) -> bool:
+    """Whether the user is listed as Owner or SME of a One Pager (Backend §5).
+
+    ``authorized_users`` are the ``one_pager_authorized_users`` rows of that
+    One Pager, the authoritative list of who may edit it.
+    """
+    if not (user and user.initials):
+        return False
+    return any(
+        u.user_initials == user.initials and u.role in AUTHORIZED_ROLES
+        for u in authorized_users
+    )
+
+
+def edit_denied_reason(
+    user: CurrentUser | None,
+    one_pager_status: str,
+    authorized_users: list[AuthorizedUser],
+) -> str | None:
+    """Why the user may not edit a One Pager's content, or None if they may.
+
+    Requirements_and_Scope.md §5: only the Owner and the SMEs of this One
+    Pager may edit it, and only while it is ``Draft`` or ``Draft Update``.
+    """
+    if not is_owner_or_sme(user, authorized_users):
+        return "Only the Owner or an SME of this One Pager can edit it."
+    if one_pager_status not in EDITABLE_STATUSES:
+        return f"A One Pager in status {one_pager_status} cannot be edited."
+    return None
+
+
+def check_can_edit(
+    user: CurrentUser | None,
+    one_pager_id: str,
+    one_pager_status: str,
+    authorized_users: list[AuthorizedUser],
+) -> None:
+    """Enforce ``edit_denied_reason`` in the service layer (logged when denied).
+
+    Raises:
+        PermissionDeniedError: With a user-facing message.
+
+    """
+    reason = edit_denied_reason(user, one_pager_status, authorized_users)
+    if reason is None:
+        return
+    log_permission_denied(
+        "edit_one_pager",
+        user=user.initials if user else None,
+        one_pager_id=one_pager_id,
+    )
+    raise PermissionDeniedError(reason)
 
 
 def can_release_lock(user: CurrentUser | None, lock: LockInfo | None) -> bool:
@@ -93,78 +173,171 @@ def can_manage_use_cases(current_user: str | None) -> bool:
 
 
 # ============================================================================
-# v1 Action Button States (Stub)
+# Preview Action Button States
 # ============================================================================
-# These functions return the button state (enabled/disabled + tooltip).
-# v1 renders all state-changing actions as DISABLED with "coming soon" tooltips.
-# Full enforcement lands when the service layer exists.
+# Which actions a user sees and can click on the Preview page (UI_Design.md
+# §4.4). Workflow actions are derived from state_machine.TRANSITIONS, so the
+# buttons follow the same rules the service layer enforces. Hiding or
+# disabling a button is never the only check: every action re-checks in the
+# service layer (Backend_Design.md §5).
 # ============================================================================
 
+# Actions whose service exists; the others are shown disabled ("coming soon")
+# when they would apply.
+IMPLEMENTED_ACTIONS: frozenset[str] = frozenset(
+    {"edit", "release_lock", "cancel", "change_dp_status"}
+)
 
-def get_action_states(
+COMING_SOON = {
+    "update": "Update arrives with the review workflow",
+    "approve": "Approve arrives with the review workflow",
+    "reject": "Reject arrives with the review workflow",
+    "cancel": "Cancel coming soon",
+    "change_dp_status": "Change DP Status coming soon",
+    "add_comment": "Review comments arrive with the review workflow",
+    "resolve_comment": "Review comments arrive with the review workflow",
+    "export_pdf": "Export PDF coming soon",
+}
+
+
+def get_action_states(  # noqa: PLR0913 - the context of one Preview page
     current_user_initials: str,
-    owner_initials: str,
+    owner_initials: str,  # noqa: ARG001 - kept for callers; Owner/SMEs come from authorized_initials
     one_pager_status: str,
-    is_locked: bool,
+    is_locked: bool,  # noqa: FBT001
     lock_holder_initials: str | None,
+    *,
+    authorized_initials: Collection[str] = (),
+    data_product_status: str = "",
+    roles: Collection[Actor] = (),
 ) -> dict[str, ActionState]:
-    """Compute the button state for all actions in the Preview page.
-    
-    v1: All state-changing actions return DISABLED, except **Release my lock**,
-    which is enabled for the holder of an active lock (Phase 3).
-    
+    """Compute the state of every Preview action for this user and One Pager.
+
+    An action is *visible* when the user's role and the statuses make it
+    applicable (UI_Design.md §4.4, "Actions (conditional)") and *enabled*
+    when it can be performed now. Actions whose service does not exist yet
+    stay disabled with a "coming soon" tooltip.
+
     Args:
         current_user_initials: Initials of the logged-in user.
         owner_initials: Initials of the One Pager owner.
-        one_pager_status: Current document status (Draft, In Review, Approved, etc.).
+        one_pager_status: Current document status (Draft, In Review, ...).
         is_locked: Whether the One Pager is currently locked.
         lock_holder_initials: Initials of lock holder if locked, None otherwise.
-        
+        authorized_initials: Initials of the Owner/SMEs of this One Pager
+            (``one_pager_authorized_users``).
+        data_product_status: Current Data Product status.
+        roles: Group roles of the user (Approver, Admin). Unity Catalog group
+            resolution is not implemented yet (Phase 2), so callers pass none.
+
     Returns:
         Dictionary mapping action name (e.g. "edit", "approve") to ActionState.
+
     """
-    # v1: All actions disabled with "coming soon" message
-    return {
-        "edit": ActionState(
-            enabled=False,
-            tooltip="Edit coming soon — requires Editor page and lock acquisition",
+    holder = lock_holder_initials if is_locked else None
+    context = _ActionContext(
+        user=current_user_initials,
+        op_status=one_pager_status,
+        dp_status=data_product_status,
+        owner_or_sme=current_user_initials in authorized_initials,
+        roles=set(roles),
+        locked_by_other=bool(holder and holder != current_user_initials),
+    )
+    states = {
+        "edit": _edit_state(
+            current_user_initials, one_pager_status, authorized_initials, holder
         ),
-        "update": ActionState(
-            enabled=False,
-            tooltip="Update coming soon",
-        ),
-        "approve": ActionState(
-            enabled=False,
-            tooltip="Approve coming soon — requires approval workflow",
-        ),
-        "reject": ActionState(
-            enabled=False,
-            tooltip="Reject coming soon — requires approval workflow",
-        ),
-        "change_dp_status": ActionState(
-            enabled=False,
-            tooltip="Change DP Status coming soon — requires workflow state machine",
-        ),
-        "cancel": ActionState(
-            enabled=False,
-            tooltip="Cancel coming soon — requires approval workflow",
-        ),
-        "add_comment": ActionState(
-            enabled=False,
-            tooltip="Add comment coming soon",
-        ),
+        "update": context.rule_state(OP_STATUS_FIELD, DRAFT_UPDATE),
+        "approve": context.rule_state(OP_STATUS_FIELD, APPROVED),
+        "reject": context.rule_state(OP_STATUS_FIELD, DRAFT),
+        "cancel": context.rule_state(OP_STATUS_FIELD, OP_CANCELLED),
+        "change_dp_status": context.dp_change_state(),
+        "add_comment": context.rule_state(OP_STATUS_FIELD, APPROVED),
         "resolve_comment": ActionState(
             enabled=False,
-            tooltip="Resolve comment coming soon",
+            tooltip=COMING_SOON["resolve_comment"],
+            visible=context.owner_or_sme,
         ),
         "release_lock": _release_lock_state(
             current_user_initials, is_locked, lock_holder_initials
         ),
-        "export_pdf": ActionState(
-            enabled=False,
-            tooltip="Export PDF coming soon",
-        ),
+        "export_pdf": ActionState(enabled=False, tooltip=COMING_SOON["export_pdf"]),
     }
+    edit = states["edit"]
+    edit.visible = context.owner_or_sme and one_pager_status in EDITABLE_STATUSES
+    for name, state in states.items():
+        if state.enabled and name not in IMPLEMENTED_ACTIONS:
+            state.enabled = False
+            state.tooltip = COMING_SOON.get(name, "Coming soon")
+    return states
+
+
+@dataclass
+class _ActionContext:
+    user: str
+    op_status: str
+    dp_status: str
+    owner_or_sme: bool
+    roles: set[Actor]
+    locked_by_other: bool
+
+    def _failure(self, rule: TransitionRule) -> str | None:
+        return guard_failure(
+            rule,
+            actors=self.roles,
+            one_pager_status=self.op_status,
+            data_product_status=self.dp_status,
+            is_owner_or_sme=self.owner_or_sme,
+        )
+
+    def rule_state(self, status_field: str, to_status: str) -> ActionState:
+        """State of the user action that moves ``status_field`` to ``to_status``."""
+        current = self.op_status if status_field == OP_STATUS_FIELD else self.dp_status
+        rule = TRANSITIONS.get((status_field, current, to_status))
+        if rule is None or rule.is_system:
+            return ActionState(enabled=False, visible=False)
+        reason = self._failure(rule)
+        if reason:
+            return ActionState(enabled=False, tooltip=reason, visible=False)
+        if self.locked_by_other:
+            return ActionState(
+                enabled=False, tooltip="Another user is editing this One Pager"
+            )
+        return ActionState(enabled=True)
+
+    def dp_change_state(self) -> ActionState:
+        """Change DP Status: enabled when any owner DP transition applies."""
+        rules = [
+            r
+            for r in transitions_from(DP_STATUS_FIELD, self.dp_status, Actor.OWNER_SME)
+            if self._failure(r) is None
+        ]
+        if not rules:
+            return ActionState(enabled=False, visible=False)
+        return ActionState(enabled=True)
+
+
+def _edit_state(
+    current_user_initials: str,
+    one_pager_status: str,
+    authorized_initials: Collection[str],
+    lock_holder_initials: str | None,
+) -> ActionState:
+    if current_user_initials not in authorized_initials:
+        return ActionState(
+            enabled=False,
+            tooltip="Only the Owner or an SME of this One Pager can edit it",
+        )
+    if one_pager_status not in EDITABLE_STATUSES:
+        return ActionState(
+            enabled=False,
+            tooltip=f"A One Pager in status {one_pager_status} cannot be edited",
+        )
+    if lock_holder_initials and lock_holder_initials != current_user_initials:
+        return ActionState(
+            enabled=False, tooltip="Another user is editing this One Pager"
+        )
+    return ActionState(enabled=True)
 
 
 def _release_lock_state(

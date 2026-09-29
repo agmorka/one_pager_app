@@ -105,6 +105,28 @@ class OnePagerDocumentStore:
         document.raw_content = content
         return path
 
+    def discard_unreferenced(self, one_pager_id: str, version: str) -> bool:
+        """Delete a version file that no status row references (compensation).
+
+        Only for a file written by a save that did not complete: the caller
+        guarantees ``one_pager_status.version`` does not point to it. Files in
+        the read-only base path (fixtures) are never touched.
+
+        Returns:
+            True if a file was deleted.
+
+        """
+        path = self._file_for(one_pager_id, version, self._write_root)
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return False
+        except OSError:
+            logger.exception(f"Failed to discard unreferenced document {path}")
+            return False
+        logger.warning(f"Discarded unreferenced document {path}")
+        return True
+
     def exists(self, one_pager_id: str, version: str) -> bool:
         """Whether the given version file exists in any read location."""
         return self._existing_file_for(one_pager_id, version) is not None

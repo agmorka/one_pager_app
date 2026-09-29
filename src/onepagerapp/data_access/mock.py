@@ -2,7 +2,7 @@
 
 import copy
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -406,7 +406,12 @@ class MockDataAccess(DataAccess):
     def get_change_log(self, one_pager_id: str) -> list[ChangeLogEntry]:
         """Fetch the change log for a One Pager (mock data, newest-first)."""
         entries = self._change_logs.get(one_pager_id, [])
-        return sorted(entries, key=lambda e: (e.created_at, e.id), reverse=True)
+        # Seeded entries are naive, new ones UTC-aware: compare both as UTC.
+        return sorted(
+            entries,
+            key=lambda e: (_as_utc(e.created_at), e.id),
+            reverse=True,
+        )
 
     def get_review_comments(self, one_pager_id: str) -> list[ReviewComment]:
         """Fetch review comments for a One Pager (mock data)."""
@@ -533,6 +538,10 @@ class MockDataAccess(DataAccess):
         self._next_change_log_id += 1
         self._change_logs.setdefault(entry.one_pager_id, []).append(stored)
 
+    def append_change_log_entries(self, entries: list[ChangeLogEntry]) -> None:
+        for entry in entries:
+            self.append_change_log(entry)
+
     def insert_one_pager_status(self, row: OnePagerStatusRow) -> None:
         if row.one_pager_id in self._status_rows:
             msg = f"one_pager_status already contains {row.one_pager_id}"
@@ -543,6 +552,49 @@ class MockDataAccess(DataAccess):
         self._status_rows.pop(one_pager_id, None)
         self._authorized_users.pop(one_pager_id, None)
         self._change_logs.pop(one_pager_id, None)
+
+    # ========================================================================
+    # Edit / Workflow Methods
+    # ========================================================================
+
+    def get_one_pager_status_row(self, one_pager_id: str) -> OnePagerStatusRow | None:
+        row = self._status_rows.get(one_pager_id)
+        return copy.copy(row) if row else None
+
+    def update_authorized_users(self, users: list[AuthorizedUser]) -> None:
+        for user in users:
+            rows = self._authorized_users.get(user.one_pager_id, [])
+            self._authorized_users[user.one_pager_id] = [
+                copy.copy(user) if row.user_initials == user.user_initials else row
+                for row in rows
+            ]
+
+    def delete_authorized_users(
+        self, one_pager_id: str, user_initials: list[str]
+    ) -> None:
+        self._authorized_users[one_pager_id] = [
+            row
+            for row in self._authorized_users.get(one_pager_id, [])
+            if row.user_initials not in user_initials
+        ]
+
+    def update_one_pager_status(
+        self, row: OnePagerStatusRow, *, expected_version: str, expected_status: str
+    ) -> bool:
+        current = self._status_rows.get(row.one_pager_id)
+        if (
+            current is None
+            or current.version != expected_version
+            or current.one_pager_status != expected_status
+        ):
+            return False
+        self._status_rows[row.one_pager_id] = replace(
+            row,
+            data_product=current.data_product,
+            created_by=current.created_by,
+            created_at=current.created_at,
+        )
+        return True
 
     # ========================================================================
     # Use Cases Page Methods
@@ -598,6 +650,17 @@ class MockDataAccess(DataAccess):
             op_id for op_id, uc_id in self._use_case_references if uc_id == use_case_id
         )
 
+    def get_linked_use_case_ids(self, one_pager_id: str) -> list[str]:
+        return sorted(
+            uc_id for op_id, uc_id in self._use_case_references if op_id == one_pager_id
+        )
+
+    def add_use_case_reference(self, one_pager_id: str, use_case_id: str) -> None:
+        self._use_case_references.add((one_pager_id, use_case_id))
+
+    def remove_use_case_reference(self, one_pager_id: str, use_case_id: str) -> None:
+        self._use_case_references.discard((one_pager_id, use_case_id))
+
     def create_use_case(self, data: UseCaseInput, user_initials: str) -> str:
         use_case_id = next_id(self, "UC")
         now = datetime.now()
@@ -641,6 +704,10 @@ class MockDataAccess(DataAccess):
             last_updated_by=user_initials,
             last_updated_at=datetime.now(),
         )
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value
 
 
 # ============================================================================

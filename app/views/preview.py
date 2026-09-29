@@ -1,8 +1,9 @@
 """Preview page — read-only view of a single One Pager.
 
 Displays the complete One Pager document with header, status timeline, content sections,
-change log, review comments, and lock indicator. State-changing actions are disabled in v1,
-except **Release my lock** for the holder of an active lock.
+change log, review comments, and lock indicator. The action bar shows the actions that
+apply to the user's role and the One Pager's statuses (``permissions.get_action_states``,
+derived from the workflow state machine); actions not implemented yet are disabled.
 
 The view:
 1. Resolves one_pager_id from session state or the query param; without one it
@@ -14,7 +15,7 @@ The view:
 5. Does not cache dynamic data (document, lock, comments) — fresh on every re-run
 
 Per Backend_Design.md §2, read permission is universal (authenticated users only).
-Per UI_Design.md §4.4, v1 renders action buttons as disabled with "coming soon" tooltips.
+Per UI_Design.md §4.4, actions depend on role and status.
 """
 
 import logging
@@ -28,12 +29,16 @@ from onepagerapp.data_access.base import DataAccess
 from onepagerapp.locking import active_lock, release_lock
 from onepagerapp.models import CurrentUser, LockInfo, OnePagerDocument, PreviewData
 from onepagerapp.permissions import (
+    AUTHORIZED_ROLES,
     PermissionDeniedError,
     can_view_one_pager,
     get_action_states,
     get_status_timeline_stages,
 )
 from adapters.theme import get_op_status_colors, get_dp_status_colors, DEFAULT_BADGE_COLOR
+from adapters.workflow_actions import cancel_and_report, change_dp_status_and_report
+from onepagerapp.state_machine import TransitionRule
+from onepagerapp.workflow import data_product_options
 
 logger = logging.getLogger(__name__)
 
@@ -531,66 +536,160 @@ def render_lock_indicator(
         _release_my_lock(data_access, header.one_pager_id, user)
 
 
-def render_action_bar(
-    preview_data: PreviewData, lock: LockInfo | None, current_user_initials: str
+# Preview actions in display order → button label (UI_Design.md §4.4).
+ACTION_BUTTONS = {
+    "edit": "✏️ Edit",
+    "update": "🔄 Update",
+    "change_dp_status": "🚦 Change DP Status",
+    "approve": "✅ Approve",
+    "reject": "❌ Reject",
+    "add_comment": "📝 Add Comment",
+    "cancel": "🛑 Cancel One Pager",
+    "export_pdf": "📄 Export PDF",
+}
+
+
+def load_authorized_initials(data_access: DataAccess, one_pager_id: str) -> set[str]:
+    """Initials of the Owner/SMEs; empty (edit disabled) if they cannot be read."""
+    try:
+        users = data_access.get_authorized_users(one_pager_id)
+    except Exception:
+        logger.exception(f"Failed to load authorized users of {one_pager_id}")
+        return set()
+    return {u.user_initials for u in users if u.role in AUTHORIZED_ROLES}
+
+
+def open_editor(one_pager_id: str) -> None:
+    """Open the Editor in edit mode for this One Pager."""
+    st.session_state["editor_mode"] = "edit"
+    st.session_state["editor_one_pager_id"] = one_pager_id
+    st.switch_page("views/editor.py")
+
+
+@st.dialog("Cancel this One Pager?")
+def confirm_cancel(data_access: DataAccess, one_pager_id: str, user: CurrentUser) -> None:
+    """Confirmation for **Cancel One Pager** (UI_Design.md §5): it is permanent."""
+    st.write(
+        "Cancelling is permanent: the One Pager and its Data Product both become "
+        "**Cancelled** and can no longer be edited."
+    )
+    reason = st.text_area("Reason (optional)", key="preview_cancel_reason", max_chars=500)
+    col_confirm, col_keep = st.columns(2)
+    if col_confirm.button("Cancel One Pager", type="primary", use_container_width=True):
+        error = cancel_and_report(data_access, one_pager_id, user, reason)
+        if error:
+            st.error(error, icon="⚠️")
+            return
+        st.rerun()
+    if col_keep.button("Keep it", use_container_width=True):
+        st.rerun()
+
+
+@st.dialog("Change Data Product status")
+def change_dp_status_dialog(
+    data_access: DataAccess,
+    one_pager_id: str,
+    user: CurrentUser,
+    options: list[TransitionRule],
 ) -> None:
-    """Render the action button bar (disabled in v1).
-    
-    Per UI_Design.md §4.4, all state-changing actions are disabled with "coming soon" tooltips.
-    
+    """Menu of the valid DP transitions (UI_Design.md §4.4); asks before
+    destructive ones such as Deprecate."""
+    by_target = {rule.to_status: rule for rule in options}
+    target = st.selectbox(
+        "New status",
+        options=list(by_target),
+        format_func=lambda s: f"{by_target[s].label} → {s}",
+        key="preview_dp_target",
+    )
+    rule = by_target[target]
+    confirmed = True
+    if rule.requires_confirmation:
+        st.warning(f"**{rule.label}** cannot be undone.", icon="⚠️")
+        confirmed = st.checkbox(
+            f"Yes, {rule.label.lower()} this Data Product",
+            key="preview_dp_confirm",
+        )
+    col_apply, col_back = st.columns(2)
+    if col_apply.button(
+        "Change status",
+        type="primary",
+        disabled=not confirmed,
+        use_container_width=True,
+    ):
+        error = change_dp_status_and_report(
+            data_access, one_pager_id, target, user, confirmed=confirmed
+        )
+        if error:
+            st.error(error, icon="⚠️")
+            return
+        st.rerun()
+    if col_back.button("Back", use_container_width=True):
+        st.rerun()
+
+
+def render_action_bar(
+    data_access: DataAccess,
+    preview_data: PreviewData,
+    lock: LockInfo | None,
+    user: CurrentUser,
+    authorized_initials: set[str],
+) -> None:
+    """Render the action button bar.
+
+    Per UI_Design.md §4.4, buttons depend on role and status; actions that
+    are not implemented yet stay disabled with a "coming soon" tooltip.
+
     Args:
         preview_data: Complete preview data.
         lock: The active lock, or None.
-        current_user_initials: Current user's initials.
+        user: The current user.
+        authorized_initials: Initials of the Owner/SMEs of this One Pager.
     """
     header = preview_data.header
-    
     actions = get_action_states(
-        current_user_initials=current_user_initials,
+        current_user_initials=user.initials,
         owner_initials=header.owner_initials,
         one_pager_status=header.one_pager_status,
         is_locked=lock is not None,
         lock_holder_initials=lock.locked_by_initials if lock else None,
+        authorized_initials=authorized_initials,
+        data_product_status=header.data_product_status,
     )
-    
+
     st.subheader("Actions")
-    
-    col1, col2, col3, col4, col5 = st.columns(5)
-    
-    with col1:
-        st.button(
-            "✏️ Edit",
-            disabled=not actions["edit"].enabled,
-            help=actions["edit"].tooltip if actions["edit"].tooltip else None,
+    shown = [name for name in ACTION_BUTTONS if actions[name].visible]
+    clicked = None
+    for column, name in zip(st.columns(max(len(shown), 1)), shown, strict=False):
+        state = actions[name]
+        with column:
+            if st.button(
+                ACTION_BUTTONS[name],
+                key=f"preview_{name}",
+                disabled=not state.enabled,
+                help=state.tooltip or None,
+                use_container_width=True,
+            ):
+                clicked = name
+    if header.one_pager_status == "Cancelled":
+        st.caption("This One Pager is cancelled (read-only).")
+    elif header.one_pager_status == "In Review" and not actions["approve"].visible:
+        st.caption("Waiting for an Approver's review.")
+
+    if clicked == "edit":
+        open_editor(header.one_pager_id)
+    elif clicked == "cancel":
+        confirm_cancel(data_access, header.one_pager_id, user)
+    elif clicked == "change_dp_status":
+        row = data_access.get_one_pager_status_row(header.one_pager_id)
+        options = (
+            data_product_options(
+                row, owner_or_sme=user.initials in authorized_initials
+            )
+            if row
+            else []
         )
-    
-    with col2:
-        st.button(
-            "✅ Approve",
-            disabled=not actions["approve"].enabled,
-            help=actions["approve"].tooltip if actions["approve"].tooltip else None,
-        )
-    
-    with col3:
-        st.button(
-            "❌ Reject",
-            disabled=not actions["reject"].enabled,
-            help=actions["reject"].tooltip if actions["reject"].tooltip else None,
-        )
-    
-    with col4:
-        st.button(
-            "📝 Add Comment",
-            disabled=not actions["add_comment"].enabled,
-            help=actions["add_comment"].tooltip if actions["add_comment"].tooltip else None,
-        )
-    
-    with col5:
-        st.button(
-            "📄 Export PDF",
-            disabled=not actions["export_pdf"].enabled,
-            help=actions["export_pdf"].tooltip if actions["export_pdf"].tooltip else None,
-        )
+        if options:
+            change_dp_status_dialog(data_access, header.one_pager_id, user, options)
 
 
 # ============================================================================
@@ -668,7 +767,13 @@ st.divider()
 # Expired locks count as "not locked" (Backend_Design.md §6).
 lock = active_lock(preview_data.lock)
 
-render_action_bar(preview_data, lock, current_user_info.initials)
+render_action_bar(
+    data_access,
+    preview_data,
+    lock,
+    current_user_info,
+    load_authorized_initials(data_access, one_pager_id),
+)
 
 st.divider()
 
