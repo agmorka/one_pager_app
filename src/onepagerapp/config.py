@@ -74,6 +74,14 @@ class AppConfig(BaseModel):
             "initials."
         ),
     )
+    ONE_PAGER_APP_MOCK_USER: str = Field(
+        "lduadm@mock.local",
+        description=(
+            "Username of the signed-in user in local-mock mode. It goes through "
+            "the same parsing as a real username, so its domain must be in "
+            "ONE_PAGER_APP_USER_DOMAINS."
+        ),
+    )
     ONE_PAGER_APP_APPROVERS: str = Field(
         "",
         description=(

@@ -34,6 +34,10 @@ from onepagerapp.models import (
 )
 from onepagerapp.validation import CURRENT_STRUCTURE_DEFINITION
 
+# Signed-in user in local-mock mode unless ONE_PAGER_APP_MOCK_USER says
+# otherwise (initials LDU with the mock.local domain accepted).
+DEFAULT_MOCK_USER = "lduadm@mock.local"
+
 
 class MockDataAccess(DataAccess):
     """In-memory fake for tabular data; documents come from the YAML store.
@@ -44,8 +48,13 @@ class MockDataAccess(DataAccess):
     fixtures in tests/fixtures/sample_one_pagers/.
     """
 
-    def __init__(self, document_store: OnePagerDocumentStore) -> None:  # noqa: D107
+    def __init__(  # noqa: D107
+        self,
+        document_store: OnePagerDocumentStore,
+        current_user: str = DEFAULT_MOCK_USER,
+    ) -> None:
         self._document_store = document_store
+        self._current_user = current_user
         self._status_rows: dict[str, OnePagerStatusRow] = {
             row.one_pager_id: row for row in _seed_status_rows()
         }
@@ -99,7 +108,7 @@ class MockDataAccess(DataAccess):
         )
 
     def get_current_user(self) -> str:
-        return "local-dev-user@mock.local"
+        return self._current_user
 
     def read_table(self, table_name: str) -> pd.DataFrame:  # noqa: ARG002
         return pd.DataFrame()

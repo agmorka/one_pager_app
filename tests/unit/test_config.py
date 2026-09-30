@@ -2,7 +2,9 @@
 
 import pytest
 
+from onepagerapp.auth import initials_from_username
 from onepagerapp.config import AppConfig, Environment
+from onepagerapp.data_access import create_data_access
 
 
 def _config(**overrides: str) -> AppConfig:
@@ -88,3 +90,27 @@ def test__username_suffixes__longest_first(
 def test__initials_pattern__invalid_regex_rejected() -> None:
     with pytest.raises(ValueError, match="not a valid regex"):
         _config(ONE_PAGER_APP_INITIALS_PATTERN="^[A-Z")
+
+
+@pytest.mark.unit
+def test__mock_user__default_is_parsed_like_a_real_username() -> None:
+    config = _config(
+        APP_MODE="local-mock",
+        ONE_PAGER_APP_USER_DOMAINS="becoc001.onmicrosoft.com,mock.local",
+    )
+    username = create_data_access(config).get_current_user()
+
+    assert username == "lduadm@mock.local"
+    assert initials_from_username(username, config) == "LDU"
+
+
+@pytest.mark.unit
+def test__mock_user__configurable() -> None:
+    config = _config(
+        APP_MODE="local-mock",
+        ONE_PAGER_APP_MOCK_USER="x0wadm@becoc001.onmicrosoft.com",
+    )
+    username = create_data_access(config).get_current_user()
+
+    assert username == "x0wadm@becoc001.onmicrosoft.com"
+    assert initials_from_username(username, config) == "X0W"
