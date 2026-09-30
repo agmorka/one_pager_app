@@ -204,13 +204,13 @@ IMPLEMENTED_ACTIONS: frozenset[str] = frozenset(
         "add_comment",
         "resolve_comment",
         "update",
+        "export_pdf",
     }
 )
 
 COMING_SOON = {
     "cancel": "Cancel coming soon",
     "change_dp_status": "Change DP Status coming soon",
-    "export_pdf": "Export PDF coming soon",
 }
 
 
@@ -275,7 +275,10 @@ def get_action_states(  # noqa: PLR0913 - the context of one Preview page
         "release_lock": _release_lock_state(
             current_user_initials, is_locked, lock_holder_initials
         ),
-        "export_pdf": ActionState(enabled=False, tooltip=COMING_SOON["export_pdf"]),
+        # Anyone who can view a One Pager may export it (Backend_Design.md §10).
+        "export_pdf": ActionState(
+            enabled=True, tooltip="Download this One Pager as a PDF"
+        ),
     }
     edit = states["edit"]
     edit.visible = context.owner_or_sme and one_pager_status in EDITABLE_STATUSES

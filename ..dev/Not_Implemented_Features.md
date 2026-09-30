@@ -102,8 +102,8 @@ There is no `git_integration.py`.
 
 | # | Feature |
 |---|---|
-| 8.1 | `export.py`: render all sections to PDF with resolved Use Cases. The library (`weasyprint` or `fpdf2`) is not chosen yet. |
-| 8.2 | Enable the **Export PDF** button in Preview |
+| 8.1 | ~~`export.py`: render all sections to PDF with resolved Use Cases. The library (`weasyprint` or `fpdf2`) is not chosen yet.~~ **Done (Phase 9):** `export.export_one_pager_pdf`, rendered by the built-in writer `onepagerapp/pdf.py` (no new dependency, Decision_Log §18). Reads the current version like Preview; reading approved versions from Git waits for 7.3 |
+| 8.2 | ~~Enable the **Export PDF** button in Preview~~ **Done (Phase 9):** enabled for every user and status; opens a dialog with the download |
 
 ## 9. Help page (Req §11, UI §4.6)
 
@@ -135,7 +135,7 @@ There is no `git_integration.py`.
 | # | Feature |
 |---|---|
 | 12.1 | ~~Content sections that are not rendered: **Governance artifacts**, **Out of Scope**, **Open Questions** and **Assumptions**. `OnePagerDocument` does not model these fields either. Use Case IDs (`UC-###`) and BR IDs are not shown.~~ **Done (Phase 1):** modelled in `OnePagerDocument` (v2 schema) and rendered in Preview |
-| 12.2 | Role- and status-dependent actions: Edit, Update, Change DP Status dropdown, Approve, Reject, Cancel, Add Comment, Resolve, Release lock, Export PDF. **Partly done (Phase 5):** the Preview action bar only shows the actions that apply to the user's role and the statuses; Edit and Release lock work. **Phase 6:** every action works except Export PDF (Phase 9) |
+| 12.2 | Role- and status-dependent actions: Edit, Update, Change DP Status dropdown, Approve, Reject, Cancel, Add Comment, Resolve, Release lock, Export PDF. **Partly done (Phase 5):** the Preview action bar only shows the actions that apply to the user's role and the statuses; Edit and Release lock work. **Phase 6:** every action works except Export PDF. **Phase 9:** Export PDF works |
 | 12.3 | ~~Error states show raw exception text (`st.error(f"... {e}")`). The docs require a friendly message and a Retry button, with no internals shown.~~ **Done (Phase 0)** |
 | 12.4 | ~~Opening Preview without an ID silently defaults to `OP-0001`~~ **Done (Phase 0):** Preview asks the user to pick a One Pager from the Registry |
 
@@ -263,11 +263,11 @@ This phase is left until the lifecycle is stable, because it depends on external
 | 40 | 7.2 `pending_pr` flag and retry | Needed once PR creation can fail |
 | 41 | 7.3 Read the approved YAML from Git (for Update and export) | Replaces the volume read in Update (1.5) |
 
-### Phase 9: PDF export
+### Phase 9: PDF export — ✅ done
 
 | Order | Item | Why now |
 |---|---|---|
-| 42 | 8.1 `export.py` (choose `weasyprint` or `fpdf2`), 8.2 enable **Export PDF** | Needs every section modelled (Phase 1). Can move earlier if stakeholders ask for it, because it depends only on Phase 1 |
+| 42 | ~~8.1 `export.py` (choose `weasyprint` or `fpdf2`), 8.2 enable **Export PDF**~~ **Done** | Needs every section modelled (Phase 1). Can move earlier if stakeholders ask for it, because it depends only on Phase 1 |
 
 ### Phase 10: Help and Admin pages
 

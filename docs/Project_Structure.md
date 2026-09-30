@@ -185,7 +185,7 @@ Core dependencies (expected):
 - `jsonschema` — Schema validation
 - `pyyaml` — YAML read/write
 - `pydantic` — Typed models for internal use (optional, for structured access to schema sections)
-- `weasyprint` (or `fpdf2`) — PDF export rendering
+- PDF export rendering: no library; `onepagerapp/pdf.py` writes the PDF with the standard library ([Decision_Log.md](Decision_Log.md) §18)
 - `structlog` — Structured logging for security-event audit trail
 
 Dev dependencies:
@@ -339,5 +339,5 @@ A live Databricks workspace connection (DEV) is required even for local developm
 | 5 | Git PAT or service connection for PR creation | The app needs credentials to create PRs in the One Pager registry repo on approval. Stored in a Databricks secret scope. |
 | 6 | Azure Pipelines service connection to Databricks workspaces | Needed for the CI/CD pipeline to deploy bundles. |
 | 7 | Branch protection rules on the One Pager registry repo | Carried over from architecture doc — determines whether auto-merge is possible on approval PRs. |
-| 8 | PDF export library choice | `weasyprint` vs. `fpdf2` — to be decided during implementation based on rendering quality and dependency footprint. |
+| 8 | ~~PDF export library choice~~ | **Resolved:** neither `weasyprint` nor `fpdf2`; a small built-in writer (`onepagerapp/pdf.py`), see [Decision_Log.md](Decision_Log.md) §18. |
 | 9 | Schema evolution strategy | How the app handles documents written against an older schema version (carried over from architecture doc open item #5; to be resolved in Step 4). |

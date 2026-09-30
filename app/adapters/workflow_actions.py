@@ -11,8 +11,9 @@ from collections.abc import Collection
 import streamlit as st
 
 from adapters.cache import writes_data
-from onepagerapp.data_access.base import DataAccess
+from onepagerapp.data_access.base import DataAccess, NotFoundError
 from onepagerapp.documents import OnePagerDocumentStore
+from onepagerapp.export import EXPORT_FAILED_MESSAGE, PdfExport, export_one_pager_pdf
 from onepagerapp.models import CurrentUser
 from onepagerapp.permissions import PermissionDeniedError
 from onepagerapp.review import (
@@ -202,3 +203,22 @@ def update_and_report(
         f"{one_pager_id} is now in Draft Update. Choose Edit to change it."
     )
     return None
+
+
+def export_pdf_and_report(
+    data_access: DataAccess,
+    one_pager_id: str,
+    user: CurrentUser,
+    status_colors: dict[str, str],
+) -> tuple[PdfExport | None, str | None]:
+    """Render the One Pager as a PDF; return it, or a user-facing error."""
+    try:
+        export = export_one_pager_pdf(
+            data_access, one_pager_id, user, status_colors=status_colors
+        )
+    except (PermissionDeniedError, NotFoundError) as e:
+        return None, str(e)
+    except Exception:
+        logger.exception(f"Failed to export {one_pager_id} as PDF")
+        return None, EXPORT_FAILED_MESSAGE
+    return export, None
