@@ -483,6 +483,15 @@ class DataAccess(ABC):
         ...
 
     @abstractmethod
+    def get_pending_pr_rows(self) -> list[OnePagerStatusRow]:
+        """Return the ``one_pager_status`` rows with ``pending_pr = true``.
+
+        Approved One Pagers whose Git PR could not be created (Backend §8).
+        Read fresh (never cached), oldest approval first.
+        """
+        ...
+
+    @abstractmethod
     def update_authorized_users(self, users: list[AuthorizedUser]) -> None:
         """Update name, email, team and role of existing authorized-user rows.
 

@@ -11,6 +11,11 @@ Status definitions (``ref_op_status`` / ``ref_dp_status``): Admins change the
 display label, order and badge color. The statuses themselves and whether
 they are final belong to the state machine and cannot be changed here.
 
+Pending PRs: approved One Pagers whose Git PR could not be created
+(``pending_pr``, Backend_Design.md §8). Creating and retrying PRs comes with
+the Git integration (Phase 8, items 7.1-7.2); until then the list is read
+only and **Retry PR** is not available.
+
 Every function checks the Admin role (logged when denied) and every change is
 logged as a security event. Pure Python — no Streamlit.
 """
@@ -25,7 +30,12 @@ from onepagerapp.data_access.base import (
     check_reference_table,
     check_status_table,
 )
-from onepagerapp.models import CurrentUser, RegistryFilter, StatusRef
+from onepagerapp.models import (
+    CurrentUser,
+    OnePagerStatusRow,
+    RegistryFilter,
+    StatusRef,
+)
 from onepagerapp.permissions import PermissionDeniedError, can_administer
 from onepagerapp.state_machine import DP_STATUSES, OP_STATUSES, Actor
 from onepagerapp.validation import sanitize_text
@@ -279,6 +289,28 @@ def delete_reference_value(
         msg = f"The {kind.noun} {value!r} no longer exists."
         raise AdminError(msg)
     _log_change("delete_reference_value", user, table, value=value)
+
+
+# Why Retry PR is disabled: nothing can create a PR before the Git integration.
+RETRY_PR_UNAVAILABLE = (
+    "Retry PR becomes available with the Git integration, which creates the "
+    "PRs on approval."
+)
+
+
+def get_pending_prs(
+    data_access: DataAccess,
+    user: CurrentUser | None,
+    roles: Collection[Actor],
+) -> list[OnePagerStatusRow]:
+    """Approved One Pagers still waiting for their Git PR, oldest first.
+
+    Raises:
+        PermissionDeniedError: The user is not an Admin.
+
+    """
+    check_can_administer(user, roles)
+    return data_access.get_pending_pr_rows()
 
 
 def get_status_definitions(

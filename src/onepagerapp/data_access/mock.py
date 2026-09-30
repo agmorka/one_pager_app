@@ -428,6 +428,19 @@ class MockDataAccess(DataAccess):
         ]
         return sorted(rows, key=lambda r: (_as_utc(r.last_updated_at), r.one_pager_id))
 
+    def get_pending_pr_rows(self) -> list[OnePagerStatusRow]:
+        rows = [copy.copy(row) for row in self._status_rows.values() if row.pending_pr]
+
+        def approved_at(row: OnePagerStatusRow) -> tuple[bool, datetime, str]:
+            reviewed = row.reviewed_at
+            return (
+                reviewed is None,
+                _as_utc(reviewed or row.last_updated_at),
+                row.one_pager_id,
+            )
+
+        return sorted(rows, key=approved_at)
+
     def update_authorized_users(self, users: list[AuthorizedUser]) -> None:
         for user in users:
             rows = self._authorized_users.get(user.one_pager_id, [])

@@ -119,7 +119,7 @@ There is no `git_integration.py`.
 | 10.1 | ~~Admin page (`7_Admin.py`), restricted to Admins~~ **Done (Phase 10):** `app/views/admin.py`, service `onepagerapp/admin.py`; in the navigation for Admins only, others see "You don't have access to this page." |
 | 10.2 | ~~CRUD for reference data: business domains, product types, **source systems** (no `ref_source_systems` table/DDL exists yet)~~ **Done (Phase 10):** add, reorder, deactivate/reactivate, delete while unused; `ref_source_systems` Liquibase changeset. The Data Sources tab keeps `sourceSystem` as free text for now |
 | 10.3 | ~~View and edit status definitions (`ref_op_status` / `ref_dp_status`)~~ **Done (Phase 10):** display label, order and badge color |
-| 10.4 | Pending PRs table with **Retry PR** |
+| 10.4 | Pending PRs table with **Retry PR**. **Partly done (Phase 10):** the **Pending PRs** section lists `pending_pr = true` rows (`admin.get_pending_prs`); **Retry PR** is shown disabled until 7.1–7.2 create PRs and set the flag |
 
 ## 11. Registry gaps (Req §3, UI §4.1)
 
@@ -269,13 +269,13 @@ This phase is left until the lifecycle is stable, because it depends on external
 |---|---|---|
 | 42 | ~~8.1 `export.py` (choose `weasyprint` or `fpdf2`), 8.2 enable **Export PDF**~~ **Done** | Needs every section modelled (Phase 1). Can move earlier if stakeholders ask for it, because it depends only on Phase 1 |
 
-### Phase 10: Help and Admin pages
+### Phase 10: Help and Admin pages — ✅ done (Retry PR waits for Phase 8)
 
 | Order | Item | Why now |
 |---|---|---|
 | 43 | ~~9.1 Help page~~ **Done** | Describes the final lifecycle, using 9.2 |
 | 44 | ~~10.1 Admin page, 10.3 status definitions, 10.2 reference-data CRUD (including the `ref_source_systems` Liquibase changeset)~~ **Done** | `sourceSystem` is free text in the schema today, so the Data Sources tab does not need this table first |
-| 45 | 10.4 Pending PRs table with **Retry PR** | Needs 7.2 |
+| 45 | 10.4 Pending PRs table with **Retry PR** — **table done**; Retry PR is disabled until 7.2 lands | Needs 7.2 |
 
 ### Phase 11: Hardening
 

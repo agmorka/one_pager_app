@@ -445,6 +445,8 @@ Implemented in `app/views/admin.py` with the service `onepagerapp/admin.py`. The
 - Status definitions: only the display label, order and badge color change. The statuses and whether they are final belong to the state machine.
 - Every change is logged as a security event and clears the cached reference data, so the Editor and Registry show it at once.
 
+**Pending PRs** lists the rows with `pending_pr = true`, oldest approval first (ID, product, version, approved at/by). **Retry PR** is shown per row but stays disabled until the Git integration exists (Phase 8, items 7.1–7.2): nothing creates PRs or sets `pending_pr` yet, so the list is empty in practice.
+
 #### States
 Same pattern: Loading / Populated / Error. Restricted to Admin role — other users see "You don't have access to this page."
 

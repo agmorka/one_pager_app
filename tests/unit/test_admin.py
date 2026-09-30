@@ -2,6 +2,8 @@
 
 import logging
 from collections.abc import Callable
+from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import NoReturn
 
@@ -14,6 +16,7 @@ from onepagerapp.admin import (
     AdminError,
     add_reference_value,
     delete_reference_value,
+    get_pending_prs,
     get_reference_values,
     get_status_definitions,
     update_reference_value,
@@ -475,3 +478,63 @@ def test__navigation__admin_page_only_for_admins(switched: list[str]) -> None:
     assert titles(ADMIN)[-1] == "Admin"
     assert "Admin" not in titles(frozenset())
     assert "Admin" not in titles(frozenset({Actor.APPROVER}))
+
+
+# ============================================================================
+# Pending PRs (UI_Design.md §4.7, Backend_Design.md §8)
+# ============================================================================
+
+
+def _mark_pending(
+    data_access: MockDataAccess, one_pager_id: str, reviewed_at: datetime | None
+) -> None:
+    row = data_access._status_rows[one_pager_id]
+    data_access._status_rows[one_pager_id] = replace(
+        row, pending_pr=True, reviewed_at=reviewed_at, reviewed_by="APR"
+    )
+
+
+@pytest.mark.unit
+def test__pending_prs__oldest_approval_first(data_access: MockDataAccess) -> None:
+    assert get_pending_prs(data_access, USER, ADMIN) == []
+
+    _mark_pending(data_access, "OP-0002", datetime(2026, 9, 1, tzinfo=UTC))
+    _mark_pending(data_access, "OP-0001", datetime(2026, 9, 20, tzinfo=UTC))
+
+    rows = get_pending_prs(data_access, USER, ADMIN)
+    assert [r.one_pager_id for r in rows] == ["OP-0002", "OP-0001"]
+    assert all(r.pending_pr for r in rows)
+    with pytest.raises(PermissionDeniedError):
+        get_pending_prs(data_access, USER, frozenset({Actor.APPROVER}))
+
+
+@pytest.mark.unit
+def test__lakehouse__pending_pr_rows() -> None:
+    conn = _FakeConnection()
+    assert _access(conn).get_pending_pr_rows() == []
+    statement, params = conn.calls[0]
+    assert "FROM cat.sch.one_pager_status WHERE pending_pr = true" in statement
+    assert "ORDER BY reviewed_at ASC" in statement
+    assert params == {}
+
+
+@pytest.mark.unit
+def test__admin_page__pending_prs(
+    data_access: MockDataAccess, switched: list[str]
+) -> None:
+    at = _app(data_access).run()
+    at.radio(key="admin_section").set_value("Pending PRs").run()
+
+    assert not at.exception
+    assert at.subheader[0].value == "Pending PRs"
+    assert "No pending PRs" in at.success[0].value
+
+    _mark_pending(data_access, "OP-0001", datetime(2026, 9, 20, 14, 30, tzinfo=UTC))
+    at.run()
+
+    assert not at.exception
+    assert any(m.value == "OP-0001" for m in at.markdown)
+    assert any(m.value == "2026-09-20 14:30 UTC" for m in at.markdown)
+    retry = at.button(key="admin_retry_pr_OP-0001")
+    assert retry.disabled
+    assert "Git integration" in at.info[0].value

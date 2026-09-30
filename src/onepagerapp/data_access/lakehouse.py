@@ -904,6 +904,15 @@ class LakehouseAccess(DataAccess):
         )
         return [self._row_to_status_row(r) for r in self._response_rows(response)]
 
+    def get_pending_pr_rows(self) -> list[OnePagerStatusRow]:
+        fqn = f"{self._fqn_prefix}.one_pager_status"
+        response = self._connection.execute_statement(
+            f"SELECT {', '.join(_ONE_PAGER_STATUS_COLUMNS)} FROM {fqn} "  # noqa: S608
+            "WHERE pending_pr = true "
+            "ORDER BY reviewed_at ASC NULLS LAST, one_pager_id ASC"
+        )
+        return [self._row_to_status_row(r) for r in self._response_rows(response)]
+
     def update_authorized_users(self, users: list[AuthorizedUser]) -> None:
         fqn = f"{self._fqn_prefix}.one_pager_authorized_users"
         for user in users:

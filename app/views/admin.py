@@ -8,6 +8,9 @@ A section menu at the top, the selected section below it:
   no One Pager uses it.
 - **Status Definitions**: display label, order and badge color of every One
   Pager and Data Product status.
+- **Pending PRs**: approved One Pagers whose Git PR could not be created
+  (``pending_pr``), with **Retry PR** per row. Retry needs the Git
+  integration (Phase 8), so it is shown disabled until then.
 
 Only Admins see the page in the navigation; everyone else who opens it gets
 "You don't have access to this page." Every change is checked again by the
@@ -17,6 +20,7 @@ cleared, so the Editor and the Registry show it at once.
 
 import logging
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 import pandas as pd
 import streamlit as st
@@ -24,6 +28,7 @@ import streamlit as st
 from adapters.theme import DEFAULT_BADGE_COLOR, status_badge
 from onepagerapp.admin import (
     REFERENCE_KINDS,
+    RETRY_PR_UNAVAILABLE,
     SAVE_FAILED_MESSAGE,
     STATUS_KINDS,
     AdminError,
@@ -31,6 +36,7 @@ from onepagerapp.admin import (
     add_reference_value,
     check_can_administer,
     delete_reference_value,
+    get_pending_prs,
     get_reference_values,
     get_status_definitions,
     update_reference_value,
@@ -47,7 +53,13 @@ logger = logging.getLogger(__name__)
 LOAD_ERROR_MESSAGE = "Couldn't load this section. Please retry."
 FLASH_KEY = "admin_flash"
 STATUS_SECTION = "Status Definitions"
-SECTIONS = [kind.title for kind in REFERENCE_KINDS] + [STATUS_SECTION]
+PENDING_PRS_SECTION = "Pending PRs"
+SECTIONS = [kind.title for kind in REFERENCE_KINDS] + [
+    STATUS_SECTION,
+    PENDING_PRS_SECTION,
+]
+PENDING_PR_COLUMNS = ["ID", "Product", "Version", "Approved", "Approved by", ""]
+_PENDING_PR_RATIOS = [1.0, 2.4, 1.0, 1.8, 1.2, 1.2]
 
 
 def apply_change(change: Callable[[], None], success: str) -> str | None:
@@ -299,6 +311,57 @@ def render_status_section(
                 st.error(error, icon="⚠️")
 
 
+def _approved_label(value: datetime | None) -> str:
+    if value is None:
+        return "-"
+    if value.tzinfo is not None:
+        value = value.astimezone(UTC)
+    return value.strftime("%Y-%m-%d %H:%M") + " UTC"
+
+
+def render_pending_prs_section(
+    data_access: DataAccess, user: CurrentUser, roles: frozenset[Actor]
+) -> None:
+    """Approved One Pagers whose Git PR is still missing, with Retry PR."""
+    st.subheader(PENDING_PRS_SECTION)
+    st.caption(
+        "Approved One Pagers whose pull request to the One Pager registry "
+        "could not be created. The approval itself is complete."
+    )
+    try:
+        rows = get_pending_prs(data_access, user, roles)
+    except Exception:
+        logger.exception("Failed to load the pending PRs")
+        render_load_error("admin_retry_pending_prs")
+        return
+    st.info(RETRY_PR_UNAVAILABLE, icon="ℹ️")
+    if not rows:
+        st.success("No pending PRs: every approved One Pager has its PR.")
+        return
+
+    header = st.columns(_PENDING_PR_RATIOS)
+    for column, title in zip(header, PENDING_PR_COLUMNS, strict=True):
+        column.markdown(f"**{title}**")
+    for row in rows:
+        cells = st.columns(_PENDING_PR_RATIOS)
+        values = [
+            row.one_pager_id,
+            row.product_name,
+            row.version,
+            _approved_label(row.reviewed_at),
+            row.reviewed_by or "-",
+        ]
+        for column, value in zip(cells[:-1], values, strict=True):
+            column.markdown(value)
+        cells[-1].button(
+            "Retry PR",
+            key=f"admin_retry_pr_{row.one_pager_id}",
+            disabled=True,
+            help=RETRY_PR_UNAVAILABLE,
+            use_container_width=True,
+        )
+
+
 # ============================================================================
 # Admin Page
 # ============================================================================
@@ -327,11 +390,13 @@ if flash:
 # A horizontal section menu: the sections use columns themselves, and
 # Streamlit allows only one level of nested columns.
 section = st.radio(
-    "Reference Data", options=SECTIONS, horizontal=True, key="admin_section"
+    "Section", options=SECTIONS, horizontal=True, key="admin_section"
 )
 st.divider()
 if section == STATUS_SECTION:
     render_status_section(data_access, current_user_info, roles)
+elif section == PENDING_PRS_SECTION:
+    render_pending_prs_section(data_access, current_user_info, roles)
 else:
     kind = next(k for k in REFERENCE_KINDS if k.title == section)
     render_reference_section(data_access, kind, current_user_info, roles)
