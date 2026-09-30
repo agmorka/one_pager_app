@@ -16,12 +16,18 @@ The application uses four roles:
 |---|---|---|
 | **Owner** | The Data Product Owner, or a Subject Matter Expert (SME) assigned to that specific Data Product | Creates and edits One Pagers for the Data Product(s) they own or are assigned to, manages the shared Use Case list, submits for review, updates Approved One Pagers, progresses and changes Data Product status within allowed values, cancels own One Pagers |
 | **Approver** | A reviewer representing Nykredit (the partner financial institution) | Approves or rejects submitted One Pagers, adds review comments (including section-level comments) |
-| **Admin** | A Platform team representative | Administers users/roles/reference data, may cancel a One Pager |
+| **Admin** | A Platform team representative | Administers reference data, may cancel a One Pager. Role membership itself is managed in Entra ID groups, outside the app |
 | **Viewer** | Any employee | Browses and views One Pagers; read-only |
 
-All users must be authenticated before accessing the application.
+All users must be authenticated before accessing the application. A user whose account is not recognised (unknown domain or username format) is refused access.
 
-Edit rights are scoped **per Data Product**: only that Data Product's Owner and its explicitly assigned SMEs may create or edit its One Pager. Being an Owner or SME on one Data Product does not grant edit rights on another. The authenticated user is matched against `dataProductOwner`/`smes` by their stable corporate `initials` (not by name or email). The `email` field is stored for display and cross-reference but is not used for authorization, since the corporate email/username format (currently `<initials>ADM@BECOC001.onmicrosoft.com`) may change over time.
+Roles are assigned through Entra ID groups: one group each for Owner/SME, Approver and Admin; every other employee is a Viewer. The groups do not exist yet; until they do, members of the environment's Data Platform Engineering group (`BEC_BECOC001_LHX_<ENV>_DataPlatEng`) hold the Owner/SME, Approver and Admin roles. A user may hold several roles; a user never approves or rejects a One Pager they are Owner or SME of (§6). See Architecture.md §4.
+
+Edit rights are scoped **per Data Product**: only that Data Product's Owner and its explicitly assigned SMEs may create or edit its One Pager. Being an Owner or SME on one Data Product does not grant edit rights on another. The authenticated user is matched against `dataProductOwner`/`smes` by their stable corporate `initials` (not by name or email). The `email` field is stored for display and cross-reference but is not used for authorization, since the corporate email/username format may change over time.
+
+**Corporate initials.** The username currently has the form `<corporate initials>adm@becoc001.onmicrosoft.com`, e.g. `x0wadm@becoc001.onmicrosoft.com` → `X0W`. The `adm` suffix may be dropped and the domain may change; both are configuration, not code. Corporate initials are assigned by the company, may contain digits, and are not necessarily a person's name initials (the user above is Agnieszka Kępkowska, `AK`, but her corporate initials are `X0W`). The `initials` of Owners and SMEs in a One Pager are always **corporate** initials.
+
+**Names.** A user's first name and surname are taken from the company directory when available; otherwise the app shows the corporate initials.
 
 ## 3. Browsing & Searching
 

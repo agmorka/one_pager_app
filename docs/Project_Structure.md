@@ -212,7 +212,7 @@ Each environment has its own:
 - **Unity Catalog catalog** — a dedicated catalog per environment (e.g. `dev_one_pager`, `prd_one_pager`), providing full isolation of schemas, tables, and volumes from other applications. Actual naming follows BEC's catalog naming convention.
 - **Unity Catalog schema** within that catalog (e.g. `app`) for all Delta tables.
 - **Unity Catalog external volume** for in-progress YAML files.
-- **Unity Catalog groups** for RBAC (Owner/SME, Approver, Admin — group names per BEC's naming convention, replicated per workspace where needed).
+- **Entra ID role groups** for Owner/SME, Approver and Admin, available in Databricks through automatic identity management. Names are app settings with an `{env}` placeholder; until dedicated groups exist, all three use `BEC_BECOC001_LHX_{env}_DataPlatEng` (Architecture §4).
 - **Databricks App deployment** (separate app instance per workspace).
 
 The Databricks Asset Bundle (`databricks.yml`) defines targets for each environment, parameterizing catalog/schema/volume names and app configuration so the same codebase deploys to any environment without code changes.
@@ -333,9 +333,9 @@ A live Databricks workspace connection (DEV) is required even for local developm
 | # | Item | Notes |
 |---|---|---|
 | 1 | Actual catalog/schema/volume names per environment | Must follow BEC's Unity Catalog naming convention. |
-| 2 | Actual UC group names per environment | Must follow BEC's group naming convention (carried over from architecture doc). |
+| 2 | Actual role group names per environment | Interim: `BEC_BECOC001_LHX_{env}_DataPlatEng` for all roles. Dedicated Entra ID groups to be requested; switching is a configuration change (Architecture §4, open item #3). |
 | 3 | Service principal setup: CI/CD pipeline deployment | Separate from the app's runtime identity. Needed for `databricks bundle deploy`. |
-| 4 | Service principal setup: app runtime identity | The app's own identity for volume/Delta/Git access at runtime. |
+| 4 | Service principal setup: app runtime identity | The app's own identity for **writes** to Delta, the volume and Git at runtime (`bp-spn-lhx-opa-{env}-001`). Delta reads run as the user. See Architecture §8 and One_Pager_App_Infrastructure_Setup.md. |
 | 5 | Git PAT or service connection for PR creation | The app needs credentials to create PRs in the One Pager registry repo on approval. Stored in a Databricks secret scope. |
 | 6 | Azure Pipelines service connection to Databricks workspaces | Needed for the CI/CD pipeline to deploy bundles. |
 | 7 | Branch protection rules on the One Pager registry repo | Carried over from architecture doc — determines whether auto-merge is possible on approval PRs. |
