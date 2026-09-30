@@ -29,7 +29,9 @@ flowchart LR
 
 ### Sidebar
 - BEC logo at the top
-- Current user identity (name/initials + role badge)
+- Current user identity (first name and surname from the directory, or the corporate initials when no name is available, + role badge: Viewer, Owner/SME, Approver, Admin; several can apply)
+- While the interim role group is used (Architecture §4), a small notice outside DEV: "Interim roles: DataPlatEng members act as Owner/SME, Approver and Admin"
+- An unrecognised account (no proxy identity, unknown domain or username format) sees only an "account not recognised — contact the platform team" page; no navigation is shown
 - Environment badge (DEV / INT / UAT / PRD) — always visible so testers never confuse environments
 - Navigation links: Registry, Editor, Review (visible to Approvers), Preview, Use Cases, Help, Admin (visible to Admins)
 - The Editor is always registered (Streamlit 1.38 cannot hide a single page and `st.switch_page` needs registered pages). Opened without an edit/create intent, it shows "Start from the Registry (➕ New) or from a One Pager's Edit action" and a button back to the Registry.

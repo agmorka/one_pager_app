@@ -92,7 +92,7 @@ This document captures significant design and development decisions made during 
 - Workspace host and auth: Databricks CLI profile (`~/.databrickscfg`), referenced via `DATABRICKS_CONFIG_PROFILE` env var — no secrets in code or env files
 - Warehouse ID, catalog, schema: env vars (`DATABRICKS_WAREHOUSE_ID`, `ONE_PAGER_APP_DATABRICKS_CATALOG`, `ONE_PAGER_APP_DATABRICKS_SCHEMA`), set in `app.yml` for deployed mode and overridable locally via `--env`
 - `APP_MODE` is **not** set in `app.yml` — the config default (`databricks`) handles the deployed case, while `--env APP_MODE=local-mock` overrides it locally (app.yml env vars take precedence over `--env` flags, so overridable vars must stay out of `app.yml`)
-- Auth on Databricks: the app inherits the calling user's identity automatically — queries run with their Unity Catalog permissions, not the service principal's
+- Auth on Databricks: the app inherits the calling user's identity automatically — queries run with their Unity Catalog permissions, not the service principal's. **Changed by §19:** reads still run as the user, writes now run as the service principal.
 
 **Architecture:**
 
@@ -266,7 +266,7 @@ If the structure needs to change in the future (e.g., to flatten further for clo
 **Decisions:**
 
 1. **Deprecated Use Cases can be restored.** [Backend_Design.md](Backend_Design.md) §9 only defines `deprecate_use_case`. Deprecation is a soft state (`deprecated` flag), so the page also offers **Restore**, which clears the flag. This lets a mistaken deprecation be undone without a manual database fix. Deprecation asks for confirmation and lists the referencing One Pagers; restore does not ask.
-2. **Write access is temporarily open to every authenticated user.** The docs restrict create/edit/deprecate to the Owner/SME group and make the page read-only for Approver, Admin and Viewer ([Requirements_and_Scope.md](Requirements_and_Scope.md) §9, [UI_Design.md](UI_Design.md) §2). UC group resolution (`auth.py`) does not exist yet, so `permissions.can_manage_use_cases()` is a v1 stub that allows any authenticated user. Every write action on the page goes through it, so enforcing the real rule is a change to that one function. [Backend_Design.md](Backend_Design.md) §15 open item #2 remains open.
+2. **Write access is temporarily open to every authenticated user.** The docs restrict create/edit/deprecate to the Owner/SME group and make the page read-only for Approver, Admin and Viewer ([Requirements_and_Scope.md](Requirements_and_Scope.md) §9, [UI_Design.md](UI_Design.md) §2). UC group resolution (`auth.py`) does not exist yet, so `permissions.can_manage_use_cases()` is a v1 stub that allows any authenticated user. Every write action on the page goes through it, so enforcing the real rule is a change to that one function. [Backend_Design.md](Backend_Design.md) §15 open item #2 remains open. **Superseded by §21:** the stub is replaced by the Owner/SME group check.
 3. **User-supplied values are bound as SQL parameters.** `DatabricksConnection.execute_statement()` now accepts named parameters (`:name` markers), passed to the SQL Statement Execution API as bound values. All Use Case queries use them, and the Preview queries were moved from the unsupported `%s` form to named markers. `LIKE` wildcards in search text are escaped. Statements the warehouse reports as failed now raise `StatementFailedError` instead of looking like empty results.
 
 **ID generation:** `UC-###` IDs come from `id_sequences` via a compare-and-swap `UPDATE ... WHERE last_value = <read value>`. Success is decided by the statement's `num_affected_rows`, and conflicts are retried up to 5 times. Re-reading the counter to confirm success is not safe: two racing writers would both see the new value and hand out the same ID.
@@ -410,3 +410,52 @@ Deleting `change_log` rows is permitted only in this compensation path, for an O
 - The export reads the current version the way Preview does. Reading an approved version from Git comes with the Git integration (Phase 8, item 7.3).
 
 **Why:** No new dependency to approve, install or keep patched, and the output is predictable and fully unit-tested (the tests read the uncompressed page contents). The cost is a fixed, simple layout and no characters outside WinAnsi. If richer layout or full Unicode is needed later, `export.py` is the only caller of `pdf.py`, so switching to `fpdf2` changes those two modules only.
+
+---
+
+## 19. Data Access Identity: Reads as the User, Writes as the Service Principal
+
+**Context:** The platform grants privileges to groups, never directly to users. Until now every SQL statement ran with the signed-in user's token (§3), while the YAML documents were written through the volume mount as the service principal, and Architecture §8 described a single service identity for all storage. Running every write as the user would require `MODIFY` grants for Owners/SMEs, Approvers and Admins on the app tables, which would let them change statuses, authorized users or the change log directly in the SQL editor, outside the workflow, validation and segregation-of-duties checks. Running everything as the service principal would drop Unity Catalog as a second line of defence and hide who read what.
+
+**Decision (option B):**
+
+- **Reads run as the user** (`x-forwarded-access-token`, scope `sql`). All employees (`account users`) have `SELECT` on the app tables.
+- **Writes run as the service principal**, and so do reads that are part of a write (ID-sequence compare-and-set, lock checks). No user group has `MODIFY` on the app tables or `WRITE VOLUME` on the registry volume.
+- The connection takes an explicit identity on every statement; a test fails if a write statement is sent as the user. In `databricks` mode a missing user token raises instead of falling back to the service principal.
+- Every write carries the acting user's corporate initials (audit columns or the change-log entry of the same operation), because Delta history now shows only the service principal.
+- `local-integration` uses the CLI profile for both identities.
+
+**Why:** Users cannot bypass the app's rules, while reads keep per-user Unity Catalog checks and per-user platform audit logs. The cost is that platform write history shows the service principal; the app's audit columns, change log and security-event log are the record of who changed what. Implementation: `..dev/User_Identity_And_Access_Plan.md` Phases 3–4.
+
+---
+
+## 20. Configurable Username Format and Corporate Initials
+
+**Context:** Usernames look like `x0wadm@becoc001.onmicrosoft.com`. The user part is the corporate initials plus `adm`; the suffix may be dropped and the domain may change. Corporate initials may contain digits (`X0W`) and differ from name initials (`AK`). `auth.py` had the format hard-coded (`<2–4 letters>ADM`), guessed initials from other usernames, and `validation.py` rejected digits in initials, so `X0W` could not be an Owner or SME.
+
+**Decision:**
+
+- Settings `ONE_PAGER_APP_USER_DOMAINS` (default `becoc001.onmicrosoft.com`), `ONE_PAGER_APP_USERNAME_SUFFIXES` (default `adm`; an empty entry allows usernames without a suffix) and `ONE_PAGER_APP_INITIALS_PATTERN` (default `^[A-Z0-9]{2,5}$`). Lists allow old and new formats side by side.
+- Initials are extracted by domain check, suffix strip (longest match) and pattern check, upper case. A username that does not match gives **no** initials; the guessing fallbacks are removed.
+- In deployed mode the username comes only from the Databricks Apps proxy headers. No username or no initials → the user is refused access ("account not recognised").
+- The same pattern validates the Owner/SME `initials` in One Pagers.
+- First name and surname come from the SCIM `Me` endpoint (user token, scope `iam.current-user:read`); when unavailable, the initials are shown. The name is for display only.
+
+**Why:** A format change becomes a configuration change, a wrong or unknown account can never be mapped to someone else's initials, and users with digits in their corporate initials can own One Pagers. Implementation: `..dev/User_Identity_And_Access_Plan.md` Phases 1, 2 and 5.
+
+---
+
+## 21. Roles from Entra ID Groups, with an Interim Group
+
+**Context:** The Owner/SME, Approver and Admin roles were meant to come from groups (Architecture §4), but no groups existed, so Approvers and Admins were configured as initials in `ONE_PAGER_APP_APPROVERS` / `ONE_PAGER_APP_ADMINS`, and creating One Pagers and managing Use Cases was open to every user (§7). Automatic identity management is enabled on the Databricks account, so Entra ID groups can be used directly.
+
+**Decision:**
+
+- One Entra ID group per role; the names are settings `ONE_PAGER_APP_GROUP_OWNER_SME`, `ONE_PAGER_APP_GROUP_APPROVER`, `ONE_PAGER_APP_GROUP_ADMIN`, with a `{env}` placeholder for the environment.
+- **Interim:** the dedicated groups do not exist yet. All three settings default to `BEC_BECOC001_LHX_{env}_DataPlatEng` (`…_DEV_…`, `…_INT_…`, `…_UAT_…`, `…_PRD_…`). Its members act as Owner/SME, Approver and Admin; everyone else is a Viewer. The app logs a warning and shows an "interim roles" notice while the default is in use.
+- **Viewer = every employee**; there is no Viewer group.
+- Membership is checked once per session as the user: `is_account_group_member(:group) OR is_member(:group)`. A failed check gives Viewer only.
+- `can_create_one_pager` and `can_manage_use_cases` require the Owner/SME group. `ONE_PAGER_APP_APPROVERS` / `ONE_PAGER_APP_ADMINS` are removed; local mock mode uses `ONE_PAGER_APP_MOCK_GROUPS`.
+- Membership is managed in Entra ID by the Data Platform Engineering team; the app has no role administration.
+
+**Why:** Access is managed through the company's standard group process and access reviews, nobody can grant themselves a role in the app, and moving from the interim group to dedicated groups is a configuration change only. Business Owners/SMEs and Nykredit reviewers outside DataPlatEng cannot create or review until the dedicated groups exist, which is accepted for the interim. Implementation: `..dev/User_Identity_And_Access_Plan.md` Phase 6.

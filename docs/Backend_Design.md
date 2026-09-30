@@ -27,11 +27,11 @@ stateDiagram-v2
 
 | From | To | Action | Guard conditions | Side effects |
 |---|---|---|---|---|
-| (new) | `Draft` | `create` | User is in Owner/SME UC group | Create YAML, create Delta row, assign OP-ID, append change log ("Initial draft created") |
+| (new) | `Draft` | `create` | User is in Owner/SME group | Create YAML, create Delta row, assign OP-ID, append change log ("Initial draft created") |
 | `Draft` | `Ready for Review` | `owner_submit` | User is Owner/SME of this DP; **strict validation passes** | Append change log (system-generated). This is a single atomic user action ("Submit for Review") that moves the document directly from `Draft` through to `In Review` — see note below. |
 | `Ready for Review` | `In Review` | (automatic, part of `owner_submit`) | — | — |
-| `In Review` | `Approved` | `approver_approve` | User is in Approver UC group; **user is not listed as Owner/SME on this DP** (segregation of duties) | Set version to next MAJOR (or `1.0.0` if first approval); auto-set DP status (`Ready for Development` on first, `In Enhancement` on re-approval); create Git PR; append **two** change log entries (one for OP status, one for DP status) |
-| `In Review` | `Draft` | `approver_reject` | User is in Approver UC group; **user is not listed as Owner/SME on this DP** (segregation of duties); comment is provided (non-empty) | Append change log (includes reviewer's comment); add review comment to `review_comments` table |
+| `In Review` | `Approved` | `approver_approve` | User is in Approver group; **user is not listed as Owner/SME on this DP** (segregation of duties) | Set version to next MAJOR (or `1.0.0` if first approval); auto-set DP status (`Ready for Development` on first, `In Enhancement` on re-approval); create Git PR; append **two** change log entries (one for OP status, one for DP status) |
+| `In Review` | `Draft` | `approver_reject` | User is in Approver group; **user is not listed as Owner/SME on this DP** (segregation of duties); comment is provided (non-empty) | Append change log (includes reviewer's comment); add review comment to `review_comments` table |
 | `Approved` | `Draft Update` | `owner_update` | User is Owner/SME of this DP | Read approved YAML from Git, write working copy to volume; version stays at last approved MAJOR until first content save; append change log |
 | `Draft Update` | `Ready for Review` | `owner_submit` | User is Owner/SME of this DP; **strict validation passes** | Same atomic behavior — moves through to `In Review` in one step. Append change log. |
 | `Draft` / `Ready for Review` / `In Review` | `Cancelled` | `cancel` | User is Owner/SME of this DP **or** user is Admin; DP status is `In Definition` | Set DP status to `Cancelled`; append change log; release any active lock |
@@ -138,23 +138,31 @@ Implemented in `onepager_core/permissions.py`. Every service-layer method that m
 
 | Check | How it works |
 |---|---|
-| **Is the user authenticated?** | Guaranteed by Databricks Apps; if somehow not, reject immediately. |
-| **Coarse role** (Owner/SME, Approver, Admin, Viewer) | Resolved by checking UC group membership via Databricks SDK. Cached in session for the duration of the request. |
+| **Is the user authenticated and recognised?** | The username comes from the Databricks Apps proxy headers. `auth.py` derives the corporate initials using the configured domains, suffixes and initials pattern (Architecture §4). No username, or a username that does not match → no initials → access refused before any page runs. Every service method also refuses a user without initials. |
+| **Coarse role** (Owner/SME, Approver, Admin, Viewer) | Once per session, one SQL statement run **as the user** checks the configured role groups: `is_account_group_member(:g) OR is_member(:g)` for `ONE_PAGER_APP_GROUP_OWNER_SME`, `…_APPROVER`, `…_ADMIN` (interim default for all three: `BEC_BECOC001_LHX_{env}_DataPlatEng`). Stored in the session; no group → Viewer; a failed check → Viewer (fail closed). |
 | **Per-Data-Product ownership** | Extract user's initials from their Databricks identity (via `auth.py`). Query `one_pager_authorized_users` for the target One Pager to check if the user has an `owner` or `sme` role. This table is kept in sync with the One Pager YAML content and provides O(1) permission verification. |
+
+### Data access identity
+
+Reads run with the user's token; writes (and reads that are part of a write, such as the ID-sequence compare-and-set and the lock checks) run as the app's service principal (Architecture §8, Decision_Log §19). The connection makes the choice explicit on every statement (`identity=USER` / `APP`), and a test fails if a write statement is sent as the user. Because writes run as the service principal, **every write carries the acting user's initials** in the table's audit column or in the change-log entry of the same operation.
+
+A permission error on a **read** means the user's groups lack a grant: the user sees "Your role does not have access to … Contact the platform team." A permission error on a **write** means the service principal lacks a grant: it is logged as a deployment error and the user sees a generic error.
 
 ### Permission matrix (enforcement points)
 
 | Operation | Required role | Additional per-record check |
 |---|---|---|
 | View any One Pager | Any authenticated user | None |
-| Create new One Pager | Owner/SME UC group member | None (document doesn't exist yet) |
-| Edit One Pager (save content) | Owner/SME UC group member | User initials ∈ {owner, smes} of this DP |
-| Submit for review | Owner/SME UC group member | User initials ∈ {owner, smes} of this DP |
-| Approve / Reject | Approver UC group member | User initials ∉ {owner, smes} of this DP (segregation of duties — cannot approve/reject own OP) |
+| Create new One Pager | Owner/SME group member | None (document doesn't exist yet) |
+| Edit One Pager (save content) | Owner/SME group member | User initials ∈ {owner, smes} of this DP |
+| Submit for review | Owner/SME group member | User initials ∈ {owner, smes} of this DP |
+| Approve / Reject | Approver group member | User initials ∉ {owner, smes} of this DP (segregation of duties — cannot approve/reject own OP) |
 | Cancel (OP in Draft/Ready for Review/In Review) | Owner/SME of this DP **or** Admin | Owner: initials check; Admin: group check |
-| Change DP status (owner-initiated transitions) | Owner/SME UC group member | User initials ∈ {owner, smes} of this DP |
-| Manage Use Cases (create/edit) | Owner/SME UC group member | None (Use Cases are shared, any Owner/SME can manage) |
-| Admin actions (manage reference data, cancel any) | Admin UC group member | None |
+| Change DP status (owner-initiated transitions) | Owner/SME group member | User initials ∈ {owner, smes} of this DP |
+| Manage Use Cases (create/edit) | Owner/SME group member | None (Use Cases are shared, any Owner/SME can manage) |
+| Admin actions (manage reference data, cancel any) | Admin group member | None |
+
+"Group" means the Entra ID role group configured for the role (Architecture §4). Role membership is managed in Entra ID, not in the app.
 
 ### Enforcement pattern
 
@@ -271,9 +279,9 @@ Use Cases are a shared registry managed via `onepager_core/repository.py`.
 
 | Operation | Permission | Logic |
 |---|---|---|
-| `create_use_case(persona, goal, scenario, decision_enabled, priority, user)` | User is in Owner/SME UC group | Generate UC-### ID, insert row into `use_cases`, return the new ID. |
-| `edit_use_case(use_case_id, fields, user)` | User is in Owner/SME UC group | Update the row; set `last_updated_by`, `last_updated_at`. |
-| `deprecate_use_case(use_case_id, user)` | User is in Owner/SME UC group | Set `deprecated = true`. The Use Case remains in the table and in any referencing One Pagers — it simply can't be linked to new One Pagers. |
+| `create_use_case(persona, goal, scenario, decision_enabled, priority, user)` | User is in Owner/SME group | Generate UC-### ID, insert row into `use_cases`, return the new ID. |
+| `edit_use_case(use_case_id, fields, user)` | User is in Owner/SME group | Update the row; set `last_updated_by`, `last_updated_at`. |
+| `deprecate_use_case(use_case_id, user)` | User is in Owner/SME group | Set `deprecated = true`. The Use Case remains in the table and in any referencing One Pagers — it simply can't be linked to new One Pagers. |
 | `link_use_case(one_pager_id, use_case_id, user)` | User is Owner/SME of this DP | Insert row into `use_case_references`. Use Case must not be deprecated. |
 | `unlink_use_case(one_pager_id, use_case_id, user)` | User is Owner/SME of this DP | Delete row from `use_case_references`. |
 
@@ -343,7 +351,7 @@ If transition rules are later moved to a data-driven reference table (data model
 | `volume.py` | YAML file read/write on the UC external volume |
 | `git_integration.py` | Create PR on approval; check pending-PR status; retry failed PRs |
 | `id_generator.py` | Atomic ID generation for OP/UC/BR |
-| `auth.py` | Extract user initials from Databricks identity; resolve UC group membership |
+| `auth.py` | Extract corporate initials from the Databricks username (configurable domains, suffixes, initials pattern); build the current user with the display name from the directory (SCIM `Me`); resolve role-group membership |
 | `config.py` | Read runtime env vars (catalog, schema, volume path, secret scope) |
 | `audit.py` | Structured security-event logging |
 | `export.py` | PDF export rendering |

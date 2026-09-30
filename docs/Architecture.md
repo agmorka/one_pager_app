@@ -12,9 +12,9 @@ This document defines the technical architecture for the One Pager Application: 
 | UI | Streamlit (multipage app) |
 | Domain/service layer | Plain Python package, importable and unit-testable without Streamlit running |
 | Validation | JSON Schema validation (`jsonschema`) directly against `structure_one_pager_v_1.json`, applied in the lenient/strict tiers defined in the requirements doc §5 |
-| Data access | Databricks SDK / Databricks SQL connector for Delta tables; volume/file APIs for the YAML files; Git integration for the merge-to-`main` step (see §6) |
+| Data access | Databricks SDK / Databricks SQL connector for Delta tables; volume/file APIs for the YAML files; Git integration for the merge-to-`main` step (see §6). Delta reads run as the signed-in user, all writes as the app's service principal (see §8, "Data access identity") |
 | Storage | See §5 |
-| Auth | Databricks Apps native user identity, combined with Unity Catalog groups and per-record ownership checks (see §4) |
+| Auth | Databricks Apps native user identity, combined with Entra ID role groups and per-record ownership checks (see §4) |
 | CI/CD | Databricks Asset Bundles (DAB) + a standard CI pipeline (lint → unit tests → bundle validate → deploy) |
 
 **Deployment scope**: a single app instance serves all business domains. Business domain is a document attribute (used for filtering/reporting), not a deployment boundary.
@@ -50,23 +50,37 @@ Streamlit re-runs the entire page script on every widget interaction. This has d
 ## 4. Authentication & Authorization
 
 ### Identity
-The app uses Databricks Apps' native user authentication; the authenticated user's identity is available to every request and is the basis for all permission checks. Databricks usernames currently follow the pattern `<initials>ADM@BECOC001.onmicrosoft.com`, but this format is not guaranteed to stay stable — see the Fine-grained edit authorization section below for why the app does not rely on it alone.
+The app uses Databricks Apps' native user authentication; the authenticated user's identity is available to every request and is the basis for all permission checks.
+
+- **Source of identity.** When deployed, the username is taken only from the headers the Databricks Apps proxy sets (`x-forwarded-email` / `x-forwarded-preferred-username`). There is no fallback to a database lookup in deployed mode, because writes run as the service principal (see §8) and a wrong identity would be written into the audit columns. Locally, `local-integration` uses `SELECT current_user()` with the CLI profile and `local-mock` uses a configured mock user.
+- **Username format.** Usernames currently look like `x0wadm@becoc001.onmicrosoft.com`: the user's **corporate initials** (`X0W`), a suffix (`adm`) and the domain. The suffix may be dropped in the future (`x0w@…`) and the domain may change. The accepted domains, the suffixes to strip and the pattern for valid initials are therefore **settings**, not code (`ONE_PAGER_APP_USER_DOMAINS`, `ONE_PAGER_APP_USERNAME_SUFFIXES`, `ONE_PAGER_APP_INITIALS_PATTERN`). Lists are allowed so that old and new formats can be accepted side by side during a change.
+- **Corporate initials are not personal initials.** Corporate initials are assigned by the company, may contain digits (`X0W`) and can differ from a person's name initials (e.g. `AK`). Only corporate initials are used by the app.
+- **Fail closed.** A request without the proxy headers, or a username whose domain, suffix or initials do not match the settings (e.g. a guest or a service account), gets no initials and is refused with an "account not recognised" page. The app never guesses initials from an unrecognised username.
+- **Display name.** First name and surname are read once per session from the workspace directory (SCIM `Me` endpoint, called with the user's token). If no name is available, the initials are shown. The display name is used for display only (change log, YAML `createdBy`, review comments, locks, PDF); it is never used for authorization.
 
 ### Coarse-grained role (which of Owner / Approver / Admin / Viewer a user can act as)
-Backed by three Unity Catalog groups, one per role that isn't purely per-record:
-- **Owner/SME group** — all DP Owners/SMEs company-wide; gates the "Create New One Pager" action (general eligibility to be an owner/SME at all). This is separate from, and a prerequisite to, the per-Data-Product ownership check below, which governs editing a *specific* existing One Pager.
+Backed by three **Entra ID groups**, one per role that isn't purely per-record. Automatic identity management is enabled on the Databricks account, so Entra ID groups (including nested groups) are available in Databricks without a separate sync:
+- **Owner/SME group** — all DP Owners/SMEs company-wide; gates the "Create New One Pager" action and managing Use Cases (general eligibility to be an owner/SME at all). This is separate from, and a prerequisite to, the per-Data-Product ownership check below, which governs editing a *specific* existing One Pager.
 - **Approver group** — Nykredit reviewers
 - **Admin group** — Platform team representatives
-- Everyone else is implicitly a Viewer.
+- **Viewer** — every employee. There is no Viewer group: every signed-in, recognised user who is in none of the groups above is a Viewer. Access to the app itself is controlled by the Databricks App's `CAN_USE` permission.
 
-> Actual group names are **not yet decided** and should follow whatever Unity Catalog group naming convention the platform team already uses, rather than an invented scheme — to be confirmed in Step 3 (project structure & tooling) when provisioning is set up.
+A user may hold several roles (e.g. Approver in general and Owner of one One Pager); segregation of duties is checked per One Pager (see "Approval model").
 
-Using a UC group for the general Owner/SME population (rather than only per-record checks) closes a gap the per-record model alone doesn't cover: there is no existing document to check membership against before someone creates the *first* One Pager for a new Data Product. The group answers "is this person allowed to create One Pagers at all?"; the per-record check (below) answers "is this person allowed to edit *this* One Pager?"
+**How roles are resolved.** Once per session, one SQL statement run with the **user's** token checks the three groups (`is_account_group_member(<group>) OR is_member(<group>)`), so the check needs no extra permission for the app. The result is kept in the session; a membership change applies from the next session. If the check fails, the user is treated as a Viewer (fail closed).
+
+**Group names are settings** (`ONE_PAGER_APP_GROUP_OWNER_SME`, `ONE_PAGER_APP_GROUP_APPROVER`, `ONE_PAGER_APP_GROUP_ADMIN`). A `{env}` placeholder is replaced with the environment (`DEV`, `INT`, `UAT`, `PRD`).
+
+> **Interim groups.** The three role groups have not been created yet. Until they are, every role uses the Data Platform Engineering group of the environment, `BEC_BECOC001_LHX_{env}_DataPlatEng` (the default of all three settings). Members of that group act as Owner/SME, Approver and Admin; all other employees are Viewers. The app logs a warning and shows an "interim roles" notice while the default is in use. Switching to the real groups is a configuration change only.
+>
+> **Group membership** is managed in Entra ID by the owning team (for now the Data Platform Engineering team), not in the app.
+
+Using a group for the general Owner/SME population (rather than only per-record checks) closes a gap the per-record model alone doesn't cover: there is no existing document to check membership against before someone creates the *first* One Pager for a new Data Product. The group answers "is this person allowed to create One Pagers at all?"; the per-record check (below) answers "is this person allowed to edit *this* One Pager?"
 
 ### Fine-grained edit authorization (per Data Product)
 A user may create/edit a specific One Pager only if they match that document's `dataProductOwner` or one of its `smes` entries. The matching algorithm uses the `initials` field as the sole authorization key:
 
-1. Extract the authenticated user's corporate initials from their Databricks identity (e.g., from the username `MJOADM@BECOC001.onmicrosoft.com` → `MJO`). The extraction logic is isolated in the auth module so it can be updated if the username format changes.
+1. Extract the authenticated user's corporate initials from their Databricks identity (e.g., from the username `x0wadm@becoc001.onmicrosoft.com` → `X0W`), using the configured domains, suffixes and initials pattern (see "Identity"). The extraction logic is isolated in the auth module, and a change of the username format is a configuration change.
 2. Compare the extracted initials against the `initials` field of `dataProductOwner` and each entry in `smes`.
 3. If any `initials` value matches, access is **granted**. The `email` field is not checked for authorization — it is stored for display purposes and cross-reference only.
 
@@ -249,8 +263,20 @@ The application logs security-relevant events in a structured format for audit a
 
 These logs do not contain PII or field values — only user identifiers, record IDs, action names, and outcomes.
 
-### Shared service identity — audit-trail tradeoff
-All storage operations (volume, Delta, Git) are performed under a single app service identity. This means the underlying platform audit logs (Delta history, volume access logs, Git commit author) show only the service principal — not the actual human user. The application's own change log (requirements doc §7) is the primary record of who did what. This tradeoff is accepted for the current phase; if stronger independent audit trail is required, per-user delegation (on-behalf-of tokens) or an immutable audit table with checksums can be evaluated later.
+### Data access identity — reads as the user, writes as the service principal
+Platform rule: users have no direct privileges on Databricks resources; privileges are granted to groups. The app therefore uses two identities (Decision_Log §19):
+
+| Operation | Runs as | Why |
+|---|---|---|
+| Delta **reads** (Registry, Preview, change log, comments, locks, Use Cases, reference data, role check) | The signed-in **user**, with the token Databricks Apps forwards (`x-forwarded-access-token`, scope `sql`) | Unity Catalog stays a second line of defence: users only see what their groups may `SELECT`. |
+| Delta **writes** (`INSERT` / `UPDATE` / `DELETE` / `MERGE`), and reads that are part of a write (ID sequence compare-and-set, lock checks) | The app's **service principal** | Users get no `MODIFY` grant, so nobody can change the app's tables outside the app and bypass the workflow, validation or segregation of duties. |
+| Volume (YAML documents), Git | The app's **service principal** | Same reason; all One Pagers are readable by every user anyway. |
+
+**Grants.** The service principal has `SELECT` and `MODIFY` on the app tables, `READ VOLUME` and `WRITE VOLUME` on the registry volume, and `CAN_USE` on the warehouse. All employees (the `account users` group) have `SELECT` on the app tables and `CAN_USE` on the warehouse, and no write privileges. See [One_Pager_App_Infrastructure_Setup.md](One_Pager_App_Infrastructure_Setup.md).
+
+**Audit-trail tradeoff.** Because writes run as the service principal, platform logs (Delta history, volume access logs, Git commit author) show the service principal, not the person. The app's own audit columns (`created_by`, `last_updated_by`, `author_initials`, …, always the user's initials), the change log (requirements doc §7) and the security-event log are the record of who did what. Every write must therefore carry the acting user's initials. Reads, in contrast, appear under the user's own name in the platform audit logs.
+
+**Token lifetime.** The user's token is taken from the headers of the first connection of the Streamlit session. If it expires during a long session, reads fail with a clear "please reload the page" message; writes are not affected.
 
 ## 9. Notifications
 
@@ -262,7 +288,7 @@ Notifications are a future-release feature (requirements doc §12); no channel d
 |---|---|---|
 | 1 | Exact branch-protection rules on the target Git repository | Needed to confirm whether PR auto-merge (§6) is possible, or a human merge step is required. |
 | 2 | Expected scale (number of One Pagers, concurrent users) | Not yet specified; affects Delta table indexing/partitioning choices in Step 4. |
-| 3 | Actual Unity Catalog group names for Owner/SME, Approver, and Admin (§4) | Must follow the platform team's existing naming convention; not invented here. |
+| 3 | Actual Entra ID group names for Owner/SME, Approver, and Admin (§4) | Groups to be requested by the Data Platform Engineering team. Until then all three roles use `BEC_BECOC001_LHX_{env}_DataPlatEng`. Switching is a configuration change (`ONE_PAGER_APP_GROUP_*`). |
 | 4 | ~~PATCH version usage~~ | **Resolved:** reserved/unused in the current phase. If activated in the future, PATCH must be determined automatically by the application, never by user self-selection (requirements doc §7). |
 | 5 | Schema evolution strategy (v1 → v2) | How the app handles documents written against an older schema version; whether validation is pinned to the `structureDefinition` field; migration approach. To be resolved in Step 4 (data model). |
 | 6 | ~~Admin reference-data administration~~ | **Resolved:** reference data includes business domain list, data product types, and source systems. These are managed in-app via the Admin page (requirements doc §2), stored in dedicated Delta reference tables, and seeded via Liquibase. See data model doc for table definitions. |

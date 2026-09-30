@@ -106,7 +106,17 @@ user_api_scopes:
   - sql
 ```
 
-If this scope is missing (or not yet granted), `sql.connect()` fails with:
+The identity design (Architecture §4) also needs `iam.current-user:read`, used to read the signed-in user's first name and surname from the SCIM `Me` endpoint:
+
+```yaml
+user_api_scopes:
+  - sql
+  - iam.current-user:read
+```
+
+Only reads use the user's token; writes use the app's service principal (Architecture §8). The same re-authentication gotcha below applies when a scope is added.
+
+If the `sql` scope is missing (or not yet granted), `sql.connect()` fails with:
 
 ```
 RequestError: Error during request to server: : Provided OAuth token does not have required scopes: sql.

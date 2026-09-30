@@ -37,7 +37,8 @@ Pure `pytest` — no Streamlit, no Databricks connection, no network. Tests run 
 | `models.py` | `test_models.py` | Pydantic model serialization/deserialization round-trips; validates against schema |
 | `locking.py` | `test_locking.py` | Acquire/reuse/warn/reject/override logic based on user, session, expiry state (mock repository). Lock TTL is read from config (configurable for tests). |
 | `validation.py` (schema) | `test_schema.py` | JSON Schema edge cases: boundary values, optional vs required fields, enum validation, pattern matching for IDs |
-| `auth.py` | `test_auth.py` | Initials extraction from Databricks username (e.g. `MJOADM@BECOC001.onmicrosoft.com` → `MJO`); UC group membership resolution with mocked Databricks SDK responses; edge cases (unknown username format, missing groups) |
+| `auth.py` | `test_auth.py` | Initials extraction from the Databricks username with the configured domains, suffixes and pattern: `x0wadm@becoc001.onmicrosoft.com` → `X0W`, `x0w@becoc001.onmicrosoft.com` → `X0W` (empty suffix allowed), case-insensitive, changed domain via config, unknown domain / suffix only / invalid characters → no initials (never a guess). Display name from a mocked SCIM `Me` response, with fallback to the initials. Role resolution from mocked group-membership results: each group → role, no group → Viewer, failed check → Viewer, `{env}` placeholder resolved per environment |
+| `data_access/lakehouse.py` (identity) | `test_lakehouse_identity.py` | Every read method runs as the user and every write method (and every read inside a write, e.g. ID sequence, lock check) as the service principal; any `INSERT` / `UPDATE` / `DELETE` / `MERGE` sent as the user fails the test; a missing user token in `databricks` mode raises instead of falling back to the service principal; every write binds the acting user's initials |
 | `config.py` | `test_config.py` | Env var reading for all expected variables; missing required env var raises clear error; defaults applied where defined; invalid values handled gracefully |
 | `audit.py` | `test_audit.py` | Security event formatting (correct structure, no PII in output); verify events are logged for: failed permission checks, lock overrides, rejected edit attempts |
 | `export.py`, `pdf.py` | `test_export.py` | PDF writer: text encoding and wrapping, page breaks, valid PDF structure; export: every section rendered, Use Case resolution from mocked Delta, audit event, permission and not-found errors; Preview offers the download. Reading approved versions from Git is tested with the Git integration (Phase 8) |
@@ -48,7 +49,7 @@ Pure `pytest` — no Streamlit, no Databricks connection, no network. Tests run 
 ### Mocking strategy
 - Repository/Delta access → mocked via dependency injection (the service layer accepts a repository interface; tests pass a fake in-memory implementation).
 - Volume/YAML access → mocked (service layer accepts a volume interface; tests pass an in-memory dict).
-- Auth/UC groups → mocked (tests pass a fake `AuthenticatedUser` with desired role/initials).
+- Auth/role groups → mocked (tests pass a fake `CurrentUser` and role set; `MockDataAccess` returns group memberships from `ONE_PAGER_APP_MOCK_GROUPS`).
 - No `unittest.mock.patch` of internals — prefer constructor injection for clean, fast tests.
 
 ## 4. Integration Tests (`tests/integration/`)
