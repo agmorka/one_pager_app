@@ -101,6 +101,15 @@ Record every answer in [Decision_Log.md](../docs/Decision_Log.md).
 
 **Done when:** all unit tests pass, and in mock mode a user configured as `x0wadm@becoc001.onmicrosoft.com` can create and edit a One Pager with Owner initials `X0W`.
 
+**Status (2026-09-30): implemented.** Notes on the implementation:
+
+- The mock user default is `lduadm@mock.local` (not `ldu@mock.local`), so it is accepted with the default suffix `adm`.
+- The sample One Pagers and the `MockDataAccess` seed use 3-character initials (`ABR`, `BSM`, `CDA`, `DPI` instead of `AB`, `BS`, `CD`, `DP`). Tests build users with `tests/users.make_user` instead of parsing usernames.
+- Until Phase 2, an unrecognised username gets a `CurrentUser` with empty initials (and the username-based display name). Empty initials match no Owner, SME, Approver or Admin, and the Use Cases page refuses writes without initials.
+- A recognised user's display name is their initials until Phase 5 reads the name from the directory.
+- `permissions.extract_initials` was removed; the Use Cases page reads the initials from the session's `CurrentUser`.
+- The validation message and form hints say "3 letters or digits". If `ONE_PAGER_APP_INITIALS_PATTERN` is changed, update `INITIALS_RULE` in `validation.py` and the hints too.
+
 ## 6. Phase 2 — Trusted Identity Only, Fail Closed
 
 **Goal:** the app knows exactly who the user is, from the Databricks Apps proxy only, and refuses access otherwise. This matters more under Option B, because writes will run with the service principal's full rights.
