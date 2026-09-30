@@ -197,6 +197,7 @@ def _app(page: str, data_access: MockDataAccess) -> AppTest:
         "document_store": data_access._document_store,
         "current_user": user.username,
         "current_user_info": user,
+        "config": AppConfig(ONE_PAGER_APP_VOLUME_PATH="/Volumes/x"),
     }.items():
         at.session_state[key] = value
     return at

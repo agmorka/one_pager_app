@@ -77,6 +77,10 @@ def _current_user() -> str | None:
     return st.session_state.get("current_user")
 
 
+def _current_initials() -> str | None:
+    return extract_initials(_current_user(), st.session_state.config)
+
+
 def _used_by_label(count: int) -> str:
     return f"{count} OP" if count == 1 else f"{count} OPs"
 
@@ -155,7 +159,7 @@ def _render_use_case_form(data_access: DataAccess, existing: UseCase | None) -> 
         )
         return
 
-    initials = extract_initials(_current_user())
+    initials = _current_initials()
     try:
         with writes_data():
             if existing is None:
@@ -212,7 +216,7 @@ def _deprecate_dialog(
                 data_access.set_use_case_deprecated(
                     use_case.use_case_id,
                     deprecated=True,
-                    user_initials=extract_initials(_current_user()),
+                    user_initials=_current_initials(),
                 )
         except Exception:
             logger.exception("Failed to deprecate use case")
@@ -230,7 +234,7 @@ def _restore(data_access: DataAccess, use_case: UseCase) -> None:
             data_access.set_use_case_deprecated(
                 use_case.use_case_id,
                 deprecated=False,
-                user_initials=extract_initials(_current_user()),
+                user_initials=_current_initials(),
             )
     except Exception:
         logger.exception("Failed to restore use case")

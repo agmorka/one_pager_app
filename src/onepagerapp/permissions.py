@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 from onepagerapp.audit import log_permission_denied
 from onepagerapp.auth import initials_from_username
+from onepagerapp.config import AppConfig
 from onepagerapp.models import AuthorizedUser, CurrentUser, LockInfo
 from onepagerapp.state_machine import (
     APPROVED,
@@ -157,13 +158,13 @@ def can_release_lock(user: CurrentUser | None, lock: LockInfo | None) -> bool:
     return bool(user and lock and lock.locked_by_initials == user.initials)
 
 
-def extract_initials(user: str | None) -> str:
+def extract_initials(user: str | None, config: AppConfig) -> str | None:
     """Derive a user's corporate initials from their Databricks identity.
 
     Kept for the Use Cases page; the single implementation lives in
     ``auth.initials_from_username`` so every feature derives the same initials.
     """
-    return initials_from_username(user)
+    return initials_from_username(user, config)
 
 
 def can_manage_use_cases(current_user: str | None) -> bool:

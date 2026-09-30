@@ -373,7 +373,9 @@ if not st.session_state.get("services_initialized"):
 data_access: DataAccess = st.session_state.data_access
 current_user_info: CurrentUser = st.session_state.get(
     "current_user_info"
-) or resolve_current_user(st.session_state.get("current_user", "unknown"))
+) or resolve_current_user(
+    st.session_state.get("current_user", "unknown"), st.session_state.config
+)
 roles: frozenset[Actor] = st.session_state.get("current_user_roles", frozenset())
 
 st.title("Administration")

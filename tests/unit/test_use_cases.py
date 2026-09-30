@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from onepagerapp.config import AppConfig
 from onepagerapp.models import PRIORITY_OPTIONS, UseCaseInput, UseCasePage
 from onepagerapp.permissions import can_manage_use_cases, extract_initials
 from onepagerapp.use_cases import (
@@ -99,17 +100,16 @@ def test_format_use_case_id_rejects_out_of_range(value: int) -> None:
     ("user", "expected"),
     [
         ("MJOADM@BECOC001.onmicrosoft.com", "MJO"),
-        ("abadm@becoc001.onmicrosoft.com", "AB"),
-        ("MJO@bec.dk", "MJO"),
-        ("local-dev-user@mock", "LDU"),
-        ("alice.brown@company.com", "AB"),
-        ("charlie", "CHA"),
-        (None, "??"),
-        ("", "??"),
+        ("x0wadm@becoc001.onmicrosoft.com", "X0W"),
+        ("MJO@bec.dk", None),
+        ("alice.brown@company.com", None),
+        (None, None),
+        ("", None),
     ],
 )
-def test_extract_initials(user: str | None, expected: str) -> None:
-    assert extract_initials(user) == expected
+def test_extract_initials(user: str | None, expected: str | None) -> None:
+    config = AppConfig(ONE_PAGER_APP_VOLUME_PATH="/Volumes/x")
+    assert extract_initials(user, config) == expected
 
 
 @pytest.mark.unit

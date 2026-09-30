@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from streamlit.testing.v1 import AppTest
 
+from onepagerapp.config import AppConfig
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import UseCaseFilter, UseCaseInput, UseCasePage
@@ -28,6 +29,7 @@ def _app(
 ) -> AppTest:
     at = AppTest.from_file(PAGE, default_timeout=30)
     at.session_state["data_access"] = data_access
+    at.session_state["config"] = AppConfig(ONE_PAGER_APP_VOLUME_PATH="/Volumes/x")
     if user:
         at.session_state["current_user"] = user
     return at.run()

@@ -81,7 +81,7 @@ def resolve_user() -> None:
     except Exception:
         logger.exception("Failed to retrieve current user")
         return
-    user = resolve_current_user(username)
+    user = resolve_current_user(username, st.session_state.config)
     st.session_state.current_user = username
     st.session_state.current_user_info = user
     st.session_state.current_user_roles = resolve_roles(
