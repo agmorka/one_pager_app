@@ -26,11 +26,23 @@ import streamlit as st
 
 from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.base import DataAccess
+from onepagerapp.export import (
+    BUSINESS_CONCEPT_COLUMNS,
+    CDE_LINEAGE_COLUMNS,
+    CDE_QUALITY_COLUMNS,
+    DATA_ELEMENT_COLUMNS,
+    DATA_SOURCE_COLUMNS,
+    OPEN_QUESTION_COLUMNS,
+    REQUIREMENT_COLUMNS,
+    RETENTION_COLUMNS,
+    USE_CASE_COLUMNS,
+    cell_text,
+    resolve_use_cases,
+)
 from onepagerapp.locking import active_lock, release_lock
 from onepagerapp.models import (
     CurrentUser,
     LockInfo,
-    OnePagerDocument,
     PreviewData,
     ReviewComment,
 )
@@ -49,6 +61,7 @@ from adapters.workflow_actions import (
     approve_and_report,
     cancel_and_report,
     change_dp_status_and_report,
+    export_pdf_and_report,
     reject_and_report,
     resolve_comment_and_report,
     update_and_report,
@@ -183,24 +196,13 @@ def _table(rows: list[dict], columns: dict[str, str]) -> pd.DataFrame:
 
     Args:
         rows: List items as stored in the document.
-        columns: Document key → column label, in display order. A key may list
-            fallbacks separated by "|" (first non-empty wins), for v1 documents.
+        columns: Document key → column label, in display order (the column
+            definitions of ``onepagerapp.export``, shared with the PDF).
     """
     # Cells are always strings: a column mixing e.g. booleans with "" for
     # missing values cannot be serialized to Arrow by st.dataframe.
-    def cell(row: dict, keys: str) -> str:
-        for key in keys.split("|"):
-            value = row.get(key)
-            if value not in (None, "", []):
-                if isinstance(value, list):
-                    return ", ".join(map(str, value))
-                if isinstance(value, bool):
-                    return "Yes" if value else "No"
-                return str(value)
-        return ""
-
     return pd.DataFrame(
-        [{label: cell(row, keys) for keys, label in columns.items()} for row in rows],
+        [{label: cell_text(row, keys) for keys, label in columns.items()} for row in rows],
         columns=list(columns.values()),
     )
 
@@ -217,100 +219,6 @@ def _show_list(items: list[str], empty: str) -> None:
         st.markdown("\n".join(f"- {item}" for item in items))
     else:
         st.write(f"*{empty}*")
-
-
-def resolve_use_cases(data_access: DataAccess, doc: OnePagerDocument) -> list[dict]:
-    """Rows for the Use Cases table, resolved from the shared use_cases table.
-
-    v2 documents hold only ``useCaseId`` references (Data_Model.md §5); their
-    content is looked up here. v1 documents hold inline objects, shown as-is.
-    A reference that cannot be resolved still shows its ID.
-    """
-    rows: list[dict] = []
-    for item in doc.use_cases:
-        use_case_id = item.get("useCaseId")
-        if not use_case_id:
-            rows.append(item)
-            continue
-        try:
-            use_case = data_access.get_use_case(use_case_id)
-        except Exception:
-            logger.exception(f"Failed to resolve Use Case {use_case_id}")
-            use_case = None
-        if use_case is None:
-            rows.append({"useCaseId": use_case_id, "persona": "(not available)"})
-            continue
-        rows.append(
-            {
-                "useCaseId": use_case.use_case_id,
-                "persona": use_case.persona,
-                "goal": use_case.goal,
-                "decisionEnabled": use_case.decision_enabled,
-                "priority": use_case.priority,
-                "deprecated": use_case.deprecated,
-            }
-        )
-    return rows
-
-
-USE_CASE_COLUMNS = {
-    "useCaseId": "ID",
-    "persona": "Persona",
-    "goal": "Goal",
-    "decisionEnabled": "Decision Enabled",
-    "priority": "Priority",
-    "deprecated": "Deprecated",
-}
-REQUIREMENT_COLUMNS = {
-    "id": "ID",
-    "requirement|description": "Requirement",
-    "priority": "Priority",
-    "notes": "Notes",
-}
-DATA_SOURCE_COLUMNS = {
-    "name|sourceName": "Name",
-    "sourceSystem|sourceType": "Source System",
-    "epoId": "EPO ID",
-    "dataProvided|description": "Data Provided",
-    "refreshFrequency": "Refresh Frequency",
-}
-DATA_ELEMENT_COLUMNS = {
-    "elementName": "Element",
-    "dataType": "Type",
-    "isPrimaryKey": "PK",
-    "containsPII": "PII",
-    "isCriticalDataElement": "CDE",
-    "cdeCriticalityTiering": "CDE Tier",
-    "description": "Description",
-    "example": "Example",
-    "source": "Source",
-    "useCaseLinks": "Use Cases",
-}
-RETENTION_COLUMNS = {
-    "dataCategory": "Data Category",
-    "retentionPeriod": "Retention Period",
-    "legalBasis": "Legal Basis",
-}
-BUSINESS_CONCEPT_COLUMNS = {"name": "Concept", "definition": "Definition"}
-CDE_QUALITY_COLUMNS = {
-    "elementName": "Element",
-    "dimension": "Dimension",
-    "rule": "Rule",
-    "threshold": "Threshold",
-}
-CDE_LINEAGE_COLUMNS = {
-    "elementName": "Element",
-    "sourceSystem": "Source System",
-    "sourceField": "Source Field",
-    "transformation": "Transformation",
-}
-OPEN_QUESTION_COLUMNS = {
-    "question": "Question",
-    "owner": "Owner",
-    "dueDate": "Due",
-    "status": "Status",
-    "answer": "Answer",
-}
 
 
 def render_content_sections(preview_data: PreviewData, use_case_rows: list[dict]) -> None:
@@ -774,6 +682,36 @@ def render_review_banner(one_pager_id: str) -> None:
         st.switch_page("views/review.py")
 
 
+@st.dialog("Export PDF")
+def export_pdf_dialog(
+    data_access: DataAccess,
+    one_pager_id: str,
+    user: CurrentUser,
+    status_colors: dict[str, str],
+) -> None:
+    """Render the PDF (Backend_Design.md §10) and offer it for download."""
+    with st.spinner("Creating the PDF..."):
+        export, error = export_pdf_and_report(
+            data_access, one_pager_id, user, status_colors
+        )
+    if error or export is None:
+        st.error(error or "The PDF could not be created. Please retry.", icon="⚠️")
+        return
+    st.write(
+        "The PDF contains every section of the current version, with its Use "
+        "Cases and change log."
+    )
+    st.download_button(
+        f"⬇️ Download {export.filename}",
+        data=export.content,
+        file_name=export.filename,
+        mime="application/pdf",
+        key="preview_download_pdf",
+        type="primary",
+        use_container_width=True,
+    )
+
+
 @st.dialog("Change Data Product status")
 def change_dp_status_dialog(
     data_access: DataAccess,
@@ -823,6 +761,7 @@ def render_action_bar(
     user: CurrentUser,
     authorized_initials: set[str],
     roles: frozenset[Actor] = frozenset(),
+    status_colors: dict[str, str] | None = None,
 ) -> None:
     """Render the action button bar.
 
@@ -835,6 +774,7 @@ def render_action_bar(
         user: The current user.
         authorized_initials: Initials of the Owner/SMEs of this One Pager.
         roles: Group roles of the user (Approver, Admin).
+        status_colors: Badge colors of the OP and DP statuses, for the PDF.
     """
     header = preview_data.header
     actions = get_action_states(
@@ -884,6 +824,10 @@ def render_action_bar(
             header.one_pager_id,
             user,
             roles,
+        )
+    elif clicked == "export_pdf":
+        export_pdf_dialog(
+            data_access, header.one_pager_id, user, status_colors or {}
         )
     elif clicked == "change_dp_status":
         row = data_access.get_one_pager_status_row(header.one_pager_id)
@@ -988,6 +932,7 @@ render_action_bar(
     current_user_info,
     authorized_initials,
     current_roles,
+    {**dp_colors, **op_colors},
 )
 
 st.divider()

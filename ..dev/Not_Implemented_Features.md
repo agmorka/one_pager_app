@@ -63,7 +63,7 @@ The Editor has create mode and, from Phase 4, edit mode. Missing:
 | 4.1 | Coarse role resolution from **Unity Catalog group membership** (Owner/SME, Approver, Admin, Viewer). Today every authenticated user may create One Pagers and manage Use Cases. **Interim (Phase 6):** `auth.resolve_roles` gives Approver/Admin from the initials in `ONE_PAGER_APP_APPROVERS` / `ONE_PAGER_APP_ADMINS`; switching to UC groups only changes that function |
 | 4.2 | ~~Per-record check: `check_can_edit` against `one_pager_authorized_users`~~ **Done (Phase 4, step 17):** `permissions.check_can_edit` / `edit_denied_reason` (Owner/SME and status `Draft` / `Draft Update`); the Owner/SME UC group check still waits for 4.1 |
 | 4.3 | ~~Real `get_action_states`. Today every action is hard-coded as disabled.~~ **Done (Phase 5):** derived from `TRANSITIONS` guards; actions whose service is not built yet stay disabled ("coming soon"). Approver/Admin roles wait for 4.1 |
-| 4.4 | Pages hidden or shown by role (Review for Approvers only, Admin for Admins only, Editor for Owner/SME only) |
+| 4.4 | Pages hidden or shown by role (Review for Approvers only, Admin for Admins only, Editor for Owner/SME only). **Partly done:** Review (Phase 6) and Admin (Phase 10) are shown by role; the Editor stays registered for everyone (UI_Design §2) |
 | 4.5 | Role badge next to the user in the sidebar |
 
 ## 5. Concurrency control / locking (Req §10, Backend §6)
@@ -102,24 +102,24 @@ There is no `git_integration.py`.
 
 | # | Feature |
 |---|---|
-| 8.1 | `export.py`: render all sections to PDF with resolved Use Cases. The library (`weasyprint` or `fpdf2`) is not chosen yet. |
-| 8.2 | Enable the **Export PDF** button in Preview |
+| 8.1 | ~~`export.py`: render all sections to PDF with resolved Use Cases. The library (`weasyprint` or `fpdf2`) is not chosen yet.~~ **Done (Phase 9):** `export.export_one_pager_pdf`, rendered by the built-in writer `onepagerapp/pdf.py` (no new dependency, Decision_Log §18). Reads the current version like Preview; reading approved versions from Git waits for 7.3 |
+| 8.2 | ~~Enable the **Export PDF** button in Preview~~ **Done (Phase 9):** enabled for every user and status; opens a dialog with the download |
 
 ## 9. Help page (Req §11, UI §4.6)
 
 | # | Feature |
 |---|---|
-| 9.1 | Help page (`6_Help.py`): lifecycle explanation, OP/DP state diagrams, valid-combinations table, roles, workflow quick reference, badge legend |
+| 9.1 | ~~Help page (`6_Help.py`): lifecycle explanation, OP/DP state diagrams, valid-combinations table, roles, workflow quick reference, badge legend~~ **Done (Phase 10):** `app/views/help.py`, content in `onepagerapp/help_content.py`; Graphviz diagrams and tables built from `get_workflow_reference`; visible to everyone |
 | 9.2 | ~~Service method that returns the serialized transitions for the Help page (Backend §14)~~ **Done (Phase 5):** `workflow.get_workflow_reference` |
 
 ## 10. Admin page (UI §4.7)
 
 | # | Feature |
 |---|---|
-| 10.1 | Admin page (`7_Admin.py`), restricted to Admins |
-| 10.2 | CRUD for reference data: business domains, product types, **source systems** (no `ref_source_systems` table/DDL exists yet) |
-| 10.3 | View and edit status definitions (`ref_op_status` / `ref_dp_status`) |
-| 10.4 | Pending PRs table with **Retry PR** |
+| 10.1 | ~~Admin page (`7_Admin.py`), restricted to Admins~~ **Done (Phase 10):** `app/views/admin.py`, service `onepagerapp/admin.py`; in the navigation for Admins only, others see "You don't have access to this page." |
+| 10.2 | ~~CRUD for reference data: business domains, product types, **source systems** (no `ref_source_systems` table/DDL exists yet)~~ **Done (Phase 10):** add, reorder, deactivate/reactivate, delete while unused; `ref_source_systems` Liquibase changeset. The Data Sources tab keeps `sourceSystem` as free text for now |
+| 10.3 | ~~View and edit status definitions (`ref_op_status` / `ref_dp_status`)~~ **Done (Phase 10):** display label, order and badge color |
+| 10.4 | Pending PRs table with **Retry PR**. **Partly done (Phase 10):** the **Pending PRs** section lists `pending_pr = true` rows (`admin.get_pending_prs`); **Retry PR** is shown disabled until 7.1–7.2 create PRs and set the flag |
 
 ## 11. Registry gaps (Req §3, UI §4.1)
 
@@ -135,7 +135,7 @@ There is no `git_integration.py`.
 | # | Feature |
 |---|---|
 | 12.1 | ~~Content sections that are not rendered: **Governance artifacts**, **Out of Scope**, **Open Questions** and **Assumptions**. `OnePagerDocument` does not model these fields either. Use Case IDs (`UC-###`) and BR IDs are not shown.~~ **Done (Phase 1):** modelled in `OnePagerDocument` (v2 schema) and rendered in Preview |
-| 12.2 | Role- and status-dependent actions: Edit, Update, Change DP Status dropdown, Approve, Reject, Cancel, Add Comment, Resolve, Release lock, Export PDF. **Partly done (Phase 5):** the Preview action bar only shows the actions that apply to the user's role and the statuses; Edit and Release lock work. **Phase 6:** every action works except Export PDF (Phase 9) |
+| 12.2 | Role- and status-dependent actions: Edit, Update, Change DP Status dropdown, Approve, Reject, Cancel, Add Comment, Resolve, Release lock, Export PDF. **Partly done (Phase 5):** the Preview action bar only shows the actions that apply to the user's role and the statuses; Edit and Release lock work. **Phase 6:** every action works except Export PDF. **Phase 9:** Export PDF works |
 | 12.3 | ~~Error states show raw exception text (`st.error(f"... {e}")`). The docs require a friendly message and a Retry button, with no internals shown.~~ **Done (Phase 0)** |
 | 12.4 | ~~Opening Preview without an ID silently defaults to `OP-0001`~~ **Done (Phase 0):** Preview asks the user to pick a One Pager from the Registry |
 
@@ -263,19 +263,19 @@ This phase is left until the lifecycle is stable, because it depends on external
 | 40 | 7.2 `pending_pr` flag and retry | Needed once PR creation can fail |
 | 41 | 7.3 Read the approved YAML from Git (for Update and export) | Replaces the volume read in Update (1.5) |
 
-### Phase 9: PDF export
+### Phase 9: PDF export — ✅ done
 
 | Order | Item | Why now |
 |---|---|---|
-| 42 | 8.1 `export.py` (choose `weasyprint` or `fpdf2`), 8.2 enable **Export PDF** | Needs every section modelled (Phase 1). Can move earlier if stakeholders ask for it, because it depends only on Phase 1 |
+| 42 | ~~8.1 `export.py` (choose `weasyprint` or `fpdf2`), 8.2 enable **Export PDF**~~ **Done** | Needs every section modelled (Phase 1). Can move earlier if stakeholders ask for it, because it depends only on Phase 1 |
 
-### Phase 10: Help and Admin pages
+### Phase 10: Help and Admin pages — ✅ done (Retry PR waits for Phase 8)
 
 | Order | Item | Why now |
 |---|---|---|
-| 43 | 9.1 Help page | Describes the final lifecycle, using 9.2 |
-| 44 | 10.1 Admin page, 10.3 status definitions, 10.2 reference-data CRUD (including the `ref_source_systems` Liquibase changeset) | `sourceSystem` is free text in the schema today, so the Data Sources tab does not need this table first |
-| 45 | 10.4 Pending PRs table with **Retry PR** | Needs 7.2 |
+| 43 | ~~9.1 Help page~~ **Done** | Describes the final lifecycle, using 9.2 |
+| 44 | ~~10.1 Admin page, 10.3 status definitions, 10.2 reference-data CRUD (including the `ref_source_systems` Liquibase changeset)~~ **Done** | `sourceSystem` is free text in the schema today, so the Data Sources tab does not need this table first |
+| 45 | 10.4 Pending PRs table with **Retry PR** — **table done**; Retry PR is disabled until 7.2 lands | Needs 7.2 |
 
 ### Phase 11: Hardening
 

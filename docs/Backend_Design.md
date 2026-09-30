@@ -281,15 +281,15 @@ Any Owner/SME can create/edit/deprecate any Use Case (they are a shared resource
 
 ## 10. PDF Export Service
 
-Implemented in `onepager_core/export.py`.
+Implemented in `onepagerapp/export.py`, rendered by the dependency-free PDF writer `onepagerapp/pdf.py` ([Decision_Log.md](Decision_Log.md) §18).
 
 ### Flow
 1. Determine which copy of the document to read:
-   - If OP status is `Approved` and no volume copy exists → read from Git `main`.
-   - Otherwise → read from the UC volume.
+   - If OP status is `Approved` and no volume copy exists → read from Git `main` (with the Git integration, Phase 8).
+   - Otherwise → read from the UC volume. Until the Git integration exists, the current version is always read from the volume.
 2. Resolve Use Case references: join UC IDs from the YAML against the `use_cases` Delta table to get full content.
-3. Render the complete One Pager (all sections) into a PDF using the chosen library (`weasyprint` or `fpdf2`).
-4. Return the PDF bytes to the UI for download.
+3. Render the complete One Pager (all sections, then the change log) into an A4 PDF.
+4. Return the PDF bytes to the UI for download (`<OP-ID>_v<version>.pdf`). Each export is logged as an `export_pdf` security event.
 
 No special permissions beyond authentication — any user who can view a One Pager can export it to PDF (consistent with universal read access).
 

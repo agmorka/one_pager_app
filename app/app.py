@@ -17,7 +17,7 @@ from onepagerapp.config import AppConfig
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.data_access import create_data_access
 from onepagerapp.data_access.factory import create_document_store
-from onepagerapp.permissions import can_review
+from onepagerapp.permissions import can_administer, can_review
 from onepagerapp.state_machine import Actor
 
 logger = logging.getLogger(__name__)
@@ -93,7 +93,10 @@ ROLE_LABELS = {Actor.APPROVER: "Approver", Actor.ADMIN: "Admin"}
 
 
 def navigation_entries(roles: frozenset[Actor]) -> list[tuple[str, str]]:
-    """(script, title) of the sidebar pages; Review only for Approvers (UI §2)."""
+    """(script, title) of the sidebar pages (UI §2).
+
+    Review only for Approvers, Admin only for Admins.
+    """
     entries = [
         ("views/registry.py", "Registry"),
         ("views/preview.py", "Preview"),
@@ -102,6 +105,9 @@ def navigation_entries(roles: frozenset[Actor]) -> list[tuple[str, str]]:
     if can_review(roles):
         entries.append(("views/review.py", "Review"))
     entries.append(("views/use_cases.py", "Use Cases"))
+    entries.append(("views/help.py", "Help"))
+    if can_administer(roles):
+        entries.append(("views/admin.py", "Admin"))
     return entries
 
 

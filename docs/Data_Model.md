@@ -332,6 +332,8 @@ The following three tables store reference data managed by the Admin via the Adm
 | Column | Type | Nullable | Description |
 |---|---|---|---|
 | `system_name` | STRING | No | PK. Source system name. |
+
+Created by the Liquibase changeset `ddl/ref_source_systems.sql`.
 | `sort_order` | INT | No | Display ordering. |
 | `active` | BOOLEAN | No | Default `true`. |
 

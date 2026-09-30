@@ -395,3 +395,18 @@ Deleting `change_log` rows is permitted only in this compensation path, for an O
 - Every app-layer write that can change these lists runs inside `writes_data()`: create, Save Draft, Submit, Approve, Reject, Cancel, Update, DP status changes, and Use Case create, edit, deprecate and restore (including the editor's inline create). It clears the three caches for all sessions when the write ends, **also when it fails**, because a failed write may have changed some rows before it rolled back. Review comments and locks do not change the lists, so they do not clear them.
 
 **Why:** Clearing on write keeps a user's own change visible at once. Other app instances (replicas) see the change within the TTL. Clearing the whole cache is cheap, because writes are rare compared to Registry reads.
+
+---
+
+## 18. PDF Export Without a Third-Party PDF Library
+
+**Context:** Backend_Design §10 and Project_Structure open item #8 left the PDF library open: `weasyprint` or `fpdf2`. `weasyprint` needs native libraries (Pango, cairo) that the Databricks Apps runtime does not guarantee. `fpdf2` is pure Python but pulls in `fonttools`, `defusedxml` and `Pillow`, and every new package has to be available in the approved Artifactory index before the app can be deployed.
+
+**Decision:** Neither library. `onepagerapp/pdf.py` is a small PDF 1.4 writer built on the standard library (`zlib` for compression) and the standard Helvetica fonts, which every PDF reader has built in, so no font files are embedded. It supports exactly what the export needs: a title band, headings, wrapped paragraphs, "Label: value" lines, bullet lists, colored status badges (always with their text) and a page footer with "Page n of N". `onepagerapp/export.py` lays out the One Pager with it:
+
+- A4, every section in editor-tab order, then the change log. Review comments are left out: they are part of the review conversation, not the business-facing document.
+- Table sections (Use Cases, requirements, data elements, …) are printed as one block per row, the first column as its title and the other non-empty columns as labelled lines. The data element grid has ten columns, which do not fit an A4 page as a table.
+- Text is encoded as WinAnsi (cp1252). That covers Danish and the other Western European letters; other characters are replaced by an ASCII form (`→` becomes `->`) or `?`.
+- The export reads the current version the way Preview does. Reading an approved version from Git comes with the Git integration (Phase 8, item 7.3).
+
+**Why:** No new dependency to approve, install or keep patched, and the output is predictable and fully unit-tested (the tests read the uncompressed page contents). The cost is a fixed, simple layout and no characters outside WinAnsi. If richer layout or full Unicode is needed later, `export.py` is the only caller of `pdf.py`, so switching to `fpdf2` changes those two modules only.

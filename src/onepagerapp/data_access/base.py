@@ -29,6 +29,40 @@ class NotFoundError(LookupError):
     """The requested record does not exist."""
 
 
+# Admin-managed reference tables (Data_Model.md §7) → their key column. Each
+# row has the key, ``sort_order`` and ``active``. Only these names are ever
+# formatted into SQL.
+REFERENCE_TABLES: dict[str, str] = {
+    "ref_business_domains": "domain",
+    "ref_data_product_types": "type",
+    "ref_source_systems": "system_name",
+}
+
+# Status definition tables (Data_Model.md §3): the statuses themselves are
+# fixed by the state machine; only their display columns are editable.
+STATUS_TABLES: tuple[str, ...] = ("ref_op_status", "ref_dp_status")
+
+
+def check_reference_table(table: str) -> str:
+    """Return the key column of an Admin-managed reference table.
+
+    Raises:
+        ValueError: ``table`` is not one of ``REFERENCE_TABLES``.
+
+    """
+    if table not in REFERENCE_TABLES:
+        msg = f"Unknown reference table {table!r}"
+        raise ValueError(msg)
+    return REFERENCE_TABLES[table]
+
+
+def check_status_table(table: str) -> None:
+    """Raise ``ValueError`` unless ``table`` is one of ``STATUS_TABLES``."""
+    if table not in STATUS_TABLES:
+        msg = f"Unknown status table {table!r}"
+        raise ValueError(msg)
+
+
 class DataAccess(ABC):
     """Interface for accessing application data."""
 
@@ -69,17 +103,94 @@ class DataAccess(ABC):
 
     @abstractmethod
     def get_ref_business_domains(self) -> pd.DataFrame:
-        """Get valid business domain values.
-        
-        Returns DataFrame with columns: domain, display_label, sort_order
+        """Get the business domain values (active and inactive).
+
+        Returns DataFrame with columns: domain, sort_order, active
         """
         ...
 
     @abstractmethod
     def get_ref_data_product_types(self) -> pd.DataFrame:
-        """Get valid data product type values.
-        
-        Returns DataFrame with columns: type, display_label, sort_order
+        """Get the data product type values (active and inactive).
+
+        Returns DataFrame with columns: type, sort_order, active
+        """
+        ...
+
+    @abstractmethod
+    def get_ref_source_systems(self) -> pd.DataFrame:
+        """Get the known source systems (active and inactive).
+
+        Returns DataFrame with columns: system_name, sort_order, active
+        """
+        ...
+
+    def get_reference_values(self, table: str) -> pd.DataFrame:
+        """Rows of one ``REFERENCE_TABLES`` table, by its name."""
+        check_reference_table(table)
+        readers = {
+            "ref_business_domains": self.get_ref_business_domains,
+            "ref_data_product_types": self.get_ref_data_product_types,
+            "ref_source_systems": self.get_ref_source_systems,
+        }
+        return readers[table]()
+
+    # ========================================================================
+    # Admin: Reference Data (UI_Design.md §4.7)
+    # ========================================================================
+
+    @abstractmethod
+    def insert_reference_value(
+        self, table: str, value: str, *, sort_order: int, active: bool
+    ) -> bool:
+        """Add a row to a ``REFERENCE_TABLES`` table, unless the key exists.
+
+        Returns:
+            True if the row was added, False if a row with this key exists.
+
+        """
+        ...
+
+    @abstractmethod
+    def update_reference_value(
+        self, table: str, value: str, *, sort_order: int, active: bool
+    ) -> bool:
+        """Change ``sort_order`` and ``active`` of a reference row.
+
+        Returns:
+            True if the row exists and was updated, False otherwise.
+
+        """
+        ...
+
+    @abstractmethod
+    def delete_reference_value(self, table: str, value: str) -> bool:
+        """Delete a reference row.
+
+        Returns:
+            True if a row was deleted, False if it did not exist.
+
+        """
+        ...
+
+    @abstractmethod
+    def update_status_definition(
+        self,
+        table: str,
+        status: str,
+        *,
+        display_label: str,
+        sort_order: int,
+        badge_color: str,
+    ) -> bool:
+        """Change the display columns of a ``STATUS_TABLES`` row.
+
+        ``status`` and ``is_terminal`` never change: the state machine owns
+        them.
+
+        Returns:
+            True if the row exists and was updated, False otherwise.
+
         """
         ...
 
@@ -368,6 +479,15 @@ class DataAccess(ABC):
         Read fresh (never cached). Sorted by ``last_updated_at``, oldest first
         (for ``In Review`` that is the submission time: nothing else changes
         the row while it waits for review).
+        """
+        ...
+
+    @abstractmethod
+    def get_pending_pr_rows(self) -> list[OnePagerStatusRow]:
+        """Return the ``one_pager_status`` rows with ``pending_pr = true``.
+
+        Approved One Pagers whose Git PR could not be created (Backend §8).
+        Read fresh (never cached), oldest approval first.
         """
         ...
 

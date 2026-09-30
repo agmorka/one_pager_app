@@ -8,6 +8,8 @@ databaseChangeLog:
         file: ddl/ref_business_domains.sql
     - include:
         file: ddl/ref_data_product_types.sql
+    - include:
+        file: ddl/ref_source_systems.sql
 
     # ID counters (OP-####, UC-###, BR-###)
     - include:

@@ -332,6 +332,8 @@ Content sections are rendered as collapsible blocks (`st.expander`), each showin
 
 **[Update] confirmation dialog:** When the Owner clicks [Update] on an Approved One Pager, a confirmation dialog appears: "This will create a working copy for editing. The current approved version remains in Git until you complete the review cycle. Proceed?" [Confirm] / [Cancel].
 
+**[Export PDF]:** Opens a dialog that renders the PDF of the current version and offers it as a download (`OP-0001_v1.0.0.pdf`). Available to every user, for every status.
+
 **[Change DP Status] dropdown:** Shows only the valid transitions from the current DP status (per backend state machine). Destructive transitions (e.g. `Active → Deprecated`) show a confirmation dialog before executing.
 
 #### States
@@ -398,8 +400,10 @@ Same pattern: Loading / Populated / Empty / Error.
 
 Data is read from `ref_op_status` / `ref_dp_status` tables for badge colors/labels, and the transition rules are rendered from the service layer's serialized `TRANSITIONS` dict (per backend design §13).
 
+Implemented in `app/views/help.py` with its content in `onepagerapp/help_content.py`. Streamlit 1.38 cannot render Mermaid, so the state diagrams are Graphviz (`st.graphviz_chart`) built from the transitions: nodes in their badge colors, final statuses double-bordered, automatic transitions dashed. Each diagram has an expander with the full transition table (who, conditions).
+
 #### States
-This page is largely static content — no Loading/Empty states needed. Error state only if Delta tables are unreachable.
+This page is largely static content — no Loading/Empty states needed. Error state only if Delta tables are unreachable: a warning with Retry, and the page is still shown with gray badges.
 
 ---
 
@@ -432,6 +436,16 @@ This page is largely static content — no Loading/Empty states needed. Error st
 - **Reference data management:** CRUD tables for business domains, product types, source systems (once these reference tables are defined — see data model open item #5).
 - **Status definitions:** View/edit `ref_op_status` and `ref_dp_status` (display labels, colors, ordering).
 - **Pending PRs:** Table of One Pagers where `pending_pr = true`, with a [Retry PR] button per row.
+
+Implemented in `app/views/admin.py` with the service `onepagerapp/admin.py`. The section menu is a horizontal selector above the section (the sections use columns themselves, and Streamlit allows one level of nested columns). Reference data rules:
+
+- A value's name is its key and One Pagers store it, so it is never renamed: add the new name and deactivate the old one.
+- **Deactivate** keeps the value on the One Pagers that use it; it is no longer offered for new choices in the Editor.
+- **Delete** is only possible while no One Pager uses the value (usage is counted for business domains and product types; source systems are free text in the documents, so their usage is not tracked).
+- Status definitions: only the display label, order and badge color change. The statuses and whether they are final belong to the state machine.
+- Every change is logged as a security event and clears the cached reference data, so the Editor and Registry show it at once.
+
+**Pending PRs** lists the rows with `pending_pr = true`, oldest approval first (ID, product, version, approved at/by). **Retry PR** is shown per row but stays disabled until the Git integration exists (Phase 8, items 7.1–7.2): nothing creates PRs or sets `pending_pr` yet, so the list is empty in practice.
 
 #### States
 Same pattern: Loading / Populated / Error. Restricted to Admin role — other users see "You don't have access to this page."
@@ -490,6 +504,6 @@ Implemented in `app/adapters/cache.py`: the Registry list, its status counts and
 | # | Item | Notes |
 |---|---|---|
 | 1 | Exact Streamlit components for multi-tab editor | `st.tabs` vs. `st.radio` sidebar — depends on Streamlit version available in Databricks Apps runtime. |
-| 2 | PDF export template/styling | Layout, fonts, page structure for the exported PDF — to be designed during implementation. |
+| 2 | ~~PDF export template/styling~~ | **Resolved:** A4, Helvetica, a dark blue title band, status badges, sections in editor-tab order with table rows as labelled blocks, change log last, "Page n of N" footer ([Decision_Log.md](Decision_Log.md) §18). |
 | 3 | Admin reference data tables | CRUD UI depends on which reference tables are created (data model open item #5). |
 | 4 | Mobile / narrow-viewport behavior | Streamlit's responsive behavior is limited — decide minimum supported viewport width. |
