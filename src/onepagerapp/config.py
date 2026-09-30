@@ -1,10 +1,11 @@
 """Configuration module for the OnePagerApp application."""
 
 import os
+import re
 from datetime import timedelta
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class AppMode(str, Enum):
@@ -49,6 +50,30 @@ class AppConfig(BaseModel):
             "30 minutes in every environment; tests override it."
         ),
     )
+    ONE_PAGER_APP_USER_DOMAINS: str = Field(
+        "becoc001.onmicrosoft.com",
+        description=(
+            "Comma-separated domains of the usernames the app accepts "
+            "(Architecture.md §4). A username with another domain gets no "
+            "initials."
+        ),
+    )
+    ONE_PAGER_APP_USERNAME_SUFFIXES: str = Field(
+        "adm",
+        description=(
+            "Comma-separated suffixes stripped from the user part of the "
+            "username to get the initials (x0wadm -> X0W). An empty entry means "
+            "no suffix, so 'adm,' accepts both x0wadm and x0w."
+        ),
+    )
+    ONE_PAGER_APP_INITIALS_PATTERN: str = Field(
+        r"^[A-Z0-9]{3}$",
+        description=(
+            "Regular expression for valid corporate initials, checked after "
+            "upper-casing. Used for the logged-in user and for Owner/SME "
+            "initials."
+        ),
+    )
     ONE_PAGER_APP_APPROVERS: str = Field(
         "",
         description=(
@@ -66,6 +91,16 @@ class AppConfig(BaseModel):
     )
     CLOUD_ROLE_NAME: str = "OnePagerApp"
 
+    @field_validator("ONE_PAGER_APP_INITIALS_PATTERN")
+    @classmethod
+    def _check_initials_pattern(cls, value: str) -> str:
+        try:
+            re.compile(value)
+        except re.error as exc:
+            msg = f"ONE_PAGER_APP_INITIALS_PATTERN is not a valid regex: {exc}"
+            raise ValueError(msg) from exc
+        return value
+
     @classmethod
     def from_env(cls) -> "AppConfig":
         """Build the configuration from the current process environment variables."""
@@ -78,6 +113,31 @@ class AppConfig(BaseModel):
     def lock_ttl(self) -> timedelta:
         """How long an edit lock lives after its last heartbeat."""
         return timedelta(seconds=self.ONE_PAGER_APP_LOCK_TTL_SECONDS)
+
+    @property
+    def user_domains(self) -> frozenset[str]:
+        """Accepted username domains (lower case)."""
+        return frozenset(
+            part.strip().lower()
+            for part in self.ONE_PAGER_APP_USER_DOMAINS.split(",")
+            if part.strip()
+        )
+
+    @property
+    def username_suffixes(self) -> tuple[str, ...]:
+        """Suffixes to strip from the user part, longest first (lower case).
+
+        An empty entry (or an empty setting) is kept as ``""``, meaning "no
+        suffix". Longest first, so ``""`` never wins over ``"adm"``.
+        """
+        parts = self.ONE_PAGER_APP_USERNAME_SUFFIXES.split(",")
+        suffixes = {part.strip().lower() for part in parts}
+        return tuple(sorted(suffixes, key=lambda suffix: (-len(suffix), suffix)))
+
+    @property
+    def initials_pattern(self) -> re.Pattern[str]:
+        """Compiled ONE_PAGER_APP_INITIALS_PATTERN."""
+        return re.compile(self.ONE_PAGER_APP_INITIALS_PATTERN)
 
     @property
     def approver_initials(self) -> frozenset[str]:
