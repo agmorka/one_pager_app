@@ -51,14 +51,15 @@ Record every answer in [Decision_Log.md](../docs/Decision_Log.md).
 
 | # | Question | Answer | Consequence for the plan |
 |---|---|---|---|
-| A1 | Do the role groups exist? | **No.** Use the built-in `users` group for every role until the real groups are requested and created. | All group names are settings with default `users`. Changing to the real groups later is a configuration change only (Phase 6). |
+| A1 | Do the role groups exist? | **No.** Until the real groups are requested and created, use the Data Platform Engineering group of each environment for every role: `BEC_BECOC001_LHX_<ENV>_DataPlatEng`, i.e. `BEC_BECOC001_LHX_DEV_DataPlatEng`, `…_INT_…`, `…_UAT_…`, `…_PRD_…`. | All group names are settings whose default is this group for the current environment. Changing to the real groups later is a configuration change only (Phase 6). |
 | A2 | How do Entra ID groups reach Databricks? | **Automatic identity management is enabled.** | Entra ID groups can be used in Databricks directly, without a sync job, and nested Entra groups count. Once created, the real role groups can be referenced by their Entra name. |
 | A3 | Who manages group membership? | **The requester's team, for now.** | No in-app role management (no role table, no Admin page for roles). Membership changes happen in Entra ID. |
 | A4 | Who is a Viewer? | **All employees.** | No Viewer group and no Viewer check: every signed-in, recognised user is at least a Viewer. |
 
-**Interim consequence of A1: every user has every role.** While all role groups are `users`, every signed-in user is Owner/SME-eligible, Approver and Admin. The per-One-Pager rules still hold (only listed Owners/SMEs edit a One Pager; nobody reviews a One Pager they own or are SME on). This matches how the app behaves today, but:
+**Interim consequence of A1: DataPlatEng members have every role, everyone else is a Viewer.** While all role groups are `BEC_BECOC001_LHX_<ENV>_DataPlatEng`, its members are Owner/SME-eligible, Approver and Admin; all other employees are Viewers. The per-One-Pager rules still hold (only listed Owners/SMEs edit a One Pager; nobody reviews a One Pager they own or are SME on). Keep in mind:
 
-- It is acceptable in DEV/INT/TST. **Do not go live in UAT/PRD with `users` as the Approver or Admin group.** Phase 7 adds a start-up warning, and a check blocks PRD until real groups are configured.
+- Business Owners/SMEs and Nykredit reviewers outside DataPlatEng **cannot create, edit or review** until the real groups exist (or they are added to DataPlatEng). This is a real limit for UAT/PRD.
+- Phase 6 adds a start-up warning and a sidebar notice while the interim group is used.
 - Request the three groups early, because the platform lead time is outside this plan. Suggested names: `OPA-OwnerSME-<ENV>`, `OPA-Approver-<ENV>`, `OPA-Admin-<ENV>` (follow the platform naming convention if one exists).
 
 ## 5. Phase 1 — Configurable Username Format and Initials
@@ -168,7 +169,7 @@ Record every answer in [Decision_Log.md](../docs/Decision_Log.md).
 
 ## 10. Phase 6 — Roles from Groups
 
-**Goal:** replace the interim initials lists with group membership (Not_Implemented_Features.md 4.1). Decided in §4.1: Entra ID groups through automatic identity management, `users` as the interim group for every role, all employees are Viewers.
+**Goal:** replace the interim initials lists with group membership (Not_Implemented_Features.md 4.1). Decided in §4.1: Entra ID groups through automatic identity management, `BEC_BECOC001_LHX_<ENV>_DataPlatEng` as the interim group for every role, all employees are Viewers.
 
 **Role model**
 
@@ -181,7 +182,10 @@ Record every answer in [Decision_Log.md](../docs/Decision_Log.md).
 | Admin | Group `ONE_PAGER_APP_GROUP_ADMIN` | Group membership at login |
 
 1. **Settings** in [config.py](../src/onepagerapp/config.py) and [.env.example](../.env.example):
-   - `ONE_PAGER_APP_GROUP_OWNER_SME`, `ONE_PAGER_APP_GROUP_APPROVER`, `ONE_PAGER_APP_GROUP_ADMIN`, each with default **`users`** (A1).
+   - `ONE_PAGER_APP_GROUP_OWNER_SME`, `ONE_PAGER_APP_GROUP_APPROVER`, `ONE_PAGER_APP_GROUP_ADMIN`, each with default **`BEC_BECOC001_LHX_{env}_DataPlatEng`** (A1).
+   - `{env}` is replaced with the environment from `AppConfig.environment` (`DEV`, `INT`, `UAT`, `PRD`), so one default works in every environment and nothing has to be set per environment for now. A value without `{env}` is used as is.
+   - A test pins the resolved names: DEV → `BEC_BECOC001_LHX_DEV_DataPlatEng`, INT → `…_INT_…`, UAT → `…_UAT_…`, PRD → `…_PRD_…`.
+   - TST appears in [One_Pager_App_Infrastructure_Setup.md](../docs/One_Pager_App_Infrastructure_Setup.md) but not in the `Environment` enum; if the app runs in TST, add it to the enum (and check that `BEC_BECOC001_LHX_TST_DataPlatEng` exists).
    - Validate that a value is a single group name (no commas, not empty).
 2. **Resolve the groups once per session**, as the user (`Identity.USER` from Phase 4; until Phase 4 is merged, the current user-token connection), in one statement:
 
@@ -192,29 +196,29 @@ Record every answer in [Decision_Log.md](../docs/Decision_Log.md).
      is_member(:admin)     OR is_account_group_member(:admin)     AS admin
    ```
 
-   - `users` is a **workspace** system group, so `is_account_group_member('users')` is false; `is_member` covers it. The real role groups will be **account** groups (Entra ID through automatic identity management), which `is_account_group_member` covers, including nested Entra groups. Checking both makes the switch from `users` to the real groups a configuration change only.
+   - The interim group and the future role groups are Entra ID groups, available as **account** groups through automatic identity management; `is_account_group_member` covers them, including nested Entra groups. `is_member` additionally covers **workspace-local** groups, so a workspace group can also be configured if ever needed.
    - Put this in a new `DataAccess.get_group_memberships(groups) -> dict[str, bool]`. In `MockDataAccess` it returns memberships from `ONE_PAGER_APP_MOCK_GROUPS` (comma-separated), so roles can be tested locally.
-   - **Verify in DEV first** (an early spike, can be done right after Phase 2): run the query for `users` and for one Entra group as a test user.
+   - **Verify in DEV first** (an early spike, can be done right after Phase 2): run the query for `BEC_BECOC001_LHX_DEV_DataPlatEng` as a member and as a non-member.
    - If the query fails, the user gets **Viewer only** (fail closed) and the error is logged. The app still opens.
 3. **`resolve_roles`** in [auth.py](../src/onepagerapp/auth.py) builds the roles from that result: `Actor.APPROVER`, `Actor.ADMIN`, and a new `Actor.OWNER_SME_GROUP` for the general "may create" right. `Actor.OWNER_SME` stays the per-record role. Store the result in `st.session_state.current_user_roles`, as today; a role change applies from the next session.
 4. **Replace the stubs** in [permissions.py](../src/onepagerapp/permissions.py): `can_create_one_pager` and `can_manage_use_cases` require `Actor.OWNER_SME_GROUP`. The per-record checks against `one_pager_authorized_users` and segregation of duties stay unchanged.
 5. **Remove** `ONE_PAGER_APP_APPROVERS` / `ONE_PAGER_APP_ADMINS` (replaced by `ONE_PAGER_APP_MOCK_GROUPS` for local testing).
 6. **Role badge** next to the user in the sidebar (Not_Implemented_Features.md 4.5): Viewer, Owner/SME, Approver, Admin (several can apply).
-7. **Interim warning.** When the Approver or Admin group is `users`, log a warning at start-up and show a small "Roles not configured: all users have all roles" notice in the sidebar, in every environment except DEV.
+7. **Interim warning.** While any role group is still the DataPlatEng default, log a warning at start-up and, in every environment except DEV, show a small "Interim roles: DataPlatEng members act as Owner/SME, Approver and Admin" notice in the sidebar.
 8. **No in-app role management** (A3): membership is changed in Entra ID by the owning team. Document the request process in the Help page ("How do I become an Approver?").
-9. **Tests:** role mapping per group result; no group = Viewer; query error = Viewer; `users` default gives every role; `can_create_one_pager` / `can_manage_use_cases` follow the group; mock groups setting.
+9. **Tests:** role mapping per group result; no group = Viewer; query error = Viewer; `{env}` resolution per environment; DataPlatEng member gets every role, non-member is Viewer; `can_create_one_pager` / `can_manage_use_cases` follow the group; mock groups setting.
 
 **Switching to the real groups later:** create the three Entra groups, add members, then set the three settings per environment and restart the app. No code change.
 
-**Done when:** in DEV, changing `ONE_PAGER_APP_GROUP_APPROVER` from `users` to a group you are not in hides the Review page after a new session.
+**Done when:** in DEV, a DataPlatEng member sees Review and Admin, a non-member sees only the Viewer pages, and changing `ONE_PAGER_APP_GROUP_APPROVER` to another group changes this after a new session.
 
 ## 11. Phase 7 — Deployment, Grants and Token Expiry
 
 1. **App configuration** ([app.yml](../app/app.yml), bundle resources):
    - Enable user authorization with scopes `sql` and `iam.current-user:read`.
-   - Add the new settings from Phases 1, 5 and 6 per environment (domains, suffixes, pattern, group names; groups = `users` until the real groups exist).
+   - Add the new settings from Phases 1 and 5 per environment (domains, suffixes, pattern). The group settings can stay unset while the DataPlatEng default is used; set them per environment once the real groups exist.
    - Give the Databricks App's `CAN_USE` permission to all employees (A4), e.g. the workspace `users` group.
-   - **PRD guard:** when `ONE_PAGER_APP_ENVIRONMENT` is `PRD` and the Approver or Admin group is `users`, the app refuses to start with a clear log message. UAT gets the warning from Phase 6 item 7.
+   - Check that `BEC_BECOC001_LHX_<ENV>_DataPlatEng` exists in each environment's account before deploying there. A missing group means every user is a Viewer.
 2. **Grant matrix.** Add to [One_Pager_App_Infrastructure_Setup.md](../docs/One_Pager_App_Infrastructure_Setup.md) and hand to the platform team:
 
    | Principal | Catalog / schema | Tables | Volume | Warehouse |
@@ -226,7 +230,7 @@ Record every answer in [Decision_Log.md](../docs/Decision_Log.md).
    Unity Catalog grants must go to an **account** group: the workspace `users` group cannot receive Unity Catalog privileges, so the read grants use the built-in `account users` group. The role groups need no Unity Catalog grants of their own, because all writes go through the service principal.
 
 3. **Token expiry test.** Streamlit reads `x-forwarded-access-token` from the headers of the first connection. Keep a session open for more than an hour and check that reads still work. If they fail, catch the "token expired" error on reads and ask the user to reload the page (a clear message instead of a stack trace). Writes are not affected, because they use the service principal.
-4. **Smoke test in DEV**: browse, create, edit, submit, approve (as a second user who is not Owner/SME), reject, admin edit. Check the audit columns and `DESCRIBE HISTORY`. While all groups are `users`, test the Viewer-only path by pointing the three group settings at a group the test user is not in. Repeat with real Viewer, Owner/SME and Approver test users once the real groups exist.
+4. **Smoke test in DEV**: browse, create, edit, submit, approve (as a second user who is not Owner/SME), reject, admin edit. Check the audit columns and `DESCRIBE HISTORY`. While the DataPlatEng group is used, run the Owner/SME, Approver and Admin steps as DataPlatEng members and the Viewer steps as a non-member. Repeat with real Viewer, Owner/SME and Approver test users once the real groups exist.
 5. **Promote** to INT, TST, UAT, PRD with the per-environment settings and grants.
 
 ## 12. Phase 8 — Documentation and Close-out
@@ -236,7 +240,7 @@ Record every answer in [Decision_Log.md](../docs/Decision_Log.md).
 3. [Data_Model.md](../docs/Data_Model.md): new audit columns on `ref_*` (if chosen in Phase 3); note that Delta history shows the service principal.
 4. [Decision_Log.md](../docs/Decision_Log.md): new entries for Option B, the fail-closed identity rule, the initials format and the directory lookup.
 5. [Not_Implemented_Features.md](Not_Implemented_Features.md): mark 4.1 and 4.5 as done.
-6. [Requirements_and_Scope.md](../docs/Requirements_and_Scope.md) §2 and [Architecture.md](../docs/Architecture.md) §4: Viewer = all employees, no Viewer group; group names are settings; interim `users` groups.
+6. [Requirements_and_Scope.md](../docs/Requirements_and_Scope.md) §2 and [Architecture.md](../docs/Architecture.md) §4: Viewer = all employees, no Viewer group; group names are settings; interim `BEC_BECOC001_LHX_<ENV>_DataPlatEng` group.
 7. [README.md](../README.md) and [.env.example](../.env.example): all new settings.
 
 ## 13. Summary of Order
@@ -249,6 +253,6 @@ Record every answer in [Decision_Log.md](../docs/Decision_Log.md).
 | 4 | Phase 3 — audit trail complete | — | Liquibase change for `ref_*` |
 | 5 | Phase 4 — reads as user, writes as service principal | Phases 2, 3; Q5, Q8 | grants |
 | 6 | Phase 5 — name from directory | Q5, Q6 | user scopes |
-| 7 | Phase 6 — roles from groups | Phase 2 (the DEV spike can run earlier) | none now (`users`); real groups later, configuration only |
+| 7 | Phase 6 — roles from groups | Phase 2 (the DEV spike can run earlier) | none now (DataPlatEng default); real groups later, configuration only |
 | 8 | Phase 7 — deployment, grants, token test | Phases 4–6 | yes |
 | 9 | Phase 8 — documentation | all | no |
