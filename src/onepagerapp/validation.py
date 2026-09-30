@@ -32,6 +32,7 @@ from typing import Any
 from jsonschema import Draft7Validator
 from jsonschema import ValidationError as SchemaError
 
+from onepagerapp.config import AppConfig
 from onepagerapp.models import (
     CurrentUser,
     NewOnePagerInput,
@@ -56,7 +57,6 @@ SUPPORTED_STRUCTURE_DEFINITIONS = (
 _PRESENCE_KEYWORDS = frozenset({"required", "minItems", "minLength"})
 
 DATA_PRODUCT_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,62}$")
-INITIALS_PATTERN = re.compile(r"^[A-Z]{2,5}$")
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _HTML_TAG = re.compile(r"<[^>]*>")
 
@@ -67,10 +67,29 @@ MAX_EMAIL_LENGTH = 254
 
 DATA_PRODUCT_TYPES = ("Foundational", "Integrated", "Augmented")
 
+# Corporate initials of Owners/SMEs (Architecture.md §4), checked after they
+# are upper-cased. The pattern is the ONE_PAGER_APP_INITIALS_PATTERN setting;
+# app.py applies the configured value at start-up (set_initials_pattern).
+_initials_pattern = re.compile(
+    AppConfig.model_fields["ONE_PAGER_APP_INITIALS_PATTERN"].default
+)
+INITIALS_RULE = "Enter corporate initials: 3 letters or digits (e.g. X0W)."
+
 DATA_PRODUCT_RULE = (
     "Use 2-63 characters: lowercase letters, digits and underscores, "
     "starting with a letter (e.g. customer_master)."
 )
+
+
+def set_initials_pattern(pattern: re.Pattern[str]) -> None:
+    """Use the configured pattern (``AppConfig.initials_pattern``) for initials."""
+    global _initials_pattern  # noqa: PLW0603 - one setting, applied at start-up
+    _initials_pattern = pattern
+
+
+def initials_pattern() -> re.Pattern[str]:
+    """Return the pattern Owner/SME initials must match (after upper-casing)."""
+    return _initials_pattern
 
 
 # ============================================================================
@@ -273,10 +292,8 @@ def _validate_person(
 
     if not person.initials:
         errors.append(ValidationError(f"{path}.initials", "Initials are required."))
-    elif not INITIALS_PATTERN.match(person.initials):
-        errors.append(
-            ValidationError(f"{path}.initials", "Initials must be 2-5 letters.")
-        )
+    elif not _initials_pattern.match(person.initials):
+        errors.append(ValidationError(f"{path}.initials", INITIALS_RULE))
 
     if not person.email:
         errors.append(ValidationError(f"{path}.email", "Email is required."))

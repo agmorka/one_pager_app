@@ -190,7 +190,8 @@ def render_basics_tab(doc: OnePagerDocument, data_access: DataAccess) -> None:
             "Initials *",
             key=bound("edit_owner_initials", doc.owner_initials),
             max_chars=5,
-            help="Corporate initials — used to grant edit access.",
+            help="Corporate initials, e.g. X0W (3 letters or digits) — used to "
+            "grant edit access.",
         )
     col_email, col_team = st.columns(2)
     with col_email:
