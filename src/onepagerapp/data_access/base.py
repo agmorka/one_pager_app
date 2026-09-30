@@ -1,5 +1,6 @@
 """Abstract base class for data access."""
 
+import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime
 
@@ -15,6 +16,7 @@ from onepagerapp.models import (
     PreviewData,
     RegistryFilter,
     RegistryPage,
+    RegistrySort,
     ReviewComment,
     UseCase,
     UseCaseFilter,
@@ -29,6 +31,19 @@ class NotFoundError(LookupError):
 
 class DataAccess(ABC):
     """Interface for accessing application data."""
+
+    @property
+    def cache_scope(self) -> str:
+        """Key of the data this instance reads, for the app's shared caches.
+
+        Instances with the same scope read the same data, so they may share
+        cached results. The default is unique per instance (in-memory data).
+        """
+        scope = getattr(self, "_cache_scope", None)
+        if scope is None:
+            scope = f"{type(self).__name__}:{uuid.uuid4().hex}"
+            self._cache_scope = scope
+        return scope
 
     @abstractmethod
     def get_current_user(self) -> str: ...
@@ -69,8 +84,14 @@ class DataAccess(ABC):
         ...
 
     @abstractmethod
-    def get_registry(self, filter: RegistryFilter, page: int, page_size: int) -> RegistryPage:
-        """Query One Pagers with filtering and pagination.
+    def get_registry(
+        self,
+        filter: RegistryFilter,
+        page: int,
+        page_size: int,
+        sort: RegistrySort | None = None,
+    ) -> RegistryPage:
+        """Query One Pagers with filtering, sorting and pagination.
         
         Applies filters with AND semantics. Returns a RegistryPage with the requested page
         of results and the total count across all matching rows.
@@ -79,6 +100,7 @@ class DataAccess(ABC):
             filter: RegistryFilter with optional criteria (None = no filter on that dimension).
             page: 1-indexed page number.
             page_size: Number of rows per page.
+            sort: Sort order; None sorts by one_pager_id ascending.
             
         Returns:
             RegistryPage containing rows for the requested page, total row count, and pagination info.

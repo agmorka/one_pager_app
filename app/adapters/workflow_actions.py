@@ -10,6 +10,7 @@ from collections.abc import Collection
 
 import streamlit as st
 
+from adapters.cache import writes_data
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import CurrentUser
@@ -44,7 +45,8 @@ def cancel_and_report(
 ) -> str | None:
     """Cancel the One Pager; return a user-facing error, or None on success."""
     try:
-        cancel_one_pager(data_access, one_pager_id, user, reason=reason)
+        with writes_data():
+            cancel_one_pager(data_access, one_pager_id, user, reason=reason)
     except (PermissionDeniedError, InvalidTransitionError, TransitionError) as e:
         return str(e)
     except Exception:
@@ -64,9 +66,10 @@ def change_dp_status_and_report(
 ) -> str | None:
     """Change the Data Product status; return a user-facing error or None."""
     try:
-        row = change_data_product_status(
-            data_access, one_pager_id, to_status, user, confirmed=confirmed
-        )
+        with writes_data():
+            row = change_data_product_status(
+                data_access, one_pager_id, to_status, user, confirmed=confirmed
+            )
     except (
         PermissionDeniedError,
         InvalidTransitionError,
@@ -92,7 +95,8 @@ def reject_and_report(
 ) -> str | None:
     """Reject the One Pager; return a user-facing error, or None on success."""
     try:
-        reject_one_pager(data_access, one_pager_id, user, comment, roles=roles)
+        with writes_data():
+            reject_one_pager(data_access, one_pager_id, user, comment, roles=roles)
     except (
         PermissionDeniedError,
         InvalidTransitionError,
@@ -119,9 +123,10 @@ def approve_and_report(
 ) -> str | None:
     """Approve the One Pager; return a user-facing error, or None on success."""
     try:
-        row = approve_one_pager(
-            data_access, document_store, one_pager_id, user, roles=roles
-        )
+        with writes_data():
+            row = approve_one_pager(
+                data_access, document_store, one_pager_id, user, roles=roles
+            )
     except (PermissionDeniedError, InvalidTransitionError, TransitionError) as e:
         return str(e)
     except Exception:
@@ -181,7 +186,8 @@ def update_and_report(
 ) -> str | None:
     """Start an update of an approved One Pager; return an error or None."""
     try:
-        start_update(data_access, one_pager_id, user, confirmed=True)
+        with writes_data():
+            start_update(data_access, one_pager_id, user, confirmed=True)
     except (
         PermissionDeniedError,
         InvalidTransitionError,

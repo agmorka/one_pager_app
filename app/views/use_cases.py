@@ -18,6 +18,7 @@ import logging
 import re
 
 import streamlit as st
+from adapters.cache import get_use_cases, writes_data
 
 from onepagerapp.data_access.base import DataAccess, NotFoundError
 from onepagerapp.models import (
@@ -156,12 +157,15 @@ def _render_use_case_form(data_access: DataAccess, existing: UseCase | None) -> 
 
     initials = extract_initials(_current_user())
     try:
+        with writes_data():
+            if existing is None:
+                new_id = data_access.create_use_case(data, initials)
+            else:
+                data_access.update_use_case(existing.use_case_id, data, initials)
         if existing is None:
-            new_id = data_access.create_use_case(data, initials)
             _select_use_case(new_id)
             _flash(f"Created Use Case {new_id}.")
         else:
-            data_access.update_use_case(existing.use_case_id, data, initials)
             _flash(f"Saved changes to {existing.use_case_id}.")
     except NotFoundError:
         st.error("This Use Case no longer exists. Close the dialog and refresh.")
@@ -204,11 +208,12 @@ def _deprecate_dialog(
     confirm_col, cancel_col, _ = st.columns([1, 1, 2])
     if confirm_col.button("Confirm", type="primary", key="uc_deprecate_confirm"):
         try:
-            data_access.set_use_case_deprecated(
-                use_case.use_case_id,
-                deprecated=True,
-                user_initials=extract_initials(_current_user()),
-            )
+            with writes_data():
+                data_access.set_use_case_deprecated(
+                    use_case.use_case_id,
+                    deprecated=True,
+                    user_initials=extract_initials(_current_user()),
+                )
         except Exception:
             logger.exception("Failed to deprecate use case")
             st.error("The Use Case could not be deprecated. Please try again.")
@@ -221,11 +226,12 @@ def _deprecate_dialog(
 
 def _restore(data_access: DataAccess, use_case: UseCase) -> None:
     try:
-        data_access.set_use_case_deprecated(
-            use_case.use_case_id,
-            deprecated=False,
-            user_initials=extract_initials(_current_user()),
-        )
+        with writes_data():
+            data_access.set_use_case_deprecated(
+                use_case.use_case_id,
+                deprecated=False,
+                user_initials=extract_initials(_current_user()),
+            )
     except Exception:
         logger.exception("Failed to restore use case")
         st.error("The Use Case could not be restored. Please try again.")
@@ -410,13 +416,15 @@ st.session_state.setdefault(_PAGE_KEY, 1)
 
 try:
     with st.spinner("Loading Use Cases..."):
-        use_case_page = data_access.get_use_cases(
+        use_case_page = get_use_cases(
+            data_access,
             current_filter, st.session_state[_PAGE_KEY], ROWS_PER_PAGE
         )
         # Clamp to the last page if rows disappeared (e.g. after deprecating)
         if not use_case_page.rows and st.session_state[_PAGE_KEY] > 1:
             st.session_state[_PAGE_KEY] = max(use_case_page.total_pages, 1)
-            use_case_page = data_access.get_use_cases(
+            use_case_page = get_use_cases(
+                data_access,
                 current_filter, st.session_state[_PAGE_KEY], ROWS_PER_PAGE
             )
 except Exception:

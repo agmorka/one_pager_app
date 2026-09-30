@@ -5,8 +5,10 @@ Displays a searchable, filterable list of all One Pagers with interactive naviga
 The view:
 1. Loads and caches reference data (status colors, domains, types)
 2. Renders status metrics showing counts by One Pager status
-3. Provides multi-field filter bar (product name, statuses, owner, domain, type)
-4. Renders paginated interactive table with clickable ID links
+3. Provides multi-field filter bar (product name, statuses, owner, domain, type,
+   use case); clicking a metric card filters the table to that status
+4. Renders paginated interactive table with sortable column headers and a View
+   button per row
 5. Each ID click navigates to the Preview page for that One Pager
 6. Handles all page states: Loading, Populated, Empty (no filters), Empty (after filter), Error
 
@@ -17,14 +19,23 @@ Per UI_Design.md §4.2, table rows are interactive and ID links navigate to prev
 import logging
 
 import streamlit as st
+from streamlit.delta_generator import DeltaGenerator
 
+from adapters import cache
 from adapters.theme import (
     TOTAL_CARD_COLOR,
     get_dp_status_colors,
     get_op_status_colors,
 )
+from onepagerapp.data_access.base import DataAccess
 from onepagerapp.locking import get_active_locks
-from onepagerapp.models import LockInfo, RegistryFilter
+from onepagerapp.models import (
+    LockInfo,
+    RegistryFilter,
+    RegistrySort,
+    UseCase,
+    UseCaseFilter,
+)
 from onepagerapp.permissions import can_create_one_pager
 
 logger = logging.getLogger(__name__)
@@ -40,10 +51,28 @@ FILTER_DEFAULTS: dict[str, str] = {
     "filter_owner": "",
     "filter_domain": "All",
     "filter_type": "All",
+    "filter_use_case": "All",
 }
 
 # Table columns to display
 TABLE_COLUMNS = ["ID", "Product", "Domain", "DP Type", "Owner", "OP Status", "DP Status", "Lock"]
+
+# Table column title -> RegistryRow field it sorts by. Lock is not sortable.
+SORTABLE_COLUMNS: dict[str, str] = {
+    "ID": "one_pager_id",
+    "Product": "product_name",
+    "Domain": "business_domain",
+    "DP Type": "data_product_type",
+    "Owner": "owner_name",
+    "OP Status": "one_pager_status",
+    "DP Status": "data_product_status",
+}
+
+# Use Cases read per query while building the Use Case filter options.
+_USE_CASE_OPTIONS_PAGE_SIZE = 200
+
+# Longest Use Case goal shown in a filter option before it is shortened.
+_USE_CASE_GOAL_MAX_LENGTH = 60
 
 LOCKS_UNAVAILABLE = "?"
 
@@ -108,53 +137,126 @@ def _get_cached_data_product_types(_data_access):
 # Render Helpers
 # ============================================================================
 
-def _render_metric_card(label: str, value: int, color: str) -> str:
+def _render_metric_card(
+    label: str, value: int, color: str, *, active: bool = False
+) -> str:
     """Generate HTML for a colored metric card.
     
     Args:
         label: Text label for the metric.
         value: Numeric value to display.
         color: Hex color code for the card background.
+        active: Whether the table is currently filtered by this card.
         
     Returns:
         HTML string for the metric card.
     """
+    outline = "outline:3px solid #1B1B1B;outline-offset:2px;" if active else ""
     return (
-        f'<div style="background:{color};color:white;'
+        f'<div style="background:{color};color:white;{outline}'
         f'height:110px;border-radius:8px;padding:12px;text-align:center;">'
         f'<div style="font-size:1.8rem;font-weight:bold;">{value}</div>'
         f'<div style="font-size:0.85rem;">{label}</div></div>'
     )
 
 
-def _render_metrics(status_counts: dict, op_status_colors: dict) -> None:
-    """Render the status metrics row showing counts per One Pager status.
+def _reset_page() -> None:
+    """Go back to the first page after the filter or the sort order changes."""
+    st.session_state.registry_page = 1
+
+
+def _filter_by_status(status: str) -> None:
+    """Metric card click: filter the table by that OP status ("All" for Total)."""
+    st.session_state["filter_op_status"] = status
+    _reset_page()
+
+
+def _render_metric_button(
+    col: DeltaGenerator, label: str, status: str, *, active: bool
+) -> None:
+    """Render the button under a metric card that applies the card's status filter."""
+    col.button(
+        "✓ Showing" if active else "Show",
+        key=f"registry-metric-{status}",
+        on_click=_filter_by_status,
+        args=(status,),
+        disabled=active,
+        use_container_width=True,
+        help=(
+            "Show all One Pagers"
+            if status == "All"
+            else f"Show only One Pagers with status {label}"
+        ),
+    )
+
+
+def _render_metrics(
+    status_counts: dict, op_status_colors: dict, active_status: str
+) -> None:
+    """Render the status metrics row; each card filters the table by its status.
     
     Args:
         status_counts: Dict mapping status → count.
         op_status_colors: Dict mapping status → hex color.
+        active_status: The OP status filter in effect ("All" when none).
     """
     metric_cols = st.columns(len(op_status_colors) + 1)
     total = sum(status_counts.values())
     metric_cols[0].markdown(
-        _render_metric_card("Total", total, TOTAL_CARD_COLOR), unsafe_allow_html=True
+        _render_metric_card(
+            "Total", total, TOTAL_CARD_COLOR, active=active_status == "All"
+        ),
+        unsafe_allow_html=True,
+    )
+    _render_metric_button(
+        metric_cols[0], "Total", "All", active=active_status == "All"
     )
     status_counts_enriched = {status: status_counts.get(status, 0) for status in op_status_colors.keys()}
     for col, (status, count) in zip(metric_cols[1:], status_counts_enriched.items(), strict=False):
         color = op_status_colors.get(status, "#808080")
         col.markdown(
-            _render_metric_card(status, count, color), unsafe_allow_html=True
+            _render_metric_card(status, count, color, active=active_status == status),
+            unsafe_allow_html=True,
         )
+        _render_metric_button(col, status, status, active=active_status == status)
 
 
 def _clear_filters() -> None:
     """Reset all filter inputs to default values."""
     for key, default in FILTER_DEFAULTS.items():
         st.session_state[key] = default
+    _reset_page()
+
+
+def _load_use_cases(data_access: DataAccess) -> list[UseCase]:
+    """Every Use Case (deprecated ones too), for the Use Case filter options."""
+    use_cases: list[UseCase] = []
+    page = 1
+    while True:
+        result = cache.get_use_cases(
+            data_access,
+            UseCaseFilter(include_deprecated=True),
+            page,
+            _USE_CASE_OPTIONS_PAGE_SIZE,
+        )
+        use_cases.extend(result.rows)
+        if not result.has_next:
+            return use_cases
+        page += 1
+
+
+def use_case_option_label(use_case: UseCase) -> str:
+    """Use Case filter option: ID, persona and goal (goal shortened)."""
+    goal = use_case.goal
+    if len(goal) > _USE_CASE_GOAL_MAX_LENGTH:
+        goal = f"{goal[: _USE_CASE_GOAL_MAX_LENGTH - 3]}..."
+    label = f"{use_case.use_case_id} · {use_case.persona}: {goal}"
+    return f"{label} (deprecated)" if use_case.deprecated else label
 
 
 def _render_filter_bar(op_status_colors: dict, dp_status_colors: dict, 
-                       domain_options: list, type_options: list) -> tuple:
+                       domain_options: list, type_options: list,
+                       use_case_labels: dict[str, str]) -> tuple:
     """Render the filter bar and return current filter values.
     
     Args:
@@ -162,37 +264,59 @@ def _render_filter_bar(op_status_colors: dict, dp_status_colors: dict,
         dp_status_colors: Dict mapping DP status → color.
         domain_options: List of available domains.
         type_options: List of available data product types.
+        use_case_labels: Use Case ID → option label ("All" is added here).
         
     Returns:
-        Tuple of (product_name, op_status, dp_status, owner, domain, data_type) filters.
+        Tuple of (product_name, op_status, dp_status, owner, domain, data_type, use_case) filters.
     """
     filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
     with filter_col1:
-        filter_product_name = st.text_input("Product Name", key="filter_product_name")
+        filter_product_name = st.text_input(
+            "Product Name", key="filter_product_name", on_change=_reset_page
+        )
     with filter_col2:
         filter_op_status = st.selectbox(
-            "OP Status", options=["All", *op_status_colors], key="filter_op_status"
+            "OP Status", options=["All", *op_status_colors], key="filter_op_status",
+            on_change=_reset_page,
         )
     with filter_col3:
         filter_dp_status = st.selectbox(
-            "DP Status", options=["All", *dp_status_colors], key="filter_dp_status"
+            "DP Status", options=["All", *dp_status_colors], key="filter_dp_status",
+            on_change=_reset_page,
         )
     with filter_col4:
-        filter_owner = st.text_input("Owner", key="filter_owner")
+        filter_owner = st.text_input("Owner", key="filter_owner", on_change=_reset_page)
+
+    # A remembered Use Case that no longer exists falls back to "All".
+    remembered = st.session_state.get("filter_use_case", "All")
+    if remembered not in ("All", *use_case_labels):
+        st.session_state["filter_use_case"] = "All"
 
     filter_col5, filter_col6, filter_col7, filter_col8 = st.columns(4)
     with filter_col5:
-        filter_domain = st.selectbox("Domain", options=domain_options, key="filter_domain")
+        filter_domain = st.selectbox(
+            "Domain", options=domain_options, key="filter_domain", on_change=_reset_page
+        )
     with filter_col6:
-        filter_type = st.selectbox("Type", options=type_options, key="filter_type")
+        filter_type = st.selectbox(
+            "Type", options=type_options, key="filter_type", on_change=_reset_page
+        )
     with filter_col7:
-        st.markdown("")
+        filter_use_case = st.selectbox(
+            "Use Case",
+            options=["All", *use_case_labels],
+            format_func=lambda uc_id: use_case_labels.get(uc_id, uc_id),
+            key="filter_use_case",
+            on_change=_reset_page,
+            help="Only One Pagers linked to this Use Case",
+        )
     with filter_col8:
         st.markdown("")
         st.markdown("")
         st.button("Clear filters", on_click=_clear_filters)
 
-    return filter_product_name, filter_op_status, filter_dp_status, filter_owner, filter_domain, filter_type
+    return (filter_product_name, filter_op_status, filter_dp_status, filter_owner,
+            filter_domain, filter_type, filter_use_case)
 
 
 def _navigate_to_create() -> None:
@@ -231,6 +355,49 @@ _ROW_COLUMN_RATIOS = [1.2, 2.2, 1.4, 1.3, 1.6, 1.3, 1.3, 0.9, 1.0]
 _ROW_KEY_PREFIX = "opview-"
 
 
+def current_sort() -> RegistrySort:
+    """Return the Registry table's sort order, kept in session state."""
+    sort = st.session_state.get("registry_sort")
+    return sort if isinstance(sort, RegistrySort) else RegistrySort()
+
+
+def _sort_by(column: str) -> None:
+    """Sort by ``column`` on a header click, or flip the direction if sorted by it."""
+    st.session_state["registry_sort"] = current_sort().toggled(column)
+    _reset_page()
+
+
+def sort_header_label(title: str, sort: RegistrySort) -> str:
+    """Return the header button text: the title, with ▲/▼ on the sorted column."""
+    if SORTABLE_COLUMNS.get(title) != sort.column:
+        return title
+    return f"{title} {'▼' if sort.descending else '▲'}"
+
+
+def _render_header_row() -> None:
+    """Render the column titles; sortable ones are buttons (UI_Design §4.1)."""
+    sort = current_sort()
+    header_cols = st.columns(_ROW_COLUMN_RATIOS)
+    for col, title in zip(header_cols, [*TABLE_COLUMNS, ""], strict=False):
+        column = SORTABLE_COLUMNS.get(title)
+        if column is None:
+            col.markdown(f"**{title}**" if title else "")
+            continue
+        if column == sort.column:
+            direction = "descending" if sort.descending else "ascending"
+            help_text = f"Sorted by {title} ({direction}). Click to reverse."
+        else:
+            help_text = f"Sort by {title}"
+        col.button(
+            sort_header_label(title, sort),
+            key=f"registry-sort-{column}",
+            on_click=_sort_by,
+            args=(column,),
+            use_container_width=True,
+            help=help_text,
+        )
+
+
 def lock_cell(lock: LockInfo | None) -> str:
     """Lock column text: icon plus the holder's initials (UI_Design.md §4.1, §7)."""
     return f"🔒 {lock.locked_by_initials}" if lock else ""
@@ -259,15 +426,13 @@ def _render_interactive_table(registry_page, locks: dict[str, LockInfo] | None) 
     """
     st.caption(
         "Click the View button on a row to open the One Pager in the Preview page. "
+        "Click a column title to sort by it; click it again to reverse the order. "
         "🔒 marks a One Pager that is being edited, with the editor's initials."
     )
     if locks is None:
         st.caption("Lock status is unavailable right now.")
 
-    # Header row
-    header_cols = st.columns(_ROW_COLUMN_RATIOS)
-    for col, title in zip(header_cols, [*TABLE_COLUMNS, ""], strict=False):
-        col.markdown(f"**{title}**")
+    _render_header_row()
     st.divider()
 
     # Data rows: text cells plus a trailing "View" button that navigates to preview
@@ -425,6 +590,15 @@ except Exception as e:
     logger.exception("Failed to load data product types")
     type_options = ["All"]
 
+try:
+    use_case_labels = {
+        uc.use_case_id: use_case_option_label(uc)
+        for uc in _load_use_cases(data_access)
+    }
+except Exception:
+    logger.exception("Failed to load use cases for the registry filter")
+    use_case_labels = {}
+
 # Render metrics row
 st.markdown("**Status Summary**")
 filter_obj = RegistryFilter(
@@ -432,20 +606,22 @@ filter_obj = RegistryFilter(
     owner=None, domain=None, data_product_type=None
 )
 try:
-    status_counts = data_access.get_registry_status_counts(filter_obj)
+    status_counts = cache.get_registry_status_counts(data_access, filter_obj)
 except Exception as e:
     logger.exception("Failed to fetch status counts")
     status_counts = dict.fromkeys(op_status_colors, 0)
 
-_render_metrics(status_counts, op_status_colors)
+_render_metrics(
+    status_counts, op_status_colors, st.session_state.get("filter_op_status", "All")
+)
 st.markdown("")
 st.markdown("")
 
 # Render filter bar
 st.markdown("**Filters**")
 (filter_product_name, filter_op_status, filter_dp_status, 
- filter_owner, filter_domain, filter_type) = _render_filter_bar(
-    op_status_colors, dp_status_colors, domain_options, type_options
+ filter_owner, filter_domain, filter_type, filter_use_case) = _render_filter_bar(
+    op_status_colors, dp_status_colors, domain_options, type_options, use_case_labels
 )
 st.markdown("")
 st.markdown("")
@@ -458,6 +634,7 @@ current_filter = RegistryFilter(
     owner=filter_owner if filter_owner else None,
     domain=filter_domain if filter_domain != "All" else None,
     data_product_type=filter_type if filter_type != "All" else None,
+    use_case_id=filter_use_case if filter_use_case != "All" else None,
 )
 
 # Check if any filter is active
@@ -468,6 +645,7 @@ has_active_filter = any([
     filter_owner,
     filter_domain != "All",
     filter_type != "All",
+    filter_use_case != "All",
 ])
 
 # Initialize pagination state
@@ -477,8 +655,12 @@ if "registry_page" not in st.session_state:
 # Fetch and render registry data
 try:
     with st.spinner("Loading One Pagers..."):
-        registry_page = data_access.get_registry(
-            current_filter, st.session_state.registry_page, ROWS_PER_PAGE
+        registry_page = cache.get_registry(
+            data_access,
+            current_filter,
+            st.session_state.registry_page,
+            ROWS_PER_PAGE,
+            current_sort(),
         )
     
     total_pages = registry_page.total_pages

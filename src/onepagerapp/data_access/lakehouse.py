@@ -27,6 +27,7 @@ from onepagerapp.models import (
     RegistryFilter,
     RegistryPage,
     RegistryRow,
+    RegistrySort,
     ReviewComment,
     UseCase,
     UseCaseFilter,
@@ -89,6 +90,11 @@ class LakehouseAccess(DataAccess):
         self._config = config
         self._connection = DatabricksConnection(config)
         self._document_store = document_store
+
+    @property
+    def cache_scope(self) -> str:
+        """Every user reads the same tables, so all sessions share the caches."""
+        return f"lakehouse:{self._fqn_prefix}"
 
     @property
     def _fqn_prefix(self) -> str:
@@ -173,19 +179,8 @@ class LakehouseAccess(DataAccess):
         """
         return value.replace("'", "''")
 
-    def get_registry(
-        self, filter: RegistryFilter, page: int, page_size: int
-    ) -> RegistryPage:
-        """Query One Pagers with server-side filtering and pagination.
-        
-        Builds a WHERE clause based on filter criteria, uses LIMIT/OFFSET for pagination,
-        and converts results to RegistryRow objects.
-        
-        All filter values are escaped to prevent SQL injection.
-        """
-        fqn = f"{self._fqn_prefix}.one_pager_status"
-        
-        # Build WHERE clause with escaped values
+    def _registry_where(self, filter: RegistryFilter) -> str:  # noqa: A002
+        """WHERE clause of the Registry queries, with every value escaped."""
         where_clauses = []
         
         if filter.product_name:
@@ -215,7 +210,43 @@ class LakehouseAccess(DataAccess):
             escaped = self._escape_sql_string(filter.data_product_type)
             where_clauses.append(f"data_product_type = '{escaped}'")
         
-        where_clause = " AND ".join(where_clauses) if where_clauses else "1=1"
+        if filter.use_case_id:
+            escaped = self._escape_sql_string(filter.use_case_id)
+            where_clauses.append(
+                f"one_pager_id IN (SELECT one_pager_id "  # noqa: S608
+                f"FROM {self._fqn_prefix}.use_case_references "
+                f"WHERE use_case_id = '{escaped}')"
+            )
+        
+        return " AND ".join(where_clauses) if where_clauses else "1=1"
+
+    @staticmethod
+    def _registry_order_by(sort: RegistrySort | None) -> str:
+        """ORDER BY of the Registry page query; ties broken by one_pager_id."""
+        sort = sort or RegistrySort()
+        if sort.column == "one_pager_id":
+            return f"one_pager_id {'DESC' if sort.descending else 'ASC'}"
+        # sort.column is one of REGISTRY_SORT_COLUMNS (checked by RegistrySort).
+        direction = "DESC" if sort.descending else "ASC"
+        return f"LOWER({sort.column}) {direction}, one_pager_id ASC"
+
+    def get_registry(
+        self,
+        filter: RegistryFilter,
+        page: int,
+        page_size: int,
+        sort: RegistrySort | None = None,
+    ) -> RegistryPage:
+        """Query One Pagers with server-side filtering, sorting and pagination.
+        
+        Builds a WHERE clause based on filter criteria, uses LIMIT/OFFSET for pagination,
+        and converts results to RegistryRow objects.
+        
+        All filter values are escaped to prevent SQL injection.
+        """
+        fqn = f"{self._fqn_prefix}.one_pager_status"
+        
+        where_clause = self._registry_where(filter)
         
         # Count total rows matching filter
         count_query = f"SELECT COUNT(*) as total FROM {fqn} WHERE {where_clause}"
@@ -235,7 +266,7 @@ class LakehouseAccess(DataAccess):
             f"last_updated_at, last_updated_by "
             f"FROM {fqn} "
             f"WHERE {where_clause} "
-            f"ORDER BY one_pager_id "
+            f"ORDER BY {self._registry_order_by(sort)} "
             f"LIMIT {page_size} OFFSET {offset}"
         )
         
@@ -285,37 +316,7 @@ class LakehouseAccess(DataAccess):
         """
         fqn = f"{self._fqn_prefix}.one_pager_status"
         
-        # Build WHERE clause (same as get_registry)
-        where_clauses = []
-        
-        if filter.product_name:
-            escaped = self._escape_sql_string(filter.product_name)
-            where_clauses.append(f"LOWER(product_name) LIKE LOWER('%{escaped}%')")
-        
-        if filter.op_status:
-            escaped = self._escape_sql_string(filter.op_status)
-            where_clauses.append(f"one_pager_status = '{escaped}'")
-        
-        if filter.dp_status:
-            escaped = self._escape_sql_string(filter.dp_status)
-            where_clauses.append(f"data_product_status = '{escaped}'")
-        
-        if filter.owner:
-            escaped = self._escape_sql_string(filter.owner)
-            where_clauses.append(
-                f"(LOWER(owner_name) LIKE LOWER('%{escaped}%') "
-                f"OR LOWER(owner_email) LIKE LOWER('%{escaped}%'))"
-            )
-        
-        if filter.domain:
-            escaped = self._escape_sql_string(filter.domain)
-            where_clauses.append(f"business_domain = '{escaped}'")
-        
-        if filter.data_product_type:
-            escaped = self._escape_sql_string(filter.data_product_type)
-            where_clauses.append(f"data_product_type = '{escaped}'")
-        
-        where_clause = " AND ".join(where_clauses) if where_clauses else "1=1"
+        where_clause = self._registry_where(filter)
         
         # Group by status and count
         query = (

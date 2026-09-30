@@ -20,6 +20,7 @@ from onepagerapp.models import (
     RegistryFilter,
     RegistryPage,
     RegistryRow,
+    RegistrySort,
     ReviewComment,
     UseCase,
     UseCaseFilter,
@@ -233,93 +234,61 @@ class MockDataAccess(DataAccess):
         """Return the current in-memory One Pager rows as Registry rows."""
         return [row.to_registry_row() for row in self._status_rows.values()]
 
-    def get_registry(
-        self, filter: RegistryFilter, page: int, page_size: int
-    ) -> RegistryPage:
-        """Query One Pagers with filtering and pagination.
-        
-        Applies all non-None filter criteria with AND semantics.
-        """
-        rows = self._get_sample_registry_data()
-        df = pd.DataFrame(
-            [
-                {
-                    "one_pager_id": r.one_pager_id,
-                    "product_name": r.product_name,
-                    "business_domain": r.business_domain,
-                    "data_product_type": r.data_product_type,
-                    "one_pager_status": r.one_pager_status,
-                    "data_product_status": r.data_product_status,
-                    "owner_name": r.owner_name,
-                    "owner_email": r.owner_email,
-                    "version": r.version,
-                    "last_updated_at": r.last_updated_at,
-                    "last_updated_by": r.last_updated_by,
-                }
-                for r in rows
-            ]
-        )
+    def _filtered_registry_rows(self, filter: RegistryFilter) -> list[RegistryRow]:  # noqa: A002
+        """Registry rows matching every non-None filter criterion (AND semantics)."""
 
-        # Apply filters
-        if filter.product_name:
-            df = df[
-                df["product_name"]
-                .str.lower()
-                .str.contains(filter.product_name.lower(), na=False)
-            ]
-        if filter.op_status:
-            df = df[df["one_pager_status"] == filter.op_status]
-        if filter.dp_status:
-            df = df[df["data_product_status"] == filter.dp_status]
-        if filter.owner:
-            df = df[
-                (
-                    df["owner_name"]
-                    .str.lower()
-                    .str.contains(filter.owner.lower(), na=False)
-                )
-                | (
-                    df["owner_email"]
-                    .str.lower()
-                    .str.contains(filter.owner.lower(), na=False)
-                )
-            ]
-        if filter.domain:
-            df = df[df["business_domain"] == filter.domain]
-        if filter.data_product_type:
-            df = df[df["data_product_type"] == filter.data_product_type]
+        def contains(value: str, needle: str | None) -> bool:
+            return not needle or needle.lower() in (value or "").lower()
 
-        total_rows = len(df)
+        def equals(value: str, wanted: str | None) -> bool:
+            return not wanted or value == wanted
 
-        # Sort by one_pager_id for consistent pagination
-        df = df.sort_values("one_pager_id").reset_index(drop=True)
-
-        # Paginate
-        offset = (page - 1) * page_size
-        limit = page_size
-        df_page = df.iloc[offset : offset + limit]
-
-        # Convert back to RegistryRow objects
-        page_rows = [
-            RegistryRow(
-                one_pager_id=row["one_pager_id"],
-                product_name=row["product_name"],
-                business_domain=row["business_domain"],
-                data_product_type=row["data_product_type"],
-                one_pager_status=row["one_pager_status"],
-                data_product_status=row["data_product_status"],
-                owner_name=row["owner_name"],
-                owner_email=row["owner_email"],
-                version=row["version"],
-                last_updated_at=row["last_updated_at"],
-                last_updated_by=row["last_updated_by"],
+        linked = {
+            op_id
+            for op_id, uc_id in self._use_case_references
+            if uc_id == filter.use_case_id
+        }
+        return [
+            r
+            for r in self._get_sample_registry_data()
+            if contains(r.product_name, filter.product_name)
+            and equals(r.one_pager_status, filter.op_status)
+            and equals(r.data_product_status, filter.dp_status)
+            and (
+                contains(r.owner_name, filter.owner)
+                or contains(r.owner_email, filter.owner)
             )
-            for _, row in df_page.iterrows()
+            and equals(r.business_domain, filter.domain)
+            and equals(r.data_product_type, filter.data_product_type)
+            and (not filter.use_case_id or r.one_pager_id in linked)
         ]
 
+    def get_registry(
+        self,
+        filter: RegistryFilter,
+        page: int,
+        page_size: int,
+        sort: RegistrySort | None = None,
+    ) -> RegistryPage:
+        """Query One Pagers with filtering, sorting and pagination.
+        
+        Applies all non-None filter criteria with AND semantics. Sorting is
+        case-insensitive, with ties broken by one_pager_id (as in the lakehouse).
+        """
+        sort = sort or RegistrySort()
+        rows = sorted(
+            self._filtered_registry_rows(filter), key=lambda r: r.one_pager_id
+        )
+        # Stable sort (also with reverse=True): ties keep their one_pager_id order.
+        rows.sort(
+            key=lambda r: str(getattr(r, sort.column) or "").lower(),
+            reverse=sort.descending,
+        )
+
+        offset = (page - 1) * page_size
         return RegistryPage(
-            rows=page_rows,
-            total_rows=total_rows,
+            rows=rows[offset : offset + page_size],
+            total_rows=len(rows),
             page=page,
             page_size=page_size,
         )
@@ -329,53 +298,9 @@ class MockDataAccess(DataAccess):
         
         Applies the same filter as get_registry(), then groups by one_pager_status.
         """
-        rows = self._get_sample_registry_data()
-        df = pd.DataFrame(
-            [
-                {
-                    "one_pager_status": r.one_pager_status,
-                    "product_name": r.product_name,
-                    "business_domain": r.business_domain,
-                    "data_product_type": r.data_product_type,
-                    "data_product_status": r.data_product_status,
-                    "owner_name": r.owner_name,
-                    "owner_email": r.owner_email,
-                }
-                for r in rows
-            ]
-        )
-
-        # Apply the same filters as get_registry()
-        if filter.product_name:
-            df = df[
-                df["product_name"]
-                .str.lower()
-                .str.contains(filter.product_name.lower(), na=False)
-            ]
-        if filter.op_status:
-            df = df[df["one_pager_status"] == filter.op_status]
-        if filter.dp_status:
-            df = df[df["data_product_status"] == filter.dp_status]
-        if filter.owner:
-            df = df[
-                (
-                    df["owner_name"]
-                    .str.lower()
-                    .str.contains(filter.owner.lower(), na=False)
-                )
-                | (
-                    df["owner_email"]
-                    .str.lower()
-                    .str.contains(filter.owner.lower(), na=False)
-                )
-            ]
-        if filter.domain:
-            df = df[df["business_domain"] == filter.domain]
-        if filter.data_product_type:
-            df = df[df["data_product_type"] == filter.data_product_type]
-
-        # Group by one_pager_status and count
-        counts = df["one_pager_status"].value_counts().to_dict()
+        counts: dict[str, int] = {}
+        for row in self._filtered_registry_rows(filter):
+            counts[row.one_pager_status] = counts.get(row.one_pager_status, 0) + 1
         return counts
 
     # ========================================================================
