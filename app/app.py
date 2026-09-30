@@ -102,6 +102,7 @@ def navigation_entries(roles: frozenset[Actor]) -> list[tuple[str, str]]:
     if can_review(roles):
         entries.append(("views/review.py", "Review"))
     entries.append(("views/use_cases.py", "Use Cases"))
+    entries.append(("views/help.py", "Help"))
     return entries
 
 

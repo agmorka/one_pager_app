@@ -109,7 +109,7 @@ There is no `git_integration.py`.
 
 | # | Feature |
 |---|---|
-| 9.1 | Help page (`6_Help.py`): lifecycle explanation, OP/DP state diagrams, valid-combinations table, roles, workflow quick reference, badge legend |
+| 9.1 | ~~Help page (`6_Help.py`): lifecycle explanation, OP/DP state diagrams, valid-combinations table, roles, workflow quick reference, badge legend~~ **Done (Phase 10):** `app/views/help.py`, content in `onepagerapp/help_content.py`; Graphviz diagrams and tables built from `get_workflow_reference`; visible to everyone |
 | 9.2 | ~~Service method that returns the serialized transitions for the Help page (Backend §14)~~ **Done (Phase 5):** `workflow.get_workflow_reference` |
 
 ## 10. Admin page (UI §4.7)
@@ -273,7 +273,7 @@ This phase is left until the lifecycle is stable, because it depends on external
 
 | Order | Item | Why now |
 |---|---|---|
-| 43 | 9.1 Help page | Describes the final lifecycle, using 9.2 |
+| 43 | ~~9.1 Help page~~ **Done** | Describes the final lifecycle, using 9.2 |
 | 44 | 10.1 Admin page, 10.3 status definitions, 10.2 reference-data CRUD (including the `ref_source_systems` Liquibase changeset) | `sourceSystem` is free text in the schema today, so the Data Sources tab does not need this table first |
 | 45 | 10.4 Pending PRs table with **Retry PR** | Needs 7.2 |
 

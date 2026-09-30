@@ -400,8 +400,10 @@ Same pattern: Loading / Populated / Empty / Error.
 
 Data is read from `ref_op_status` / `ref_dp_status` tables for badge colors/labels, and the transition rules are rendered from the service layer's serialized `TRANSITIONS` dict (per backend design §13).
 
+Implemented in `app/views/help.py` with its content in `onepagerapp/help_content.py`. Streamlit 1.38 cannot render Mermaid, so the state diagrams are Graphviz (`st.graphviz_chart`) built from the transitions: nodes in their badge colors, final statuses double-bordered, automatic transitions dashed. Each diagram has an expander with the full transition table (who, conditions).
+
 #### States
-This page is largely static content — no Loading/Empty states needed. Error state only if Delta tables are unreachable.
+This page is largely static content — no Loading/Empty states needed. Error state only if Delta tables are unreachable: a warning with Retry, and the page is still shown with gray badges.
 
 ---
 
