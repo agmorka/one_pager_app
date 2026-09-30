@@ -5,9 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from onepagerapp.config import AppConfig
 from onepagerapp.models import PRIORITY_OPTIONS, UseCaseInput, UseCasePage
-from onepagerapp.permissions import can_manage_use_cases, extract_initials
+from onepagerapp.permissions import can_manage_use_cases
 from onepagerapp.use_cases import (
     USE_CASE_FIELDS,
     clean_use_case_input,
@@ -96,26 +95,9 @@ def test_format_use_case_id_rejects_out_of_range(value: int) -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(
-    ("user", "expected"),
-    [
-        ("MJOADM@BECOC001.onmicrosoft.com", "MJO"),
-        ("x0wadm@becoc001.onmicrosoft.com", "X0W"),
-        ("MJO@bec.dk", None),
-        ("alice.brown@company.com", None),
-        (None, None),
-        ("", None),
-    ],
-)
-def test_extract_initials(user: str | None, expected: str | None) -> None:
-    config = AppConfig(ONE_PAGER_APP_VOLUME_PATH="/Volumes/x")
-    assert extract_initials(user, config) == expected
-
-
-@pytest.mark.unit
 def test_can_manage_use_cases_requires_authentication() -> None:
-    assert can_manage_use_cases("MJOADM@BECOC001.onmicrosoft.com")
-    assert not can_manage_use_cases(None)
+    assert can_manage_use_cases("MJO")
+    assert not can_manage_use_cases(None)  # not signed in or not recognised
     assert not can_manage_use_cases("")
 
 

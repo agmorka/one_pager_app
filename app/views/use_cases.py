@@ -23,12 +23,13 @@ from adapters.cache import get_use_cases, writes_data
 from onepagerapp.data_access.base import DataAccess, NotFoundError
 from onepagerapp.models import (
     PRIORITY_OPTIONS,
+    CurrentUser,
     UseCase,
     UseCaseFilter,
     UseCaseInput,
     UseCasePage,
 )
-from onepagerapp.permissions import can_manage_use_cases, extract_initials
+from onepagerapp.permissions import PermissionDeniedError, can_manage_use_cases
 from onepagerapp.use_cases import (
     USE_CASE_FIELDS,
     clean_use_case_input,
@@ -73,12 +74,22 @@ def _md(text: str) -> str:
     return _MARKDOWN_SPECIAL.sub(r"\\\1", text)
 
 
-def _current_user() -> str | None:
-    return st.session_state.get("current_user")
-
-
 def _current_initials() -> str | None:
-    return extract_initials(_current_user(), st.session_state.config)
+    """Initials of the signed-in user, resolved once per session by app.py.
+
+    None when nobody is signed in or the username is not recognised.
+    """
+    user: CurrentUser | None = st.session_state.get("current_user_info")
+    return (user.initials or None) if user else None
+
+
+def _actor_initials() -> str:
+    """Initials recorded on a Use Case write; refuses unrecognised users."""
+    initials = _current_initials()
+    if initials is None:
+        msg = "Your account is not recognised."
+        raise PermissionDeniedError(msg)
+    return initials
 
 
 def _used_by_label(count: int) -> str:
@@ -159,8 +170,8 @@ def _render_use_case_form(data_access: DataAccess, existing: UseCase | None) -> 
         )
         return
 
-    initials = _current_initials()
     try:
+        initials = _actor_initials()
         with writes_data():
             if existing is None:
                 new_id = data_access.create_use_case(data, initials)
@@ -216,7 +227,7 @@ def _deprecate_dialog(
                 data_access.set_use_case_deprecated(
                     use_case.use_case_id,
                     deprecated=True,
-                    user_initials=_current_initials(),
+                    user_initials=_actor_initials(),
                 )
         except Exception:
             logger.exception("Failed to deprecate use case")
@@ -234,7 +245,7 @@ def _restore(data_access: DataAccess, use_case: UseCase) -> None:
             data_access.set_use_case_deprecated(
                 use_case.use_case_id,
                 deprecated=False,
-                user_initials=_current_initials(),
+                user_initials=_actor_initials(),
             )
     except Exception:
         logger.exception("Failed to restore use case")
@@ -388,7 +399,7 @@ except (AttributeError, KeyError):
     st.error("Services are not initialized. Please refresh the page.")
     st.stop()
 
-can_manage = can_manage_use_cases(_current_user())
+can_manage = can_manage_use_cases(_current_initials())
 
 title_col, new_col = st.columns([5, 1])
 title_col.title("Use Case Registry")

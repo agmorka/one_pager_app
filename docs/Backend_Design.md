@@ -176,7 +176,7 @@ class PermissionService:
             raise PermissionDeniedError("User is not in the Owner/SME group.")
         
         # Fast lookup in one_pager_authorized_users table
-        user_initials = extract_initials(user.identity)
+        user_initials = user.initials  # resolved once per session (auth.py)
         authorized_user = self.authorized_users_repo.get(
             one_pager_id=one_pager_id, 
             user_initials=user_initials
