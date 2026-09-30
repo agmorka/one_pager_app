@@ -60,7 +60,7 @@ def test__format_event__quotes_values_that_could_forge_fields() -> None:
 @pytest.mark.unit
 def test__format_event__rejects_invalid_field_names() -> None:
     with pytest.raises(ValueError, match="Invalid audit field name"):
-        format_event("x", Outcome.SUCCESS, user="AB", **{"Bad Key": 1})
+        format_event("x", Outcome.SUCCESS, user="ABR", **{"Bad Key": 1})
 
 
 @pytest.mark.unit
@@ -78,7 +78,7 @@ def test__log_event__level_follows_outcome(
     caplog: pytest.LogCaptureFixture, outcome: Outcome, level: int
 ) -> None:
     with caplog.at_level(logging.DEBUG, logger=AUDIT_LOGGER_NAME):
-        log_event("x", outcome, user="AB")
+        log_event("x", outcome, user="ABR")
     (record,) = _records(caplog)
     assert record.levelno == level
 
@@ -86,7 +86,7 @@ def test__log_event__level_follows_outcome(
 @pytest.mark.unit
 def test__helpers__produce_expected_events(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.INFO, logger=AUDIT_LOGGER_NAME):
-        log_permission_denied("edit_one_pager", user="AB", one_pager_id="OP-0001")
+        log_permission_denied("edit_one_pager", user="ABR", one_pager_id="OP-0001")
         log_status_transition(
             one_pager_id="OP-0001",
             user="MJO",
@@ -95,15 +95,15 @@ def test__helpers__produce_expected_events(caplog: pytest.LogCaptureFixture) -> 
             to_status="Approved",
             version="1.0.0",
         )
-        log_lock_override(one_pager_id="OP-0001", user="AB", previous_holder="MJO")
+        log_lock_override(one_pager_id="OP-0001", user="ABR", previous_holder="MJO")
 
     messages = [r.getMessage() for r in _records(caplog)]
     assert messages == [
-        "action=edit_one_pager outcome=permission_denied one_pager_id=OP-0001 user=AB",
+        "action=edit_one_pager outcome=permission_denied one_pager_id=OP-0001 user=ABR",
         "action=status_transition outcome=success one_pager_id=OP-0001 user=MJO "
         'status_field=one_pager_status from_status="In Review" to_status=Approved '
         "version=1.0.0",
-        "action=acquire_lock outcome=lock_override one_pager_id=OP-0001 user=AB "
+        "action=acquire_lock outcome=lock_override one_pager_id=OP-0001 user=ABR "
         "previous_holder=MJO",
     ]
 

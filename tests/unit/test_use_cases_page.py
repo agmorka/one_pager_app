@@ -128,7 +128,7 @@ def test_user_text_is_rendered_literally(data_access: MockDataAccess) -> None:
             decision_enabled="d",
             priority="Low",
         ),
-        "AB",
+        "ABR",
     )
     at = _app(data_access)
     assert "\\*\\*bold\\*\\* \\:red\\[x\\] \\$x\\$" in _markdown(at)

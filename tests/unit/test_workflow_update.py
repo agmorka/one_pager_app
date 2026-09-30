@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 
 import pytest
 
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.editing import open_for_edit, save_draft, working_copy
@@ -18,9 +17,10 @@ from onepagerapp.workflow import (
     start_update,
     submit_for_review,
 )
+from tests.users import make_user
 
 NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
-ALICE = resolve_current_user("alice.brown@company.com")  # Owner of OP-0001
+ALICE = make_user("ABR", "Alice Brown")  # Owner of OP-0001
 APPROVED_ID = "OP-0001"  # seeded Approved / Ready for Development, v1.0.0
 
 
@@ -55,7 +55,7 @@ def test__update__needs_confirmation(mock_data_access: MockDataAccess) -> None:
 
 @pytest.mark.unit
 def test__update__owner_or_sme_only(mock_data_access: MockDataAccess) -> None:
-    other = resolve_current_user("cjo@bec.dk")
+    other = make_user("CJO")
     with pytest.raises(PermissionDeniedError):
         start_update(mock_data_access, APPROVED_ID, other, confirmed=True)
 
@@ -113,7 +113,7 @@ def test__full_update_cycle_ends_in_the_next_major(
         mock_data_access,
         document_store,
         APPROVED_ID,
-        resolve_current_user("cjo@bec.dk"),
+        make_user("CJO"),
         roles={Actor.APPROVER},
         now=NOW,
     )
@@ -141,7 +141,7 @@ def test__rejected_update_returns_to_draft_update(
     row = reject_one_pager(
         mock_data_access,
         APPROVED_ID,
-        resolve_current_user("cjo@bec.dk"),
+        make_user("CJO"),
         "Keep the old lineage",
         roles={Actor.APPROVER},
         now=NOW,

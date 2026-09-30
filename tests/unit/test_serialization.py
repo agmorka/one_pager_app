@@ -21,7 +21,7 @@ def test__new_fields_round_trip() -> None:
         "onePagerStatus": "Draft",
         "dataProductStatus": "In Definition",
         "version": "0.1.0",
-        "dataProductOwner": {"name": "A B", "initials": "AB", "email": "a@b.dk"},
+        "dataProductOwner": {"name": "A B", "initials": "ABR", "email": "a@b.dk"},
         "description": "d",
         "createdBy": "A B",
         "createdAt": "2026-09-29T10:00:00+00:00",

@@ -5,14 +5,15 @@ from datetime import UTC, datetime
 
 import pytest
 
-from onepagerapp.auth import resolve_current_user, resolve_roles
+from onepagerapp.auth import resolve_roles
 from onepagerapp.config import AppConfig
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.permissions import PermissionDeniedError, can_review
 from onepagerapp.review import get_review_queue
 from onepagerapp.state_machine import Actor
+from tests.users import make_user
 
-APPROVER = resolve_current_user("cjo@bec.dk")
+APPROVER = make_user("CJO")
 
 
 def _config(**overrides: str) -> AppConfig:
@@ -24,8 +25,8 @@ def test__resolve_roles__from_configured_initials() -> None:
     config = _config(ONE_PAGER_APP_APPROVERS="cjo, XY", ONE_PAGER_APP_ADMINS="adm")
 
     assert resolve_roles(APPROVER, config) == {Actor.APPROVER}
-    assert resolve_roles(resolve_current_user("adm@bec.dk"), config) == {Actor.ADMIN}
-    assert resolve_roles(resolve_current_user("ab@bec.dk"), config) == frozenset()
+    assert resolve_roles(make_user("ADM"), config) == {Actor.ADMIN}
+    assert resolve_roles(make_user("ABC"), config) == frozenset()
     assert resolve_roles(None, config) == frozenset()
 
 

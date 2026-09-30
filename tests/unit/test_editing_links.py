@@ -4,7 +4,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.documents.serialization import document_to_dict
@@ -21,6 +20,7 @@ from onepagerapp.models import CurrentUser, NewOnePagerInput, OnePagerDocument
 from onepagerapp.permissions import PermissionDeniedError
 from onepagerapp.validation import validate_strict
 from onepagerapp.workflow import create_one_pager
+from tests.users import make_user
 
 NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
 
@@ -53,7 +53,7 @@ def _save(data_access, store, doc, user):  # noqa: ANN001, ANN202
 
 
 def _deprecate(data_access: MockDataAccess, use_case_id: str) -> None:
-    data_access.set_use_case_deprecated(use_case_id, True, "AB")
+    data_access.set_use_case_deprecated(use_case_id, True, "ABR")
 
 
 @pytest.mark.unit
@@ -88,7 +88,7 @@ def test__link_and_unlink__require_owner_or_sme(
     assert mock_data_access.get_linked_use_case_ids("OP-0003") == ["UC-001"]
     assert "OP-0003" in mock_data_access.get_use_case_references("UC-001")
 
-    stranger = resolve_current_user("alice.brown@company.com")
+    stranger = make_user("ABR", "Alice Brown")
     with pytest.raises(PermissionDeniedError):
         link_use_case(mock_data_access, "OP-0003", "UC-002", stranger)
     with pytest.raises(PermissionDeniedError):

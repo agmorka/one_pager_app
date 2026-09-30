@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import CurrentUser, NewOnePagerInput, PersonRef
+from tests.users import make_user
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "sample_one_pagers"
 
@@ -25,7 +25,7 @@ def mock_data_access(document_store: OnePagerDocumentStore) -> MockDataAccess:
 
 @pytest.fixture
 def creator() -> CurrentUser:
-    return resolve_current_user("MJOADM@BECOC001.onmicrosoft.com")
+    return make_user("MJO")
 
 
 @pytest.fixture

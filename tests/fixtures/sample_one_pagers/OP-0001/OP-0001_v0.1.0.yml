@@ -9,7 +9,7 @@ version: "0.1.0"
 
 dataProductOwner:
   name: "Alice Brown"
-  initials: "AB"
+  initials: "ABR"
   email: "alice.brown@company.com"
   team: "Data Platform"
 

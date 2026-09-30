@@ -46,9 +46,9 @@ def _use_case_row(use_case_id: str = "UC-001", deprecated: str = "false") -> lis
         "Decision",
         "High",
         deprecated,
-        "AB",
+        "ABR",
         "2026-09-01T10:00:00.000Z",
-        "CD",
+        "CDA",
         "2026-09-02T11:30:00.000Z",
         "3",
     ]

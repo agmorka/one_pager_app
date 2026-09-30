@@ -5,7 +5,6 @@ from typing import NoReturn
 
 import pytest
 
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.models import ChangeLogEntry
 from onepagerapp.permissions import PermissionDeniedError
@@ -15,9 +14,10 @@ from onepagerapp.workflow import (
     TransitionError,
     reject_one_pager,
 )
+from tests.users import make_user
 
 NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
-APPROVER = resolve_current_user("cjo@bec.dk")
+APPROVER = make_user("CJO")
 ROLES = frozenset({Actor.APPROVER})
 IN_REVIEW_ID = "OP-0002"  # seeded In Review, Owner BS, SME DP, v0.3.0
 
@@ -75,7 +75,7 @@ def test__reject__approvers_only(mock_data_access: MockDataAccess) -> None:
 
 @pytest.mark.unit
 def test__reject__segregation_of_duties(mock_data_access: MockDataAccess) -> None:
-    sme = resolve_current_user("dp@bec.dk")  # SME of OP-0002
+    sme = make_user("DPI", "Diana Prince")  # SME of OP-0002
     with pytest.raises(PermissionDeniedError, match="Owner or SME"):
         reject_one_pager(mock_data_access, IN_REVIEW_ID, sme, "No", roles=ROLES)
 

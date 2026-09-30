@@ -6,7 +6,6 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from onepagerapp.audit import AUDIT_LOGGER_NAME
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.config import AppConfig
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.locking import (
@@ -28,13 +27,14 @@ from onepagerapp.permissions import (
     PermissionDeniedError,
     get_action_states,
 )
+from tests.users import make_user
 
 OP_ID = "OP-0001"
 T0 = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
 TTL = timedelta(seconds=60)
 
-ALICE = resolve_current_user("alice.brown@company.com")
-MAJA = resolve_current_user("MJOADM@BECOC001.onmicrosoft.com")
+ALICE = make_user("ABR", "Alice Brown")
+MAJA = make_user("MJO")
 
 
 def _audit(caplog: pytest.LogCaptureFixture) -> list[str]:
@@ -72,13 +72,13 @@ def test__acquire__no_lock_creates_one(
     stored = mock_data_access.get_lock(OP_ID)
     assert stored == result.lock
     assert stored is not None
-    assert stored.locked_by_initials == "AB"
+    assert stored.locked_by_initials == "ABR"
     assert stored.locked_by_name == "Alice Brown"
     assert stored.session_id == "s1"
     assert stored.acquired_at == stored.last_heartbeat == T0
     assert stored.expires_at == T0 + TTL
     assert _audit(caplog) == [
-        "action=acquire_lock outcome=success one_pager_id=OP-0001 user=AB"
+        "action=acquire_lock outcome=success one_pager_id=OP-0001 user=ABR"
     ]
 
 
@@ -129,7 +129,7 @@ def test__acquire__other_user_active_lock_is_refused(
     assert not result.acquired
     assert result.message == "Locked by Alice Brown since 2026-09-29 10:00 UTC."
     assert result.lock is not None
-    assert result.lock.locked_by_initials == "AB"
+    assert result.lock.locked_by_initials == "ABR"
 
 
 @pytest.mark.unit
@@ -151,7 +151,7 @@ def test__acquire__other_user_expired_lock_is_overridden_and_logged(
     assert stored.acquired_at == later
     assert _audit(caplog) == [
         "action=acquire_lock outcome=lock_override one_pager_id=OP-0001 "
-        "user=MJO previous_holder=AB"
+        "user=MJO previous_holder=ABR"
     ]
     record = next(r for r in caplog.records if r.name == AUDIT_LOGGER_NAME)
     assert record.levelno == logging.WARNING
@@ -237,12 +237,12 @@ def test__heartbeat__lock_taken_over_after_expiry_is_lost(
 
 @pytest.mark.unit
 def test__expiry__boundary_and_naive_timestamps() -> None:
-    lock = LockInfo(OP_ID, "AB", "Alice", "s1", T0, T0, T0 + TTL)
+    lock = LockInfo(OP_ID, "ABR", "Alice", "s1", T0, T0, T0 + TTL)
     assert not is_expired(lock, T0 + TTL)
     assert is_expired(lock, T0 + TTL + timedelta(microseconds=1))
 
     naive = LockInfo(
-        OP_ID, "AB", "Alice", "s1", T0, T0, (T0 + TTL).replace(tzinfo=None)
+        OP_ID, "ABR", "Alice", "s1", T0, T0, (T0 + TTL).replace(tzinfo=None)
     )
     assert not is_expired(naive, T0)
     assert is_expired(naive, T0 + 2 * TTL)
@@ -274,7 +274,7 @@ def test__release__holder_releases_from_any_session(
 
     assert mock_data_access.get_lock(OP_ID) is None
     assert _audit(caplog) == [
-        "action=release_lock outcome=success one_pager_id=OP-0001 user=AB"
+        "action=release_lock outcome=success one_pager_id=OP-0001 user=ABR"
     ]
 
 
@@ -323,12 +323,12 @@ def test__release_lock_action_state__only_for_the_holder() -> None:
             lock_holder_initials=holder,
         )["release_lock"]
 
-    assert state("AB", True, "AB").enabled
-    assert not state("MJO", True, "AB").enabled
-    assert state("MJO", True, "AB").tooltip == (
+    assert state("ABR", True, "ABR").enabled
+    assert not state("MJO", True, "ABR").enabled
+    assert state("MJO", True, "ABR").tooltip == (
         "Only the lock holder can release this lock"
     )
-    assert not state("AB", False, None).enabled
+    assert not state("ABR", False, None).enabled
 
 
 @pytest.mark.unit
@@ -341,5 +341,5 @@ def test__get_active_locks__one_read_for_many_ids(
     locks = get_active_locks(mock_data_access, ["OP-0001", "OP-0002", "OP-9999"], T0)
 
     assert list(locks) == ["OP-0001"]
-    assert locks["OP-0001"].locked_by_initials == "AB"
+    assert locks["OP-0001"].locked_by_initials == "ABR"
     assert get_active_locks(mock_data_access, [], T0) == {}

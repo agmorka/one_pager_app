@@ -4,7 +4,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.base import NotFoundError
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.editing import DocumentMissingError, open_for_edit, working_copy
@@ -18,6 +17,7 @@ from onepagerapp.permissions import (
     is_owner_or_sme,
 )
 from onepagerapp.workflow import create_one_pager
+from tests.users import make_user
 
 NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
 
@@ -48,7 +48,7 @@ def test__is_owner_or_sme__matches_initials_and_role(creator: CurrentUser) -> No
     assert is_owner_or_sme(creator, _authorized(("MJO", "owner")))
     assert is_owner_or_sme(creator, _authorized(("MJO", "sme")))
     assert not is_owner_or_sme(creator, _authorized(("MJO", "viewer")))
-    assert not is_owner_or_sme(creator, _authorized(("AB", "owner")))
+    assert not is_owner_or_sme(creator, _authorized(("ABR", "owner")))
     assert not is_owner_or_sme(None, _authorized(("MJO", "owner")))
 
 
@@ -75,7 +75,7 @@ def test__check_can_edit__denial_is_logged(
     creator: CurrentUser, caplog: pytest.LogCaptureFixture
 ) -> None:
     with pytest.raises(PermissionDeniedError, match="Owner or an SME"):
-        check_can_edit(creator, "OP-0009", "Draft", _authorized(("AB", "owner")))
+        check_can_edit(creator, "OP-0009", "Draft", _authorized(("ABR", "owner")))
     assert "permission_denied" in caplog.text
     assert "OP-0009" in caplog.text
 
@@ -96,7 +96,7 @@ def test__action_states__edit_enabled_for_owner_sme_of_draft() -> None:
     assert edit("DPR", "Draft Update")
     assert edit("MJO", "Draft", holder="MJO")
     assert not edit("MJO", "Draft", holder="DPR")
-    assert not edit("AB", "Draft")
+    assert not edit("ABR", "Draft")
     assert not edit("MJO", "In Review")
 
 
@@ -117,7 +117,7 @@ def test__open_for_edit__acquires_lock_and_reads_document(
 def test__open_for_edit__locked_by_other_user(
     draft_id: str, creator: CurrentUser, mock_data_access: MockDataAccess
 ) -> None:
-    sme = resolve_current_user("dpr@bec.dk")
+    sme = make_user("DPR")
     open_for_edit(mock_data_access, draft_id, sme, "other", now=NOW)
 
     session = open_for_edit(
@@ -132,7 +132,7 @@ def test__open_for_edit__locked_by_other_user(
 def test__open_for_edit__not_authorized_takes_no_lock(
     draft_id: str, mock_data_access: MockDataAccess
 ) -> None:
-    stranger = resolve_current_user("alice.brown@company.com")
+    stranger = make_user("ABR", "Alice Brown")
     with pytest.raises(PermissionDeniedError):
         open_for_edit(mock_data_access, draft_id, stranger, "s1", now=NOW)
     assert mock_data_access.get_lock(draft_id) is None
@@ -140,7 +140,7 @@ def test__open_for_edit__not_authorized_takes_no_lock(
 
 @pytest.mark.unit
 def test__open_for_edit__status_not_editable(mock_data_access: MockDataAccess) -> None:
-    owner = resolve_current_user("bob.smith@company.com")  # OP-0002 is In Review
+    owner = make_user("BSM", "Bob Smith")  # OP-0002 is In Review
     with pytest.raises(PermissionDeniedError, match="In Review"):
         open_for_edit(mock_data_access, "OP-0002", owner, "s1", now=NOW)
 

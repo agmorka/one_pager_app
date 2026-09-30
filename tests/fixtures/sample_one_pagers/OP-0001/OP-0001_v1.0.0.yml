@@ -9,13 +9,13 @@ version: "1.0.0"
 
 dataProductOwner:
   name: "Alice Brown"
-  initials: "AB"
+  initials: "ABR"
   email: "alice.brown@company.com"
   team: "Data Platform"
 
 smes:
   - name: "Charlie Davis"
-    initials: "CD"
+    initials: "CDA"
     email: "charlie.davis@company.com"
     team: "Analytics"
 
@@ -123,7 +123,7 @@ outOfScope:
 
 openQuestions:
   - question: "Should prospects without consent be included?"
-    owner: "CD"
+    owner: "CDA"
     dueDate: "2026-10-31"
     status: "Answered"
     answer: "No, only prospects with marketing consent."

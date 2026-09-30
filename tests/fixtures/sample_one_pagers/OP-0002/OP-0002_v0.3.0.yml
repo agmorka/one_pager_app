@@ -9,13 +9,13 @@ version: "0.3.0"
 
 dataProductOwner:
   name: "Bob Smith"
-  initials: "BS"
+  initials: "BSM"
   email: "bob.smith@company.com"
   team: "Sales Analytics"
 
 smes:
   - name: "Diana Prince"
-    initials: "DP"
+    initials: "DPI"
     email: "diana.prince@company.com"
     team: "Finance"
 
@@ -103,7 +103,7 @@ outOfScope:
 
 openQuestions:
   - question: "Which system owns returns?"
-    owner: "DP"
+    owner: "DPI"
     dueDate: "2026-11-15"
     status: "Open"
 

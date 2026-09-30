@@ -11,10 +11,10 @@ import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from tests.conftest import FIXTURES_DIR
+from tests.users import make_user
 
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
 
@@ -30,7 +30,7 @@ def switched(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 @pytest.fixture
 def services(tmp_path: Path) -> dict:
     store = OnePagerDocumentStore(FIXTURES_DIR, write_path=tmp_path)
-    user = resolve_current_user("alice.brown@company.com")
+    user = make_user("ABR", "Alice Brown")
     return {
         "services_initialized": True,
         "data_access": MockDataAccess(store),
@@ -81,8 +81,8 @@ def test__editor__owner_prefilled_from_current_user(
     assert not at.exception
     assert at.title[0].value == "New One Pager"
     assert at.text_input(key="create_owner_name").value == "Alice Brown"
-    assert at.text_input(key="create_owner_initials").value == "AB"
-    assert at.text_input(key="create_owner_email").value == "alice.brown@company.com"
+    assert at.text_input(key="create_owner_initials").value == "ABR"
+    assert at.text_input(key="create_owner_email").value == services["current_user"]
 
 
 @pytest.mark.unit
