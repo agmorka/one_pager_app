@@ -63,7 +63,7 @@ The Editor has create mode and, from Phase 4, edit mode. Missing:
 | 4.1 | Coarse role resolution from **Unity Catalog group membership** (Owner/SME, Approver, Admin, Viewer). Today every authenticated user may create One Pagers and manage Use Cases. **Interim (Phase 6):** `auth.resolve_roles` gives Approver/Admin from the initials in `ONE_PAGER_APP_APPROVERS` / `ONE_PAGER_APP_ADMINS`; switching to UC groups only changes that function |
 | 4.2 | ~~Per-record check: `check_can_edit` against `one_pager_authorized_users`~~ **Done (Phase 4, step 17):** `permissions.check_can_edit` / `edit_denied_reason` (Owner/SME and status `Draft` / `Draft Update`); the Owner/SME UC group check still waits for 4.1 |
 | 4.3 | ~~Real `get_action_states`. Today every action is hard-coded as disabled.~~ **Done (Phase 5):** derived from `TRANSITIONS` guards; actions whose service is not built yet stay disabled ("coming soon"). Approver/Admin roles wait for 4.1 |
-| 4.4 | Pages hidden or shown by role (Review for Approvers only, Admin for Admins only, Editor for Owner/SME only) |
+| 4.4 | Pages hidden or shown by role (Review for Approvers only, Admin for Admins only, Editor for Owner/SME only). **Partly done:** Review (Phase 6) and Admin (Phase 10) are shown by role; the Editor stays registered for everyone (UI_Design §2) |
 | 4.5 | Role badge next to the user in the sidebar |
 
 ## 5. Concurrency control / locking (Req §10, Backend §6)
@@ -116,9 +116,9 @@ There is no `git_integration.py`.
 
 | # | Feature |
 |---|---|
-| 10.1 | Admin page (`7_Admin.py`), restricted to Admins |
-| 10.2 | CRUD for reference data: business domains, product types, **source systems** (no `ref_source_systems` table/DDL exists yet) |
-| 10.3 | View and edit status definitions (`ref_op_status` / `ref_dp_status`) |
+| 10.1 | ~~Admin page (`7_Admin.py`), restricted to Admins~~ **Done (Phase 10):** `app/views/admin.py`, service `onepagerapp/admin.py`; in the navigation for Admins only, others see "You don't have access to this page." |
+| 10.2 | ~~CRUD for reference data: business domains, product types, **source systems** (no `ref_source_systems` table/DDL exists yet)~~ **Done (Phase 10):** add, reorder, deactivate/reactivate, delete while unused; `ref_source_systems` Liquibase changeset. The Data Sources tab keeps `sourceSystem` as free text for now |
+| 10.3 | ~~View and edit status definitions (`ref_op_status` / `ref_dp_status`)~~ **Done (Phase 10):** display label, order and badge color |
 | 10.4 | Pending PRs table with **Retry PR** |
 
 ## 11. Registry gaps (Req §3, UI §4.1)
@@ -274,7 +274,7 @@ This phase is left until the lifecycle is stable, because it depends on external
 | Order | Item | Why now |
 |---|---|---|
 | 43 | ~~9.1 Help page~~ **Done** | Describes the final lifecycle, using 9.2 |
-| 44 | 10.1 Admin page, 10.3 status definitions, 10.2 reference-data CRUD (including the `ref_source_systems` Liquibase changeset) | `sourceSystem` is free text in the schema today, so the Data Sources tab does not need this table first |
+| 44 | ~~10.1 Admin page, 10.3 status definitions, 10.2 reference-data CRUD (including the `ref_source_systems` Liquibase changeset)~~ **Done** | `sourceSystem` is free text in the schema today, so the Data Sources tab does not need this table first |
 | 45 | 10.4 Pending PRs table with **Retry PR** | Needs 7.2 |
 
 ### Phase 11: Hardening

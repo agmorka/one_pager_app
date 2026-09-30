@@ -8,7 +8,12 @@ import pandas as pd
 from databricks.sdk.service.sql import StatementResponse
 
 from onepagerapp.config import AppConfig
-from onepagerapp.data_access.base import DataAccess, NotFoundError
+from onepagerapp.data_access.base import (
+    DataAccess,
+    NotFoundError,
+    check_reference_table,
+    check_status_table,
+)
 from onepagerapp.data_access.connection import (
     DatabricksConnection,
     SqlParameterValue,
@@ -170,6 +175,67 @@ class LakehouseAccess(DataAccess):
 
     def get_ref_data_product_types(self) -> pd.DataFrame:
         return self.read_table("ref_data_product_types")
+
+    def get_ref_source_systems(self) -> pd.DataFrame:
+        return self.read_table("ref_source_systems")
+
+    # Reference-data writes: table and key column names come from the
+    # REFERENCE_TABLES / STATUS_TABLES whitelists; every value is a parameter.
+
+    def insert_reference_value(
+        self, table: str, value: str, *, sort_order: int, active: bool
+    ) -> bool:
+        key = check_reference_table(table)
+        fqn = f"{self._fqn_prefix}.{table}"
+        response = self._connection.execute_statement(
+            f"INSERT INTO {fqn} ({key}, sort_order, active) "  # noqa: S608
+            f"SELECT :value, :sort_order, :active "
+            f"WHERE NOT EXISTS (SELECT 1 FROM {fqn} WHERE {key} = :value)",
+            parameters={"value": value, "sort_order": sort_order, "active": active},
+        )
+        return self._affected_rows(response) == 1
+
+    def update_reference_value(
+        self, table: str, value: str, *, sort_order: int, active: bool
+    ) -> bool:
+        key = check_reference_table(table)
+        response = self._connection.execute_statement(
+            f"UPDATE {self._fqn_prefix}.{table} "  # noqa: S608
+            f"SET sort_order = :sort_order, active = :active WHERE {key} = :value",
+            parameters={"value": value, "sort_order": sort_order, "active": active},
+        )
+        return self._affected_rows(response) == 1
+
+    def delete_reference_value(self, table: str, value: str) -> bool:
+        key = check_reference_table(table)
+        response = self._connection.execute_statement(
+            f"DELETE FROM {self._fqn_prefix}.{table} WHERE {key} = :value",  # noqa: S608
+            parameters={"value": value},
+        )
+        return self._affected_rows(response) == 1
+
+    def update_status_definition(
+        self,
+        table: str,
+        status: str,
+        *,
+        display_label: str,
+        sort_order: int,
+        badge_color: str,
+    ) -> bool:
+        check_status_table(table)
+        response = self._connection.execute_statement(
+            f"UPDATE {self._fqn_prefix}.{table} "  # noqa: S608
+            f"SET display_label = :display_label, sort_order = :sort_order, "
+            f"badge_color = :badge_color WHERE status = :status",
+            parameters={
+                "status": status,
+                "display_label": display_label,
+                "sort_order": sort_order,
+                "badge_color": badge_color,
+            },
+        )
+        return self._affected_rows(response) == 1
 
     @staticmethod
     def _escape_sql_string(value: str) -> str:

@@ -437,6 +437,14 @@ This page is largely static content — no Loading/Empty states needed. Error st
 - **Status definitions:** View/edit `ref_op_status` and `ref_dp_status` (display labels, colors, ordering).
 - **Pending PRs:** Table of One Pagers where `pending_pr = true`, with a [Retry PR] button per row.
 
+Implemented in `app/views/admin.py` with the service `onepagerapp/admin.py`. The section menu is a horizontal selector above the section (the sections use columns themselves, and Streamlit allows one level of nested columns). Reference data rules:
+
+- A value's name is its key and One Pagers store it, so it is never renamed: add the new name and deactivate the old one.
+- **Deactivate** keeps the value on the One Pagers that use it; it is no longer offered for new choices in the Editor.
+- **Delete** is only possible while no One Pager uses the value (usage is counted for business domains and product types; source systems are free text in the documents, so their usage is not tracked).
+- Status definitions: only the display label, order and badge color change. The statuses and whether they are final belong to the state machine.
+- Every change is logged as a security event and clears the cached reference data, so the Editor and Registry show it at once.
+
 #### States
 Same pattern: Loading / Populated / Error. Restricted to Admin role — other users see "You don't have access to this page."
 

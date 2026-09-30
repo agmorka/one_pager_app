@@ -147,6 +147,11 @@ def can_review(roles: Collection[Actor]) -> bool:
     return Actor.APPROVER in roles
 
 
+def can_administer(roles: Collection[Actor]) -> bool:
+    """Whether the user may use the Admin page: Admins only (UI_Design.md §2)."""
+    return Actor.ADMIN in roles
+
+
 def can_release_lock(user: CurrentUser | None, lock: LockInfo | None) -> bool:
     """Check if the user may release a lock: only its holder may (Backend §6)."""
     return bool(user and lock and lock.locked_by_initials == user.initials)

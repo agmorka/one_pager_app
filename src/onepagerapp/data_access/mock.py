@@ -6,7 +6,12 @@ from datetime import UTC, datetime
 
 import pandas as pd
 
-from onepagerapp.data_access.base import DataAccess, NotFoundError
+from onepagerapp.data_access.base import (
+    DataAccess,
+    NotFoundError,
+    check_reference_table,
+    check_status_table,
+)
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.id_generator import next_id
 from onepagerapp.models import (
@@ -71,6 +76,12 @@ class MockDataAccess(DataAccess):
             )
             + 1
         )
+        # Rows of the Admin-managed reference tables and status definitions.
+        self._reference: dict[str, list[dict]] = _seed_reference_data()
+        self._status_definitions: dict[str, list[dict]] = {
+            "ref_op_status": _seed_op_statuses(),
+            "ref_dp_status": _seed_dp_statuses(),
+        }
         # Rows of the locks table, keyed by one_pager_id (one lock per One Pager).
         self._locks: dict[str, LockInfo] = {}
         # D14: counters start after the highest seeded mock IDs.
@@ -94,141 +105,78 @@ class MockDataAccess(DataAccess):
         return pd.DataFrame()
 
     def get_ref_op_status(self) -> pd.DataFrame:
-        return pd.DataFrame(
-            [
-                {
-                    "status": "Draft",
-                    "display_label": "Draft",
-                    "sort_order": 1,
-                    "badge_color": "#808080",
-                    "is_terminal": False,
-                },
-                {
-                    "status": "Ready for Review",
-                    "display_label": "Ready for Review",
-                    "sort_order": 2,
-                    "badge_color": "#F9BD00",
-                    "is_terminal": False,
-                },
-                {
-                    "status": "In Review",
-                    "display_label": "In Review",
-                    "sort_order": 3,
-                    "badge_color": "#FFA500",
-                    "is_terminal": False,
-                },
-                {
-                    "status": "Approved",
-                    "display_label": "Approved",
-                    "sort_order": 4,
-                    "badge_color": "#65B676",
-                    "is_terminal": False,
-                },
-                {
-                    "status": "Draft Update",
-                    "display_label": "Draft Update",
-                    "sort_order": 5,
-                    "badge_color": "#7E57C2",
-                    "is_terminal": False,
-                },
-                {
-                    "status": "Cancelled",
-                    "display_label": "Cancelled",
-                    "sort_order": 6,
-                    "badge_color": "#F34421",
-                    "is_terminal": True,
-                },
-            ]
-        )
+        return pd.DataFrame(copy.deepcopy(self._status_definitions["ref_op_status"]))
 
     def get_ref_dp_status(self) -> pd.DataFrame:
-        return pd.DataFrame(
-            [
-                {
-                    "status": "In Definition",
-                    "display_label": "In Definition",
-                    "sort_order": 1,
-                    "badge_color": "#808080",
-                    "is_terminal": False,
-                },
-                {
-                    "status": "Ready for Development",
-                    "display_label": "Ready for Development",
-                    "sort_order": 2,
-                    "badge_color": "#65B676",
-                    "is_terminal": False,
-                },
-                {
-                    "status": "In Development",
-                    "display_label": "In Development",
-                    "sort_order": 3,
-                    "badge_color": "#3599B8",
-                    "is_terminal": False,
-                },
-                {
-                    "status": "Active",
-                    "display_label": "Active",
-                    "sort_order": 4,
-                    "badge_color": "#00975f",
-                    "is_terminal": False,
-                },
-                {
-                    "status": "In Enhancement",
-                    "display_label": "In Enhancement",
-                    "sort_order": 5,
-                    "badge_color": "#F9BD00",
-                    "is_terminal": False,
-                },
-                {
-                    "status": "Deprecated",
-                    "display_label": "Deprecated",
-                    "sort_order": 6,
-                    "badge_color": "#7E57C2",
-                    "is_terminal": True,
-                },
-                {
-                    "status": "Cancelled",
-                    "display_label": "Cancelled",
-                    "sort_order": 7,
-                    "badge_color": "#F34421",
-                    "is_terminal": True,
-                },
-            ]
-        )
+        return pd.DataFrame(copy.deepcopy(self._status_definitions["ref_dp_status"]))
 
     def get_ref_business_domains(self) -> pd.DataFrame:
-        return pd.DataFrame(
-            [
-                {"domain": "Finance", "display_label": "Finance", "sort_order": 1},
-                {"domain": "Operations", "display_label": "Operations", "sort_order": 2},
-                {"domain": "HR", "display_label": "Human Resources", "sort_order": 3},
-                {"domain": "Technology", "display_label": "Technology", "sort_order": 4},
-                {"domain": "Marketing", "display_label": "Marketing", "sort_order": 5},
-                {"domain": "Sales", "display_label": "Sales", "sort_order": 6},
-                {"domain": "Customer", "display_label": "Customer", "sort_order": 7},
-            ]
-        )
+        return self._reference_frame("ref_business_domains")
 
     def get_ref_data_product_types(self) -> pd.DataFrame:
+        return self._reference_frame("ref_data_product_types")
+
+    def get_ref_source_systems(self) -> pd.DataFrame:
+        return self._reference_frame("ref_source_systems")
+
+    def _reference_frame(self, table: str) -> pd.DataFrame:
+        key = check_reference_table(table)
+        rows = sorted(self._reference[table], key=lambda r: (r["sort_order"], r[key]))
         return pd.DataFrame(
-            [
-                {
-                    "type": "Foundational",
-                    "display_label": "Foundational",
-                    "sort_order": 1,
-                },
-                {
-                    "type": "Integrated",
-                    "display_label": "Integrated",
-                    "sort_order": 2,
-                },
-                {
-                    "type": "Augmented",
-                    "display_label": "Augmented",
-                    "sort_order": 3,
-                },
-            ]
+            copy.deepcopy(rows), columns=[key, "sort_order", "active"]
         )
+
+    def _reference_row(self, table: str, value: str) -> dict | None:
+        key = check_reference_table(table)
+        return next((r for r in self._reference[table] if r[key] == value), None)
+
+    def insert_reference_value(
+        self, table: str, value: str, *, sort_order: int, active: bool
+    ) -> bool:
+        if self._reference_row(table, value) is not None:
+            return False
+        key = check_reference_table(table)
+        self._reference[table].append(
+            {key: value, "sort_order": sort_order, "active": active}
+        )
+        return True
+
+    def update_reference_value(
+        self, table: str, value: str, *, sort_order: int, active: bool
+    ) -> bool:
+        row = self._reference_row(table, value)
+        if row is None:
+            return False
+        row.update(sort_order=sort_order, active=active)
+        return True
+
+    def delete_reference_value(self, table: str, value: str) -> bool:
+        row = self._reference_row(table, value)
+        if row is None:
+            return False
+        self._reference[table].remove(row)
+        return True
+
+    def update_status_definition(
+        self,
+        table: str,
+        status: str,
+        *,
+        display_label: str,
+        sort_order: int,
+        badge_color: str,
+    ) -> bool:
+        check_status_table(table)
+        row = next(
+            (r for r in self._status_definitions[table] if r["status"] == status),
+            None,
+        )
+        if row is None:
+            return False
+        row.update(
+            display_label=display_label, sort_order=sort_order, badge_color=badge_color
+        )
+        return True
 
     def _get_sample_registry_data(self) -> list[RegistryRow]:
         """Return the current in-memory One Pager rows as Registry rows."""
@@ -884,3 +832,137 @@ def _sample_use_cases() -> list[UseCase]:
             created_at,
         ) in samples
     ]
+
+
+def _seed_op_statuses() -> list[dict]:
+    """``ref_op_status`` rows (the Liquibase seed)."""
+    return [
+        {
+            "status": "Draft",
+            "display_label": "Draft",
+            "sort_order": 1,
+            "badge_color": "#808080",
+            "is_terminal": False,
+        },
+        {
+            "status": "Ready for Review",
+            "display_label": "Ready for Review",
+            "sort_order": 2,
+            "badge_color": "#F9BD00",
+            "is_terminal": False,
+        },
+        {
+            "status": "In Review",
+            "display_label": "In Review",
+            "sort_order": 3,
+            "badge_color": "#FFA500",
+            "is_terminal": False,
+        },
+        {
+            "status": "Approved",
+            "display_label": "Approved",
+            "sort_order": 4,
+            "badge_color": "#65B676",
+            "is_terminal": False,
+        },
+        {
+            "status": "Draft Update",
+            "display_label": "Draft Update",
+            "sort_order": 5,
+            "badge_color": "#7E57C2",
+            "is_terminal": False,
+        },
+        {
+            "status": "Cancelled",
+            "display_label": "Cancelled",
+            "sort_order": 6,
+            "badge_color": "#F34421",
+            "is_terminal": True,
+        },
+    ]
+
+
+def _seed_dp_statuses() -> list[dict]:
+    """``ref_dp_status`` rows (the Liquibase seed)."""
+    return [
+        {
+            "status": "In Definition",
+            "display_label": "In Definition",
+            "sort_order": 1,
+            "badge_color": "#808080",
+            "is_terminal": False,
+        },
+        {
+            "status": "Ready for Development",
+            "display_label": "Ready for Development",
+            "sort_order": 2,
+            "badge_color": "#65B676",
+            "is_terminal": False,
+        },
+        {
+            "status": "In Development",
+            "display_label": "In Development",
+            "sort_order": 3,
+            "badge_color": "#3599B8",
+            "is_terminal": False,
+        },
+        {
+            "status": "Active",
+            "display_label": "Active",
+            "sort_order": 4,
+            "badge_color": "#00975f",
+            "is_terminal": False,
+        },
+        {
+            "status": "In Enhancement",
+            "display_label": "In Enhancement",
+            "sort_order": 5,
+            "badge_color": "#F9BD00",
+            "is_terminal": False,
+        },
+        {
+            "status": "Deprecated",
+            "display_label": "Deprecated",
+            "sort_order": 6,
+            "badge_color": "#7E57C2",
+            "is_terminal": True,
+        },
+        {
+            "status": "Cancelled",
+            "display_label": "Cancelled",
+            "sort_order": 7,
+            "badge_color": "#F34421",
+            "is_terminal": True,
+        },
+    ]
+
+
+def _seed_reference_data() -> dict[str, list[dict]]:
+    """Rows of the Admin-managed reference tables (Data_Model.md §7)."""
+
+    def rows(key: str, values: list[str]) -> list[dict]:
+        return [
+            {key: value, "sort_order": order, "active": True}
+            for order, value in enumerate(values, start=1)
+        ]
+
+    return {
+        "ref_business_domains": rows(
+            "domain",
+            [
+                "Finance",
+                "Operations",
+                "HR",
+                "Technology",
+                "Marketing",
+                "Sales",
+                "Customer",
+            ],
+        ),
+        "ref_data_product_types": rows(
+            "type", ["Foundational", "Integrated", "Augmented"]
+        ),
+        "ref_source_systems": rows(
+            "system_name", ["SAP ERP", "Salesforce CRM", "Workday", "Core Banking"]
+        ),
+    }
