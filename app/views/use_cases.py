@@ -29,7 +29,7 @@ from onepagerapp.models import (
     UseCaseInput,
     UseCasePage,
 )
-from onepagerapp.permissions import PermissionDeniedError, can_manage_use_cases
+from onepagerapp.permissions import can_manage_use_cases, require_identity
 from onepagerapp.use_cases import (
     USE_CASE_FIELDS,
     clean_use_case_input,
@@ -85,11 +85,8 @@ def _current_initials() -> str | None:
 
 def _actor_initials() -> str:
     """Initials recorded on a Use Case write; refuses unrecognised users."""
-    initials = _current_initials()
-    if initials is None:
-        msg = "Your account is not recognised."
-        raise PermissionDeniedError(msg)
-    return initials
+    user = st.session_state.get("current_user_info")
+    return require_identity(user, "manage_use_cases").initials
 
 
 def _used_by_label(count: int) -> str:

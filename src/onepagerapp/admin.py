@@ -36,7 +36,11 @@ from onepagerapp.models import (
     RegistryFilter,
     StatusRef,
 )
-from onepagerapp.permissions import PermissionDeniedError, can_administer
+from onepagerapp.permissions import (
+    PermissionDeniedError,
+    can_administer,
+    require_identity,
+)
 from onepagerapp.state_machine import DP_STATUSES, OP_STATUSES, Actor
 from onepagerapp.validation import sanitize_text
 
@@ -117,6 +121,7 @@ class ReferenceValue:
 
 def check_can_administer(user: CurrentUser | None, roles: Collection[Actor]) -> None:
     """Raise ``PermissionDeniedError`` (logged) unless the user is an Admin."""
+    require_identity(user, "administer")
     if can_administer(roles):
         return
     log_permission_denied("administer", user=user.initials if user else None)

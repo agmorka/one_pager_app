@@ -39,6 +39,31 @@ class PermissionDeniedError(Exception):
     """Raised by the service layer when a user may not perform an action."""
 
 
+UNRECOGNISED_USER_MESSAGE = (
+    "Your account is not recognised by the One Pager App. Contact the platform team."
+)
+
+
+def require_identity(
+    user: CurrentUser | None, action: str, one_pager_id: str | None = None
+) -> CurrentUser:
+    """Refuse a service call without a recognised user (Architecture.md §4).
+
+    app.py already refuses unrecognised users before any page runs; this check
+    at every service entry point makes sure a missing identity (no user, or
+    empty initials) can never reach a read of protected data or a write.
+
+    Raises:
+        PermissionDeniedError: There is no user or the user has no initials
+            (logged as ``permission_denied``).
+
+    """
+    if user is None or not user.initials:
+        log_permission_denied(action, user=None, one_pager_id=one_pager_id)
+        raise PermissionDeniedError(UNRECOGNISED_USER_MESSAGE)
+    return user
+
+
 @dataclass
 class ActionState:
     """Button state for a single action.

@@ -125,6 +125,13 @@ Record every answer in [Decision_Log.md](../docs/Decision_Log.md).
 
 **Done when:** a request without proxy headers, or with an unknown domain, never reaches a page, and tests cover each mode.
 
+**Status (2026-10-01): implemented.** Notes on the implementation:
+
+- `app.py` loads the configuration, resolves the user and only then creates the data access. In `local-integration` the data access is created first, because the identity comes from `SELECT current_user()`.
+- A failed identity lookup (e.g. the warehouse is unreachable in `local-integration`) is treated like a missing username: access denied.
+- The refusal is logged once per session as `action=access_app outcome=permission_denied user=- username=<username>`.
+- `permissions.require_identity` runs first in the workflow, editing, review, locking and admin entry points (admin and the review queue through `check_can_administer` / `check_can_review`), and in the Use Cases page's writes.
+
 ## 7. Phase 3 — Complete the Audit Trail in the App's Tables
 
 **Goal:** before writes move to the service principal (Phase 4), every write stores **who** made it, because Delta history will show only the service principal afterwards.

@@ -42,6 +42,7 @@ from onepagerapp.permissions import (
     PermissionDeniedError,
     check_can_edit,
     is_owner_or_sme,
+    require_identity,
 )
 from onepagerapp.validation import (
     normalize_document,
@@ -128,6 +129,7 @@ def load_for_edit(
         DocumentMissingError: The current version's document is missing.
 
     """
+    require_identity(user, "load_for_edit", one_pager_id)
     row = data_access.get_one_pager_status_row(one_pager_id)
     if row is None:
         msg = f"One Pager {one_pager_id} not found."
@@ -452,6 +454,7 @@ def save_draft(  # noqa: PLR0913 - every argument is needed to save
         SaveError: Storing failed; nothing visible was changed.
 
     """
+    require_identity(user, "save_draft", one_pager_id)
     now = now or datetime.now(UTC)
     row = data_access.get_one_pager_status_row(one_pager_id)
     if row is None:
@@ -739,6 +742,7 @@ def link_use_case(
         ValueError: The Use Case does not exist or is deprecated.
 
     """
+    require_identity(user, "link_use_case", one_pager_id)
     _check_can_link(data_access, one_pager_id, user, "link_use_case")
     reason = link_denied_reason(data_access, use_case_id)
     if reason:
@@ -762,6 +766,7 @@ def unlink_use_case(
         PermissionDeniedError: The user is not Owner/SME of the One Pager.
 
     """
+    require_identity(user, "unlink_use_case", one_pager_id)
     _check_can_link(data_access, one_pager_id, user, "unlink_use_case")
     data_access.remove_use_case_reference(one_pager_id, use_case_id)
     log_event(

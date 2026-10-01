@@ -5,7 +5,9 @@ overrides, status transitions, failed writes) goes through ``log_event`` so the
 records share one ``key=value`` format that log search can parse.
 
 Records contain only user initials, record IDs, action names and outcomes —
-never field values or PII (Architecture.md §8).
+never field values or PII (Architecture.md §8). The one exception is the
+username of an account that is refused because it has no initials
+(``log_unrecognised_user``).
 """
 
 import logging
@@ -117,6 +119,18 @@ def log_permission_denied(
 ) -> None:
     """Log a failed permission check."""
     log_event(action, Outcome.PERMISSION_DENIED, user=user, one_pager_id=one_pager_id)
+
+
+def log_unrecognised_user(username: str | None) -> None:
+    """Log that a user was refused because their account is not recognised.
+
+    There are no initials to log, so the raw username is logged instead (it is
+    the only way to see who was refused; never a token or header value other
+    than the username). ``None`` means no username was provided at all.
+    """
+    log_event(
+        "access_app", Outcome.PERMISSION_DENIED, user=None, username=username or None
+    )
 
 
 def log_status_transition(  # noqa: PLR0913 - every field is part of the event
