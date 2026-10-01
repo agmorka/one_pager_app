@@ -7,11 +7,11 @@ import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.state_machine import Actor
 from tests.conftest import FIXTURES_DIR
+from tests.users import make_user
 
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
 
@@ -36,7 +36,7 @@ def _app(
     data_access_cls: type = MockDataAccess,
 ) -> AppTest:
     store = OnePagerDocumentStore(FIXTURES_DIR, write_path=tmp_path)
-    user = resolve_current_user("cjo@bec.dk")
+    user = make_user("CJO")
     at = AppTest.from_file(str(APP_DIR / "views" / "review.py"), default_timeout=30)
     state = {
         "services_initialized": True,

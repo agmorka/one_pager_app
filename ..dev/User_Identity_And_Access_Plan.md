@@ -32,18 +32,18 @@ The phases are listed in the order they should be implemented. Each phase can be
 
 ## 4. Phase 0 — Decisions and Platform Prerequisites
 
-Answer these before or during Phase 1. Phases 1–3 do not depend on them. Phases 4–7 do.
+Answer these before or during Phase 1. Phases 1–3 do not depend on them. Phases 4–7 do. **All eight are now answered: see §4.1 (Q7) and §4.2 (Q1–Q6, Q8).**
 
 | # | Question | Needed by | Owner |
 |---|---|---|---|
-| Q1 | Initials format: allowed characters (letters and digits?), minimum and maximum length, always upper case? | Phase 1 | Business / platform |
-| Q2 | During the switch from `x0wadm@` to `x0w@`, do both usernames exist at the same time? Should both map to the same initials? (Assumed yes.) | Phase 1 | Platform |
-| Q3 | During a domain change, are old and new domains valid at the same time? | Phase 1 | Platform |
-| Q4 | A username that does not match the configured format (unknown domain, service account, guest): **deny access** or **read-only**? (Recommended: deny.) | Phase 2 | Business |
-| Q5 | Is Databricks Apps **user authorization** enabled for the app in every environment, with scopes `sql` and `iam.current-user:read`? | Phase 4 | Platform |
-| Q6 | Are `givenName` / `familyName` / `displayName` filled in for users in the workspace? Check with `GET /api/2.0/preview/scim/v2/Me`. | Phase 5 | Platform |
+| Q1 | Initials format: allowed characters (letters and digits?), minimum and maximum length, always upper case? | Phase 1 | Business / platform — **answered, see §4.2** |
+| Q2 | During the switch from `x0wadm@` to `x0w@`, do both usernames exist at the same time? Should both map to the same initials? (Assumed yes.) | Phase 1 | Platform — **answered, see §4.2** |
+| Q3 | During a domain change, are old and new domains valid at the same time? | Phase 1 | Platform — **answered, see §4.2** |
+| Q4 | A username that does not match the configured format (unknown domain, service account, guest): **deny access** or **read-only**? (Recommended: deny.) | Phase 2 | Business — **answered, see §4.2** |
+| Q5 | Is Databricks Apps **user authorization** enabled for the app in every environment, with scopes `sql` and `iam.current-user:read`? | Phase 4 | Platform — **answered, see §4.2** |
+| Q6 | Are `givenName` / `familyName` / `displayName` filled in for users in the workspace? Check with `GET /api/2.0/preview/scim/v2/Me`. | Phase 5 | Platform — **answered, see §4.2** |
 | Q7 | Names of the Owner/SME, Approver, Admin (and Viewer, if any) groups per environment. Does `SCIM Me` return nested group memberships, or is `is_account_group_member()` needed? | Phase 6 | Platform — **answered, see §4.1** |
-| Q8 | Can the service principal get `SELECT` + `MODIFY` on the `onepager_app` schema and `WRITE VOLUME` on the registry volume, while user groups get only `SELECT` / `READ VOLUME`? | Phase 4 | Platform |
+| Q8 | Can the service principal get `SELECT` + `MODIFY` on the `onepager_app` schema and `WRITE VOLUME` on the registry volume, while user groups get only `SELECT` / `READ VOLUME`? | Phase 4 | Platform — **answered, see §4.2** |
 
 Record every answer in [Decision_Log.md](../docs/Decision_Log.md).
 
@@ -62,14 +62,27 @@ Record every answer in [Decision_Log.md](../docs/Decision_Log.md).
 - Phase 6 adds a start-up warning and a sidebar notice while the interim group is used.
 - Request the three groups early, because the platform lead time is outside this plan. Suggested names: `OPA-OwnerSME-<ENV>`, `OPA-Approver-<ENV>`, `OPA-Admin-<ENV>` (follow the platform naming convention if one exists).
 
+### 4.2 Answers received for Q1–Q6 and Q8 (2026-09-30)
+
+| # | Answer | Consequence for the plan |
+|---|---|---|
+| Q1 | Initials are letters and digits, **always exactly 3 characters**. Upper or lower case does not matter. | Default `ONE_PAGER_APP_INITIALS_PATTERN` is `^[A-Z0-9]{3}$`. Initials are upper-cased **before** the pattern check, both at login and when Owner/SME initials are entered, so `x0w` is accepted and stored as `X0W`. |
+| Q2 | `X0W` are the initials in the BEC domain; `X0Wadm` is the username in Databricks. In the future this may be aligned so users log in to Databricks as `X0W`. No overlap period was mentioned. | Default `ONE_PAGER_APP_USERNAME_SUFFIXES` is `adm` only (strict: `x0w@…` is not accepted today). When the usernames are aligned, set it to `adm,` for the switch and to empty afterwards. Configuration only, no code change. Because the pattern requires exactly 3 characters, an unstripped `x0wadm` can never be taken as initials. |
+| Q3 | **No.** Old and new domains are not valid at the same time. | `ONE_PAGER_APP_USER_DOMAINS` holds one production domain. A domain change is a configuration change made at the time of the switch. The setting stays a list only so that mock mode can add `mock.local`. |
+| Q4 | **Deny access.** | Phase 2 shows the "account not recognised" page and stops. No read-only mode. |
+| Q5 | **Yes**, user authorization is enabled with scopes `sql` and `iam.current-user:read`. | Phases 4 and 5 are unblocked. Phase 7 still checks the scopes in `app.yml` for every environment. |
+| Q6 | **Probably yes** (not yet verified). | Verify at the start of Phase 5 with `GET /api/2.0/preview/scim/v2/Me` as a real user in DEV. If names are empty, Phase 5 falls back to the initials (step 8), so nothing breaks. |
+| Q7 | Group names: answered in §4.1. Nested groups: not known. | No answer needed from the platform team. Phase 6 uses `is_account_group_member()`, which covers nested Entra groups, and the DEV spike in Phase 6 step 2 confirms it. |
+| Q8 | **Yes**, the service principal already has this access. | Phase 4 is unblocked. Phase 7 still checks the second half of the question: that no user group has `MODIFY` on the app tables or `WRITE VOLUME` on the volume. |
+
 ## 5. Phase 1 — Configurable Username Format and Initials
 
 **Goal:** `x0wadm@becoc001.onmicrosoft.com` → `X0W`, and the suffix and domain can be changed through configuration only.
 
 1. **Add settings to `AppConfig`** ([config.py](../src/onepagerapp/config.py)):
-   - `ONE_PAGER_APP_USER_DOMAINS` — comma-separated list of accepted domains, default `becoc001.onmicrosoft.com`. A list lets old and new domains work side by side (Q3).
-   - `ONE_PAGER_APP_USERNAME_SUFFIXES` — comma-separated list of suffixes to strip from the user part, default `adm`. An empty entry means "no suffix", so `adm,` accepts both `x0wadm` and `x0w` (Q2).
-   - `ONE_PAGER_APP_INITIALS_PATTERN` — regular expression for valid initials, default `^[A-Z0-9]{2,5}$` (Q1).
+   - `ONE_PAGER_APP_USER_DOMAINS` — comma-separated list of accepted domains, default `becoc001.onmicrosoft.com`. Old and new domains are never valid at the same time (Q3); a domain change is a configuration change at the switch. It is a list so mock mode can add `mock.local`.
+   - `ONE_PAGER_APP_USERNAME_SUFFIXES` — comma-separated list of suffixes to strip from the user part, default `adm`. An empty entry means "no suffix", so `adm,` accepts both `x0wadm` and `x0w`: use it for the future switch to `x0w@` usernames, then leave it empty (Q2).
+   - `ONE_PAGER_APP_INITIALS_PATTERN` — regular expression for valid initials, default `^[A-Z0-9]{3}$` (Q1: letters and digits, exactly 3 characters). The pattern is checked after upper-casing.
    - Properties `user_domains`, `username_suffixes`, `initials_pattern` that normalise (lower case domains and suffixes, compiled pattern).
 2. **Rewrite `initials_from_username`** in [auth.py](../src/onepagerapp/auth.py):
    - Signature `initials_from_username(username, config) -> str | None`.
@@ -78,15 +91,24 @@ Record every answer in [Decision_Log.md](../docs/Decision_Log.md).
    - Remove the guessing fallbacks (`alice.brown` → `AB`, first 3 letters, `"??"`). An unrecognised username must never produce initials that could match someone else.
 3. **Keep one implementation.** Update `permissions.extract_initials` and every caller (`resolve_current_user`, the Use Cases page) to pass the config. Callers that received `"??"` now receive `None`. Phase 2 decides what happens then.
 4. **Mock mode user.** Replace the hardcoded `local-dev-user@mock.local` in [mock.py](../src/onepagerapp/data_access/mock.py) with a setting `ONE_PAGER_APP_MOCK_USER` (default `ldu@mock.local`) and add `mock.local` to the domains in [.env.example](../.env.example), so mock mode goes through the same parsing as production.
-5. **Allow digits in stored initials.** Make `INITIALS_PATTERN` in [validation.py](../src/onepagerapp/validation.py) use `config.initials_pattern`, so the Owner/SME rows accept `X0W`. Update the form hints on the Editor Basics tab and the Help page text.
+5. **Allow digits in stored initials.** Make `INITIALS_PATTERN` in [validation.py](../src/onepagerapp/validation.py) use `config.initials_pattern`, so the Owner/SME rows accept `X0W`. Upper-case the entered value before the check and store it upper-case, so `x0w` is accepted and saved as `X0W` (Q1: case does not matter). Update the form hints on the Editor Basics tab and the Help page text.
 6. **Tests** ([tests/unit/test_auth.py](../tests/unit/test_auth.py), [test_config.py](../tests/unit/test_config.py), [test_validation.py](../tests/unit/test_validation.py)):
-   - `x0wadm@becoc001.onmicrosoft.com` → `X0W`; `x0w@becoc001.onmicrosoft.com` → `X0W` (suffix list `adm,`).
+   - `x0wadm@becoc001.onmicrosoft.com` → `X0W`; `x0w@becoc001.onmicrosoft.com` → `X0W` (suffix list `adm,`); `x0w@becoc001.onmicrosoft.com` → `None` with the default suffix `adm`.
    - Upper/lower case in user and domain; unknown domain → `None`; changed domain via config → works.
    - Suffix only (`adm@…`) → `None`; too long / invalid characters → `None`.
-   - Validation accepts `X0W` and rejects `x0w`, `X`, `X0W!`.
+   - Validation accepts `X0W` and `x0w` (normalised to `X0W`) and rejects `X`, `X0`, `X0WA`, `X0W!`.
 7. **Docs.** Update [Architecture.md](../docs/Architecture.md) §4 and [Requirements_and_Scope.md](../docs/Requirements_and_Scope.md) §2: the format is configurable, and corporate initials differ from personal initials. Add the three settings to [.env.example](../.env.example) and [README.md](../README.md).
 
 **Done when:** all unit tests pass, and in mock mode a user configured as `x0wadm@becoc001.onmicrosoft.com` can create and edit a One Pager with Owner initials `X0W`.
+
+**Status (2026-09-30): implemented.** Notes on the implementation:
+
+- The mock user default is `lduadm@mock.local` (not `ldu@mock.local`), so it is accepted with the default suffix `adm`.
+- The sample One Pagers and the `MockDataAccess` seed use 3-character initials (`ABR`, `BSM`, `CDA`, `DPI` instead of `AB`, `BS`, `CD`, `DP`). Tests build users with `tests/users.make_user` instead of parsing usernames.
+- Until Phase 2, an unrecognised username gets a `CurrentUser` with empty initials (and the username-based display name). Empty initials match no Owner, SME, Approver or Admin, and the Use Cases page refuses writes without initials.
+- A recognised user's display name is their initials until Phase 5 reads the name from the directory.
+- `permissions.extract_initials` was removed; the Use Cases page reads the initials from the session's `CurrentUser`.
+- The validation message and form hints say "3 letters or digits". If `ONE_PAGER_APP_INITIALS_PATTERN` is changed, update `INITIALS_RULE` in `validation.py` and the hints too.
 
 ## 6. Phase 2 — Trusted Identity Only, Fail Closed
 
@@ -96,7 +118,7 @@ Record every answer in [Decision_Log.md](../docs/Decision_Log.md).
    - `databricks`: only `x-forwarded-email` / `x-forwarded-preferred-username` (set by the Databricks Apps proxy). **No** `SELECT current_user()` fallback.
    - `local-integration`: `SELECT current_user()` with the CLI profile (unchanged).
    - `local-mock`: `ONE_PAGER_APP_MOCK_USER`.
-2. **Fail closed.** If there is no username, or `initials_from_username` returns `None`, show a clear page ("Your account `…` is not recognised by the One Pager App. Contact the platform team.") and stop the script (`st.stop()`). No page is rendered and no data access is created for that session. (Or read-only, per Q4.)
+2. **Fail closed.** If there is no username, or `initials_from_username` returns `None`, show a clear page ("Your account `…` is not recognised by the One Pager App. Contact the platform team.") and stop the script (`st.stop()`). No page is rendered and no data access is created for that session. There is no read-only mode (Q4: deny access).
 3. **`CurrentUser` stays the single source** of identity for every service call. Add a check in the service layer entry points (workflow, editing, review, locking, use cases, admin) that `user.initials` is set, so a missing identity can never reach a write.
 4. **Log** the unrecognised username (without tokens) with a `permission_denied` audit event ([audit.py](../src/onepagerapp/audit.py)).
 5. **Tests:** header present / missing per mode; unknown domain → access page; `SELECT current_user()` not called in `databricks` mode.
@@ -248,11 +270,11 @@ Record every answer in [Decision_Log.md](../docs/Decision_Log.md).
 | Order | Phase | Depends on | Platform needed |
 |---|---|---|---|
 | 1 | Phase 0 — questions | — | yes (answers) |
-| 2 | Phase 1 — configurable initials | Q1–Q3 (defaults can be used first) | no |
-| 3 | Phase 2 — trusted identity, fail closed | Phase 1, Q4 | no |
+| 2 | Phase 1 — configurable initials | Q1–Q3 (answered, §4.2) | no |
+| 3 | Phase 2 — trusted identity, fail closed | Phase 1, Q4 (answered: deny) | no |
 | 4 | Phase 3 — audit trail complete | — | Liquibase change for `ref_*` |
-| 5 | Phase 4 — reads as user, writes as service principal | Phases 2, 3; Q5, Q8 | grants |
-| 6 | Phase 5 — name from directory | Q5, Q6 | user scopes |
+| 5 | Phase 4 — reads as user, writes as service principal | Phases 2, 3; Q5, Q8 (answered: yes) | grants |
+| 6 | Phase 5 — name from directory | Q5, Q6 (Q6 to verify in DEV) | user scopes |
 | 7 | Phase 6 — roles from groups | Phase 2 (the DEV spike can run earlier) | none now (DataPlatEng default); real groups later, configuration only |
 | 8 | Phase 7 — deployment, grants, token test | Phases 4–6 | yes |
 | 9 | Phase 8 — documentation | all | no |

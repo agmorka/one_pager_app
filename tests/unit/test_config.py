@@ -2,7 +2,9 @@
 
 import pytest
 
+from onepagerapp.auth import initials_from_username
 from onepagerapp.config import AppConfig, Environment
+from onepagerapp.data_access import create_data_access
 
 
 def _config(**overrides: str) -> AppConfig:
@@ -49,3 +51,66 @@ def test__from_env__reads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ONE_PAGER_APP_VOLUME_PATH", "/Volumes/cat/schema/vol")
     monkeypatch.setenv("ONE_PAGER_APP_ENVIRONMENT", "PRD")
     assert AppConfig.from_env().environment is Environment.PRD
+
+
+@pytest.mark.unit
+def test__identity_settings__defaults() -> None:
+    config = _config()
+    assert config.user_domains == frozenset({"becoc001.onmicrosoft.com"})
+    assert config.username_suffixes == ("adm",)
+    assert config.initials_pattern.pattern == r"^[A-Z0-9]{3}$"
+
+
+@pytest.mark.unit
+def test__user_domains__normalised() -> None:
+    config = _config(
+        ONE_PAGER_APP_USER_DOMAINS=" BECOC001.onmicrosoft.com , mock.local,"
+    )
+    assert config.user_domains == frozenset({"becoc001.onmicrosoft.com", "mock.local"})
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("adm", ("adm",)),
+        ("ADM, ", ("adm", "")),
+        ("adm,", ("adm", "")),
+        ("", ("",)),
+        ("a,adm,a", ("adm", "a")),
+    ],
+)
+def test__username_suffixes__longest_first(
+    value: str, expected: tuple[str, ...]
+) -> None:
+    assert _config(ONE_PAGER_APP_USERNAME_SUFFIXES=value).username_suffixes == expected
+
+
+@pytest.mark.unit
+def test__initials_pattern__invalid_regex_rejected() -> None:
+    with pytest.raises(ValueError, match="not a valid regex"):
+        _config(ONE_PAGER_APP_INITIALS_PATTERN="^[A-Z")
+
+
+@pytest.mark.unit
+def test__mock_user__default_is_parsed_like_a_real_username() -> None:
+    config = _config(
+        APP_MODE="local-mock",
+        ONE_PAGER_APP_USER_DOMAINS="becoc001.onmicrosoft.com,mock.local",
+    )
+    username = create_data_access(config).get_current_user()
+
+    assert username == "lduadm@mock.local"
+    assert initials_from_username(username, config) == "LDU"
+
+
+@pytest.mark.unit
+def test__mock_user__configurable() -> None:
+    config = _config(
+        APP_MODE="local-mock",
+        ONE_PAGER_APP_MOCK_USER="x0wadm@becoc001.onmicrosoft.com",
+    )
+    username = create_data_access(config).get_current_user()
+
+    assert username == "x0wadm@becoc001.onmicrosoft.com"
+    assert initials_from_username(username, config) == "X0W"

@@ -34,6 +34,10 @@ from onepagerapp.models import (
 )
 from onepagerapp.validation import CURRENT_STRUCTURE_DEFINITION
 
+# Signed-in user in local-mock mode unless ONE_PAGER_APP_MOCK_USER says
+# otherwise (initials LDU with the mock.local domain accepted).
+DEFAULT_MOCK_USER = "lduadm@mock.local"
+
 
 class MockDataAccess(DataAccess):
     """In-memory fake for tabular data; documents come from the YAML store.
@@ -44,8 +48,13 @@ class MockDataAccess(DataAccess):
     fixtures in tests/fixtures/sample_one_pagers/.
     """
 
-    def __init__(self, document_store: OnePagerDocumentStore) -> None:  # noqa: D107
+    def __init__(  # noqa: D107
+        self,
+        document_store: OnePagerDocumentStore,
+        current_user: str = DEFAULT_MOCK_USER,
+    ) -> None:
         self._document_store = document_store
+        self._current_user = current_user
         self._status_rows: dict[str, OnePagerStatusRow] = {
             row.one_pager_id: row for row in _seed_status_rows()
         }
@@ -99,7 +108,7 @@ class MockDataAccess(DataAccess):
         )
 
     def get_current_user(self) -> str:
-        return "local-dev-user@mock.local"
+        return self._current_user
 
     def read_table(self, table_name: str) -> pd.DataFrame:  # noqa: ARG002
         return pd.DataFrame()
@@ -647,13 +656,13 @@ def _seed_status_rows() -> list[OnePagerStatusRow]:
             data_product_status="Ready for Development",
             version="1.0.0",
             owner_name="Alice Brown",
-            owner_initials="AB",
+            owner_initials="ABR",
             owner_email="alice.brown@company.com",
             owner_team="Data Platform",
-            created_by="AB",
+            created_by="ABR",
             created_at=datetime(2026, 8, 1, 9, 0),
             last_updated_at=datetime(2026, 9, 20, 14, 30),
-            last_updated_by="AB",
+            last_updated_by="ABR",
             structure_definition=CURRENT_STRUCTURE_DEFINITION,
             reviewed_at=datetime(2026, 9, 20, 14, 30),
             reviewed_by="CJ",
@@ -668,13 +677,13 @@ def _seed_status_rows() -> list[OnePagerStatusRow]:
             data_product_status="In Definition",
             version="0.3.0",
             owner_name="Bob Smith",
-            owner_initials="BS",
+            owner_initials="BSM",
             owner_email="bob.smith@company.com",
             owner_team="Sales Analytics",
-            created_by="BS",
+            created_by="BSM",
             created_at=datetime(2026, 9, 1, 9, 0),
             last_updated_at=datetime(2026, 9, 19, 10, 15),
-            last_updated_by="BS",
+            last_updated_by="BSM",
             structure_definition=CURRENT_STRUCTURE_DEFINITION,
         ),
     ]
@@ -685,7 +694,7 @@ def _seed_authorized_users() -> dict[str, list[AuthorizedUser]]:
         "OP-0001": [
             AuthorizedUser(
                 one_pager_id="OP-0001",
-                user_initials="AB",
+                user_initials="ABR",
                 user_name="Alice Brown",
                 user_email="alice.brown@company.com",
                 user_team="Data Platform",
@@ -695,7 +704,7 @@ def _seed_authorized_users() -> dict[str, list[AuthorizedUser]]:
         "OP-0002": [
             AuthorizedUser(
                 one_pager_id="OP-0002",
-                user_initials="BS",
+                user_initials="BSM",
                 user_name="Bob Smith",
                 user_email="bob.smith@company.com",
                 user_team="Sales Analytics",
@@ -703,7 +712,7 @@ def _seed_authorized_users() -> dict[str, list[AuthorizedUser]]:
             ),
             AuthorizedUser(
                 one_pager_id="OP-0002",
-                user_initials="DP",
+                user_initials="DPI",
                 user_name="Diana Prince",
                 user_email="diana.prince@company.com",
                 user_team="Finance",
@@ -734,7 +743,7 @@ def _seed_change_logs() -> dict[str, list[ChangeLogEntry]]:
                 one_pager_id="OP-0001",
                 version="0.9.0",
                 event_type="content_save",
-                author_initials="AB",
+                author_initials="ABR",
                 author_name="Alice Brown",
                 summary="Addressed review comments on data sources",
                 created_at=datetime(2026, 9, 15, 10, 0),
@@ -744,7 +753,7 @@ def _seed_change_logs() -> dict[str, list[ChangeLogEntry]]:
                 one_pager_id="OP-0001",
                 version="0.1.0",
                 event_type="creation",
-                author_initials="AB",
+                author_initials="ABR",
                 author_name="Alice Brown",
                 summary="Initial One Pager created",
                 created_at=datetime(2026, 8, 1, 9, 0),
@@ -766,7 +775,7 @@ def _seed_review_comments() -> dict[str, list[ReviewComment]]:
                 comment="Add a requirement for audit trail compliance.",
                 resolved=True,
                 created_at=datetime(2026, 9, 1, 9, 0),
-                resolved_by="AB",
+                resolved_by="ABR",
                 resolved_at=datetime(2026, 9, 5, 14, 0),
             ),
             ReviewComment(
@@ -774,12 +783,12 @@ def _seed_review_comments() -> dict[str, list[ReviewComment]]:
                 one_pager_id="OP-0001",
                 version="0.9.0",
                 section="dataSources",
-                reviewer_initials="BS",
+                reviewer_initials="BSM",
                 reviewer_name="Bob Smith",
                 comment="Need to clarify the refreshFrequency for Salesforce.",
                 resolved=True,
                 created_at=datetime(2026, 9, 12, 11, 0),
-                resolved_by="AB",
+                resolved_by="ABR",
                 resolved_at=datetime(2026, 9, 15, 10, 30),
             ),
         ],
@@ -802,28 +811,28 @@ def _sample_use_cases() -> list[UseCase]:
             "Fulfill GDPR data subject access requests quickly",
             "Query Person dataset with unique ID and get all attributes in one place",
             "Respond to GDPR requests within 30 days",
-            "Must Have", False, "AB", datetime(2026, 6, 1, 9, 30),
+            "Must Have", False, "ABR", datetime(2026, 6, 1, 9, 30),
         ),
         (
             "UC-003", "Finance Director",
             "Reconcile revenue across channels and time periods",
             "Query unified order data by date range, channel, product, and customer",
             "Close accounting books on time with full audit trail",
-            "High", False, "BS", datetime(2026, 7, 2, 11, 0),
+            "High", False, "BSM", datetime(2026, 7, 2, 11, 0),
         ),
         (
             "UC-004", "Operations Manager",
             "Track fulfillment status and predict delivery dates",
             "See order status, warehouse inventory, and shipping progress in one view",
             "Proactively communicate delivery estimates to customers",
-            "Medium", False, "BS", datetime(2026, 7, 2, 11, 15),
+            "Medium", False, "BSM", datetime(2026, 7, 2, 11, 15),
         ),
         (
             "UC-005", "Branch Advisor",
             "See a customer summary before meetings",
             "Open a printed customer summary prepared by the back office",
             "Prepare advice for scheduled customer meetings",
-            "Low", True, "AB", datetime(2026, 5, 20, 8, 45),
+            "Low", True, "ABR", datetime(2026, 5, 20, 8, 45),
         ),
     ]
     return [

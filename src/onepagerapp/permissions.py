@@ -13,7 +13,6 @@ from collections.abc import Collection
 from dataclasses import dataclass
 
 from onepagerapp.audit import log_permission_denied
-from onepagerapp.auth import initials_from_username
 from onepagerapp.models import AuthorizedUser, CurrentUser, LockInfo
 from onepagerapp.state_machine import (
     APPROVED,
@@ -157,16 +156,7 @@ def can_release_lock(user: CurrentUser | None, lock: LockInfo | None) -> bool:
     return bool(user and lock and lock.locked_by_initials == user.initials)
 
 
-def extract_initials(user: str | None) -> str:
-    """Derive a user's corporate initials from their Databricks identity.
-
-    Kept for the Use Cases page; the single implementation lives in
-    ``auth.initials_from_username`` so every feature derives the same initials.
-    """
-    return initials_from_username(user)
-
-
-def can_manage_use_cases(current_user: str | None) -> bool:
+def can_manage_use_cases(user_initials: str | None) -> bool:
     """Check if the current user can create, edit, deprecate or restore Use Cases.
 
     Per Backend_Design.md §5/§9 only Owner/SME group members may manage the
@@ -178,12 +168,13 @@ def can_manage_use_cases(current_user: str | None) -> bool:
     group check is a change here only.
 
     Args:
-        current_user: Current user identifier or None if not authenticated.
+        user_initials: Initials of the signed-in user, or None when nobody is
+            signed in or the username is not recognised (``auth.py``).
 
     Returns:
         True if the user may manage Use Cases.
     """
-    return bool(current_user)
+    return bool(user_initials)
 
 
 # ============================================================================

@@ -9,12 +9,12 @@ import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
-from onepagerapp.models import LockInfo
+from onepagerapp.models import CurrentUser, LockInfo
 from onepagerapp.state_machine import Actor
 from tests.conftest import FIXTURES_DIR
+from tests.users import make_user
 
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
 
@@ -35,7 +35,7 @@ def switched(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 def _services(tmp_path: Path, data_access_cls: type = MockDataAccess) -> dict:
     store = OnePagerDocumentStore(FIXTURES_DIR, write_path=tmp_path)
-    user = resolve_current_user("alice.brown@company.com")
+    user = make_user("ABR", "Alice Brown")
     return {
         "services_initialized": True,
         "data_access": data_access_cls(store),
@@ -199,14 +199,15 @@ def test__preview__v1_document_uses_legacy_fields(
     assert any("7 years" in m.value for m in classification.markdown)
 
 
-ALICE = "alice.brown@company.com"
-MAJA = "MJOADM@BECOC001.onmicrosoft.com"
+ALICE = make_user("ABR", "Alice Brown")
+MAJA = make_user("MJO")
 
 
-def _lock_services(tmp_path: Path, holder: str, expires_in: timedelta) -> dict:
+def _lock_services(
+    tmp_path: Path, holder_user: CurrentUser, expires_in: timedelta
+) -> dict:
     services = _services(tmp_path)
     now = datetime.now(UTC)
-    holder_user = resolve_current_user(holder)
     services["data_access"]._locks["OP-0001"] = LockInfo(
         one_pager_id="OP-0001",
         locked_by_initials=holder_user.initials,
@@ -259,12 +260,11 @@ def test__preview__expired_lock_is_not_shown(
     assert not [w for w in at.warning if "Locked by" in w.value]
 
 
-APPROVER = "cjo@bec.dk"
+APPROVER = make_user("CJO")
 
 
-def _review_services(tmp_path: Path, username: str = APPROVER) -> dict:
+def _review_services(tmp_path: Path, user: CurrentUser = APPROVER) -> dict:
     services = _services(tmp_path)
-    user = resolve_current_user(username)
     return {
         **services,
         "current_user": user.username,
@@ -296,7 +296,8 @@ def test__preview__review_mode_for_approver(
 def test__preview__no_review_actions_for_owner_or_sme(
     tmp_path: Path, switched: list[str]
 ) -> None:
-    at = _app(_review_services(tmp_path, "dp@bec.dk")).run()  # SME of OP-0002
+    sme = make_user("DPI", "Diana Prince")  # SME of OP-0002
+    at = _app(_review_services(tmp_path, sme)).run()
 
     assert not at.exception
     keys = {b.key for b in at.button}
@@ -346,9 +347,9 @@ def test__preview__owner_resolves_review_comments(
 ) -> None:
     from onepagerapp.workflow import reject_one_pager  # noqa: PLC0415
 
-    state = _review_services(tmp_path, "bob.smith@company.com")  # Owner
+    state = _review_services(tmp_path, make_user("BSM", "Bob Smith"))  # Owner
     data_access = state["data_access"]
-    approver = resolve_current_user(APPROVER)
+    approver = APPROVER
     reject_one_pager(
         data_access, "OP-0002", approver, "Needs work", roles={Actor.APPROVER}
     )
@@ -361,7 +362,7 @@ def test__preview__owner_resolves_review_comments(
     resolve.click().run()
 
     assert not at.exception
-    assert data_access.get_review_comments("OP-0002")[0].resolved_by == "BS"
+    assert data_access.get_review_comments("OP-0002")[0].resolved_by == "BSM"
     assert "The comment was marked as resolved." in [s.value for s in at.success]
     assert not [b for b in at.button if b.key == f"preview_resolve_{comment.id}"]
 
@@ -376,7 +377,7 @@ def test__preview__viewers_cannot_resolve(
     reject_one_pager(
         state["data_access"],
         "OP-0002",
-        resolve_current_user(APPROVER),
+        APPROVER,
         "Needs work",
         roles={Actor.APPROVER},
     )

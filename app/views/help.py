@@ -137,7 +137,9 @@ st.dataframe(
 )
 st.caption(
     "Owner/SME rights apply per Data Product: only the people listed as Owner "
-    "or SME of a One Pager may edit it, matched on their initials."
+    "or SME of a One Pager may edit it, matched on their corporate initials "
+    "(e.g. X0W for the username x0wadm@…; 3 letters or digits, which may differ "
+    "from the initials of your name)."
 )
 
 st.header("Workflow quick reference")

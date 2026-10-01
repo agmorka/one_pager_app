@@ -43,7 +43,7 @@ def _doc() -> OnePagerDocument:
         version="0.1.0",
         description="Desc",
         owner_name="A",
-        owner_initials="AB",
+        owner_initials="ABR",
         owner_email="a@b.dk",
         owner_team=None,
     )

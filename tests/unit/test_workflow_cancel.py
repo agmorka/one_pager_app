@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 
 import pytest
 
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.editing import open_for_edit
@@ -13,6 +12,7 @@ from onepagerapp.models import CurrentUser, NewOnePagerInput
 from onepagerapp.permissions import PermissionDeniedError
 from onepagerapp.state_machine import Actor, InvalidTransitionError
 from onepagerapp.workflow import cancel_one_pager, create_one_pager
+from tests.users import make_user
 
 NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
 
@@ -63,7 +63,7 @@ def test__cancel__sets_both_statuses(
 def test__cancel__releases_anyones_lock(
     draft: str, creator: CurrentUser, mock_data_access: MockDataAccess
 ) -> None:
-    sme = resolve_current_user("dpr@bec.dk")
+    sme = make_user("DPR")
     open_for_edit(mock_data_access, draft, sme, "sme-session", now=NOW)
 
     cancel_one_pager(mock_data_access, draft, creator, now=NOW)
@@ -75,7 +75,7 @@ def test__cancel__releases_anyones_lock(
 def test__cancel__admin_may_cancel_others(
     draft: str, mock_data_access: MockDataAccess
 ) -> None:
-    admin = resolve_current_user("adm@bec.dk")
+    admin = make_user("ADM")
     with pytest.raises(PermissionDeniedError):
         cancel_one_pager(mock_data_access, draft, admin, now=NOW)
 

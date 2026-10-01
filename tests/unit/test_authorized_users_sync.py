@@ -4,7 +4,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.editing import (
@@ -22,6 +21,7 @@ from onepagerapp.models import (
 )
 from onepagerapp.permissions import PermissionDeniedError
 from onepagerapp.workflow import create_one_pager
+from tests.users import make_user
 
 NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
 
@@ -128,7 +128,7 @@ def test__save__removed_user_loses_edit_access(
     with pytest.raises(PermissionDeniedError):
         _save(mock_data_access, document_store, opened, creator)
 
-    sme = resolve_current_user("dpr@bec.dk")
+    sme = make_user("DPR")
     assert open_for_edit(
         mock_data_access, "OP-0003", sme, "s2", now=NOW + timedelta(hours=1)
     ).lock.acquired

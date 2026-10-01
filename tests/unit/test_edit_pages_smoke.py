@@ -11,12 +11,12 @@ import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import NewOnePagerInput, PersonRef
 from onepagerapp.workflow import create_one_pager
 from tests.conftest import FIXTURES_DIR
+from tests.users import make_user
 
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
 NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
@@ -34,7 +34,7 @@ def switched(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 def services(tmp_path: Path) -> dict:
     store = OnePagerDocumentStore(FIXTURES_DIR, write_path=tmp_path)
     data_access = MockDataAccess(store)
-    user = resolve_current_user("alice.brown@company.com")
+    user = make_user("ABR", "Alice Brown")
     result = create_one_pager(
         NewOnePagerInput(
             data_product="customer_master",
@@ -42,7 +42,7 @@ def services(tmp_path: Path) -> dict:
             business_domain="Customer",
             data_product_type="Foundational",
             description="Unified customer view",
-            owner=PersonRef("Alice Brown", "AB", "alice.brown@company.com"),
+            owner=PersonRef("Alice Brown", "ABR", "alice.brown@company.com"),
             smes=[PersonRef("Diana Prince", "DPR", "diana@bec.dk")],
         ),
         user,
@@ -112,10 +112,10 @@ def test__editor__edit_mode_prefills_basics_and_locks(
     assert not at.exception
     assert at.title[0].value == "Editing: Customer Master (OP-0003)"
     assert at.text_input(key="edit_product_name").value == "Customer Master"
-    assert at.text_input(key="edit_owner_initials").value == "AB"
+    assert at.text_input(key="edit_owner_initials").value == "ABR"
     assert at.text_area(key="edit_description").value == "Unified customer view"
     lock = services["data_access"].get_lock("OP-0003")
-    assert lock.locked_by_initials == "AB"
+    assert lock.locked_by_initials == "ABR"
 
 
 @pytest.mark.unit
@@ -142,13 +142,13 @@ def test__editor__lock_held_by_other_user_blocks_editing(
 ) -> None:
     from onepagerapp.locking import acquire_lock  # noqa: PLC0415
 
-    sme = resolve_current_user("dpr@bec.dk")
+    sme = make_user("DPR")
     acquire_lock(services["data_access"], "OP-0003", sme, "other-session")
 
     at = _editor(services).run()
 
     assert not at.exception
-    assert "Locked by Dpr" in at.warning[0].value
+    assert "Locked by DPR" in at.warning[0].value
     assert "edit_document" not in at.session_state
 
 
@@ -467,7 +467,7 @@ def _reject_with_comment(services: dict) -> int:
     data_access = services["data_access"]
     rows = data_access._status_rows
     rows["OP-0003"].one_pager_status = "In Review"
-    approver = resolve_current_user("cjo@bec.dk")
+    approver = make_user("CJO")
     roles = {Actor.APPROVER}
     add_review_comment(
         data_access, "OP-0003", approver, "dataSources", "Add sources", roles=roles
@@ -506,7 +506,7 @@ def test__editor__review_tab_resolves_comments(
 
     assert not at.exception
     comment = services["data_access"].get_review_comments("OP-0003")[0]
-    assert (comment.resolved, comment.resolved_by) == (True, "AB")
+    assert (comment.resolved, comment.resolved_by) == (True, "ABR")
     assert "The comment was marked as resolved." in [s.value for s in at.success]
     assert f"edit_resolve_{comment_id}" not in {b.key for b in at.button}
 
@@ -560,4 +560,4 @@ def test__editor__opens_approved_version_after_update(
 
     assert not at.exception
     assert at.title[0].value == "Editing: Person Master Data (OP-0001)"
-    assert services["data_access"].get_lock("OP-0001").locked_by_initials == "AB"
+    assert services["data_access"].get_lock("OP-0001").locked_by_initials == "ABR"

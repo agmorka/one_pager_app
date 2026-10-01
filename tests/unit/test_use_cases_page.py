@@ -7,8 +7,10 @@ from streamlit.testing.v1 import AppTest
 
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
-from onepagerapp.models import UseCaseFilter, UseCaseInput, UseCasePage
+from onepagerapp.models import CurrentUser, UseCaseFilter, UseCaseInput, UseCasePage
+from tests.users import make_user
 
+MJO = make_user("MJO")
 PAGE = str(Path(__file__).parents[2] / "app" / "views" / "use_cases.py")
 
 
@@ -23,13 +25,12 @@ class FailingDataAccess(MockDataAccess):
         raise RuntimeError(msg)
 
 
-def _app(
-    data_access: MockDataAccess, user: str | None = "MJOADM@BECOC001.onmicrosoft.com"
-) -> AppTest:
+def _app(data_access: MockDataAccess, user: CurrentUser | None = MJO) -> AppTest:
     at = AppTest.from_file(PAGE, default_timeout=30)
     at.session_state["data_access"] = data_access
     if user:
-        at.session_state["current_user"] = user
+        at.session_state["current_user"] = user.username
+        at.session_state["current_user_info"] = user
     return at.run()
 
 
@@ -128,7 +129,17 @@ def test_user_text_is_rendered_literally(data_access: MockDataAccess) -> None:
             decision_enabled="d",
             priority="Low",
         ),
-        "AB",
+        "ABR",
     )
     at = _app(data_access)
     assert "\\*\\*bold\\*\\* \\:red\\[x\\] \\$x\\$" in _markdown(at)
+
+
+@pytest.mark.unit
+def test_read_only_for_unrecognised_user(data_access: MockDataAccess) -> None:
+    unrecognised = CurrentUser("alice.brown@company.com", "", "Alice Brown")
+    at = _app(data_access, user=unrecognised)
+    at.button(key="uc_details_UC-002").click().run()
+    labels = {b.label for b in at.button}
+    assert all(b.key != "uc_new" for b in at.button)
+    assert not {"Edit", "Deprecate", "Restore"} & labels

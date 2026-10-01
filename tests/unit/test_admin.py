@@ -23,7 +23,6 @@ from onepagerapp.admin import (
     update_status_definition,
 )
 from onepagerapp.audit import AUDIT_LOGGER_NAME
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.permissions import PermissionDeniedError
@@ -36,10 +35,11 @@ from tests.unit.test_lakehouse_writes import (
     _FakeConnection,
     _response,
 )
+from tests.users import make_user
 
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
 ADMIN = frozenset({Actor.ADMIN})
-USER = resolve_current_user("ada.admin@company.com")
+USER = make_user("ADA", "Ada Admin")
 DOMAINS = "ref_business_domains"
 SOURCES = "ref_source_systems"
 
@@ -88,7 +88,7 @@ def test__admin__only_for_admins(
             pytest.raises(PermissionDeniedError, match=ADMIN_DENIED_MESSAGE),
         ):
             call(data_access, roles)
-    assert "action=administer outcome=permission_denied user=AA" in caplog.messages
+    assert "action=administer outcome=permission_denied user=ADA" in caplog.messages
     assert "Risk" not in list(data_access.get_ref_business_domains()["domain"])
 
 
@@ -132,7 +132,7 @@ def test__add_reference_value(
         data_access.get_ref_business_domains(), "domain"
     )
     assert (
-        'action=add_reference_value outcome=success user=AA '
+        'action=add_reference_value outcome=success user=ADA '
         'table=ref_business_domains value="Risk & Compliance"' in caplog.messages
     )
 

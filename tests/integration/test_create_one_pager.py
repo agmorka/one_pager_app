@@ -17,7 +17,6 @@ from pathlib import Path
 
 import pytest
 
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.config import AppConfig
 from onepagerapp.data_access.factory import create_data_access, create_document_store
 from onepagerapp.data_access.lakehouse import LakehouseAccess
@@ -29,6 +28,7 @@ from onepagerapp.models import (
     PersonRef,
 )
 from onepagerapp.workflow import create_one_pager
+from tests.users import make_user
 
 TEST_OP_ID = "OP-9990"
 TEST_SEQUENCE = "T9"
@@ -166,7 +166,7 @@ def test__create_one_pager__end_to_end(
         pytest.skip("Volume path not mounted in this environment")
     store = create_document_store(config)
     data_access_with_store = create_data_access(config, store)
-    user = resolve_current_user("ITTADM@BECOC001.onmicrosoft.com")
+    user = make_user("ITT")
     data = NewOnePagerInput(
         data_product=f"it_test_{datetime.now(UTC):%Y%m%d%H%M%S}",
         product_name="Integration Test Product",

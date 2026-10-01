@@ -11,7 +11,6 @@ import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from onepagerapp.audit import AUDIT_LOGGER_NAME
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.base import NotFoundError
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
@@ -32,13 +31,14 @@ from onepagerapp.pdf import (
 )
 from onepagerapp.permissions import PermissionDeniedError, get_action_states
 from tests.conftest import FIXTURES_DIR
+from tests.users import make_user
 
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
 NOW = datetime(2026, 9, 30, 12, 0, tzinfo=UTC)
 
 
 def _viewer() -> CurrentUser:
-    return resolve_current_user("zoe.viewer@company.com")
+    return make_user("ZVI", "Zoe Viewer")
 
 
 def _texts(pdf: bytes) -> list[str]:
@@ -215,7 +215,7 @@ def test__export__is_audited(
         export_one_pager_pdf(data_access, "OP-0002", _viewer())
 
     assert (
-        "action=export_pdf outcome=success one_pager_id=OP-0002 user=ZV "
+        "action=export_pdf outcome=success one_pager_id=OP-0002 user=ZVI "
         "version=0.3.0" in caplog.messages
     )
 
@@ -254,7 +254,7 @@ def test__cell_text__formats_values() -> None:
 @pytest.mark.unit
 @pytest.mark.parametrize("status", ["Draft", "In Review", "Approved", "Cancelled"])
 def test__export_pdf_action__enabled_for_everyone(status: str) -> None:
-    state = get_action_states("XYZ", "AB", status, False, None)["export_pdf"]
+    state = get_action_states("XYZ", "ABR", status, False, None)["export_pdf"]
 
     assert state.visible
     assert state.enabled

@@ -5,7 +5,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.editing import (
@@ -20,6 +19,7 @@ from onepagerapp.locking import release_lock
 from onepagerapp.models import CurrentUser, NewOnePagerInput, OnePagerDocument
 from onepagerapp.permissions import PermissionDeniedError
 from onepagerapp.workflow import create_one_pager
+from tests.users import make_user
 
 NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
 LATER = NOW + timedelta(minutes=5)
@@ -233,7 +233,7 @@ def test__save_draft__not_authorized(
     mock_data_access: MockDataAccess,
     document_store: OnePagerDocumentStore,
 ) -> None:
-    stranger = resolve_current_user("alice.brown@company.com")
+    stranger = make_user("ABR", "Alice Brown")
     with pytest.raises(PermissionDeniedError):
         _save(mock_data_access, document_store, draft, stranger)
 

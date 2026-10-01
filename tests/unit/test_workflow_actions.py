@@ -7,12 +7,12 @@ from types import ModuleType
 import pytest
 import streamlit as st
 
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import CurrentUser, NewOnePagerInput, PersonRef
 from onepagerapp.workflow import create_one_pager
 from tests.conftest import FIXTURES_DIR
+from tests.users import make_user
 
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
 
@@ -28,7 +28,7 @@ def actions(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 
 @pytest.fixture
 def alice() -> CurrentUser:
-    return resolve_current_user("alice.brown@company.com")
+    return make_user("ABR", "Alice Brown")
 
 
 @pytest.fixture
@@ -42,7 +42,7 @@ def data_access(tmp_path: Path, alice: CurrentUser) -> MockDataAccess:
             business_domain="Customer",
             data_product_type="Foundational",
             description="Unified customer view",
-            owner=PersonRef("Alice Brown", "AB", "alice.brown@company.com"),
+            owner=PersonRef("Alice Brown", "ABR", "alice.brown@company.com"),
         ),
         alice,
         data_access,
@@ -69,7 +69,7 @@ def test__cancel_and_report(
 def test__cancel_and_report__permission_error_is_shown(
     actions: ModuleType, data_access: MockDataAccess
 ) -> None:
-    stranger = resolve_current_user("xyz@bec.dk")
+    stranger = make_user("XYZ")
     error = actions.cancel_and_report(data_access, "OP-0003", stranger, "")
     assert error == "Only the Owner, an SME or an Admin can cancel this One Pager."
 
@@ -100,7 +100,7 @@ def test__reject__requires_a_reason_then_reports_success(
 ) -> None:
     from onepagerapp.state_machine import Actor  # noqa: PLC0415
 
-    approver = resolve_current_user("cjo@bec.dk")
+    approver = make_user("CJO")
     roles = frozenset({Actor.APPROVER})
     st.session_state["preview_review_mode"] = "OP-0002"
 
@@ -125,7 +125,7 @@ def test__reject__self_review_is_reported(
 ) -> None:
     from onepagerapp.state_machine import Actor  # noqa: PLC0415
 
-    owner = resolve_current_user("bob.smith@company.com")  # Owner of OP-0002
+    owner = make_user("BSM", "Bob Smith")  # Owner of OP-0002
     error = actions.reject_and_report(
         data_access, "OP-0002", owner, "No", frozenset({Actor.APPROVER})
     )
@@ -139,7 +139,7 @@ def test__approve__reports_the_new_version(
     from onepagerapp.state_machine import Actor  # noqa: PLC0415
 
     store = OnePagerDocumentStore(FIXTURES_DIR, write_path=tmp_path / "approve")
-    approver = resolve_current_user("cjo@bec.dk")
+    approver = make_user("CJO")
     st.session_state["preview_review_mode"] = "OP-0002"
 
     error = actions.approve_and_report(
@@ -165,7 +165,7 @@ def test__add_comment__reports_errors_and_success(
 ) -> None:
     from onepagerapp.state_machine import Actor  # noqa: PLC0415
 
-    approver = resolve_current_user("cjo@bec.dk")
+    approver = make_user("CJO")
     roles = frozenset({Actor.APPROVER})
 
     assert (
@@ -183,7 +183,7 @@ def test__add_comment__reports_errors_and_success(
     assert st.session_state["preview_flash"] == "Your review comment was added."
     [comment] = data_access.get_review_comments("OP-0002")
 
-    owner = resolve_current_user("bob.smith@company.com")
+    owner = make_user("BSM", "Bob Smith")
     error = actions.resolve_comment_and_report(
         data_access, "OP-0002", comment.id, owner
     )

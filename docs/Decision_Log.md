@@ -435,10 +435,11 @@ Deleting `change_log` rows is permitted only in this compensation path, for an O
 
 **Decision:**
 
-- Settings `ONE_PAGER_APP_USER_DOMAINS` (default `becoc001.onmicrosoft.com`), `ONE_PAGER_APP_USERNAME_SUFFIXES` (default `adm`; an empty entry allows usernames without a suffix) and `ONE_PAGER_APP_INITIALS_PATTERN` (default `^[A-Z0-9]{2,5}$`). Lists allow old and new formats side by side.
-- Initials are extracted by domain check, suffix strip (longest match) and pattern check, upper case. A username that does not match gives **no** initials; the guessing fallbacks are removed.
-- In deployed mode the username comes only from the Databricks Apps proxy headers. No username or no initials → the user is refused access ("account not recognised").
-- The same pattern validates the Owner/SME `initials` in One Pagers.
+- Settings `ONE_PAGER_APP_USER_DOMAINS` (default `becoc001.onmicrosoft.com`), `ONE_PAGER_APP_USERNAME_SUFFIXES` (default `adm`; an empty entry allows usernames without a suffix) and `ONE_PAGER_APP_INITIALS_PATTERN` (default `^[A-Z0-9]{3}$`: corporate initials are always 3 letters or digits, case does not matter).
+- Old and new domains are never valid at the same time; a domain change is a configuration change at the switch. `X0Wadm` is today's Databricks username for the initials `X0W`; if usernames are later aligned to `X0W`, the suffix setting changes to `adm,` for the switch and then to empty.
+- Initials are extracted by domain check, suffix strip (longest match), upper-casing and pattern check. A username that does not match gives **no** initials; the guessing fallbacks are removed.
+- In deployed mode the username comes only from the Databricks Apps proxy headers. No username or no initials → the user is refused access ("account not recognised"). There is no read-only mode for unrecognised accounts.
+- The same pattern validates the Owner/SME `initials` in One Pagers; the value is upper-cased first, so `x0w` is stored as `X0W`.
 - First name and surname come from the SCIM `Me` endpoint (user token, scope `iam.current-user:read`); when unavailable, the initials are shown. The name is for display only.
 
 **Why:** A format change becomes a configuration change, a wrong or unknown account can never be mapped to someone else's initials, and users with digits in their corporate initials can own One Pagers. Implementation: `..dev/User_Identity_And_Access_Plan.md` Phases 1, 2 and 5.

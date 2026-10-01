@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 
 import pytest
 
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.models import CurrentUser
 from onepagerapp.permissions import PermissionDeniedError
@@ -15,15 +14,16 @@ from onepagerapp.workflow import (
     change_data_product_status,
     data_product_options,
 )
+from tests.users import make_user
 
 NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
-# OP-0001 is seeded Approved / Ready for Development, owned by Alice Brown (AB).
+# OP-0001 is seeded Approved / Ready for Development, owned by Alice Brown (ABR).
 OP_ID = "OP-0001"
 
 
 @pytest.fixture
 def owner() -> CurrentUser:
-    return resolve_current_user("alice.brown@company.com")
+    return make_user("ABR", "Alice Brown")
 
 
 def _set(data_access: MockDataAccess, op: str, dp: str) -> None:
@@ -92,7 +92,7 @@ def test__lifecycle_start_activate_deprecate(
 
 @pytest.mark.unit
 def test__not_owner_or_sme(mock_data_access: MockDataAccess) -> None:
-    other = resolve_current_user("bob.smith@company.com")
+    other = make_user("BSM", "Bob Smith")
     with pytest.raises(PermissionDeniedError):
         change_data_product_status(mock_data_access, OP_ID, "In Development", other)
 

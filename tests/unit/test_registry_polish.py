@@ -8,7 +8,6 @@ import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.config import AppConfig
 from onepagerapp.data_access import lakehouse
 from onepagerapp.data_access.mock import MockDataAccess
@@ -20,6 +19,7 @@ from onepagerapp.models import (
     RegistrySort,
 )
 from tests.conftest import FIXTURES_DIR
+from tests.users import make_user
 
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
 
@@ -235,7 +235,7 @@ def app_dir_on_path(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _run(tmp_path: Path) -> AppTest:
     data_access = _mock(tmp_path)
-    user = resolve_current_user("alice.brown@company.com")
+    user = make_user("ABR", "Alice Brown")
     at = AppTest.from_file(str(APP_DIR / "views" / "registry.py"), default_timeout=30)
     for key, value in {
         "services_initialized": True,

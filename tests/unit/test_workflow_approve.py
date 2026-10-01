@@ -6,7 +6,6 @@ from typing import NoReturn
 
 import pytest
 
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import ChangeLogEntry
@@ -18,9 +17,10 @@ from onepagerapp.workflow import (
     next_major,
     plan_approval,
 )
+from tests.users import make_user
 
 NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
-APPROVER = resolve_current_user("cjo@bec.dk")
+APPROVER = make_user("CJO")
 ROLES = frozenset({Actor.APPROVER})
 IN_REVIEW_ID = "OP-0002"  # seeded In Review / In Definition, v0.3.0
 
@@ -126,7 +126,7 @@ def test__approve__approvers_only_and_not_own(
         approve_one_pager(
             mock_data_access, document_store, IN_REVIEW_ID, APPROVER, roles=set()
         )
-    owner = resolve_current_user("bob.smith@company.com")
+    owner = make_user("BSM", "Bob Smith")
     with pytest.raises(PermissionDeniedError, match="Owner or SME"):
         approve_one_pager(
             mock_data_access, document_store, IN_REVIEW_ID, owner, roles=ROLES

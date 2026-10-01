@@ -9,13 +9,13 @@ version: "0.2.0"
 
 dataProductOwner:
   name: "Alice Brown"
-  initials: "AB"
+  initials: "ABR"
   email: "alice.brown@company.com"
   team: "Data Platform"
 
 smes:
   - name: "Charlie Davis"
-    initials: "CD"
+    initials: "CDA"
     email: "charlie.davis@company.com"
     team: "Analytics"
 

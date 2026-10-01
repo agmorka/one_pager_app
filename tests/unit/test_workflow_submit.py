@@ -4,7 +4,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.editing import (
@@ -17,6 +16,7 @@ from onepagerapp.models import CurrentUser, NewOnePagerInput
 from onepagerapp.permissions import PermissionDeniedError
 from onepagerapp.workflow import TransitionError, create_one_pager, submit_for_review
 from tests.unit.test_editing_links import fill_all_sections
+from tests.users import make_user
 
 NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
 LATER = NOW + timedelta(minutes=5)
@@ -109,7 +109,7 @@ def test__submit__requires_owner_or_sme_and_the_lock(
 ) -> None:
     _prepare(mock_data_access, document_store, valid_input, creator)
 
-    stranger = resolve_current_user("alice.brown@company.com")
+    stranger = make_user("ABR", "Alice Brown")
     with pytest.raises(PermissionDeniedError, match="Owner or an SME"):
         submit_for_review(mock_data_access, "OP-0003", stranger, "s9", now=LATER)
     with pytest.raises(LockNotHeldError, match="edit lock"):
@@ -120,7 +120,7 @@ def test__submit__requires_owner_or_sme_and_the_lock(
 def test__submit__only_from_draft_or_draft_update(
     mock_data_access: MockDataAccess,
 ) -> None:
-    owner = resolve_current_user("bob.smith@company.com")  # OP-0002 is In Review
+    owner = make_user("BSM", "Bob Smith")  # OP-0002 is In Review
     with pytest.raises(PermissionDeniedError, match="In Review"):
         submit_for_review(mock_data_access, "OP-0002", owner, "s1", now=NOW)
 

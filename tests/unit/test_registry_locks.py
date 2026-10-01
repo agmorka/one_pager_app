@@ -7,11 +7,11 @@ import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import LockInfo
 from tests.conftest import FIXTURES_DIR
+from tests.users import make_user
 
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
 
@@ -48,9 +48,9 @@ def _run(tmp_path: Path, data_access_cls: type = MockDataAccess) -> tuple:
     data_access = data_access_cls(store)
     data_access._locks = {
         "OP-0001": _lock("OP-0001", "MJO", timedelta(minutes=20)),
-        "OP-0002": _lock("OP-0002", "BS", -timedelta(minutes=1)),
+        "OP-0002": _lock("OP-0002", "BSM", -timedelta(minutes=1)),
     }
-    user = resolve_current_user("alice.brown@company.com")
+    user = make_user("ABR", "Alice Brown")
     at = AppTest.from_file(str(APP_DIR / "views" / "registry.py"), default_timeout=30)
     for key, value in {
         "services_initialized": True,

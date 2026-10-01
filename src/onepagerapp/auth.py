@@ -1,8 +1,9 @@
 """User identity helpers.
 
 Derives the corporate initials (the authorization key, Architecture.md §4) and
-a display name from the authenticated Databricks username. The extraction is
-isolated here so it can be updated if the username format changes.
+a display name from the authenticated Databricks username. The username format
+(accepted domains, suffixes, valid initials) is configuration, not code
+(``AppConfig.user_domains``, ``username_suffixes``, ``initials_pattern``).
 """
 
 import re
@@ -11,71 +12,72 @@ from onepagerapp.config import AppConfig
 from onepagerapp.models import CurrentUser
 from onepagerapp.state_machine import Actor
 
-# Corporate usernames look like "<initials>ADM@BECOC001.onmicrosoft.com"
-# (Requirements_and_Scope.md §2), e.g. "MJOADM@..." -> "MJO".
-_CORPORATE_USERNAME = re.compile(r"^([A-Za-z]{2,4})ADM$", re.IGNORECASE)
-_PLAIN_INITIALS = re.compile(r"^[A-Za-z]{2,4}$")
 _SEPARATORS = re.compile(r"[.\-_\s]+")
-_MIN_PARTS = 2
-_MAX_PARTS = 3
 
 
-def initials_from_username(username: str | None) -> str:
-    """Derive a user's corporate initials from their Databricks identity.
+def initials_from_username(username: str | None, config: AppConfig) -> str | None:
+    """Derive a user's corporate initials from their Databricks username.
 
     This is the single implementation used everywhere initials are needed
-    (authorization, Delta audit columns, change log); ``permissions.
-    extract_initials`` delegates here.
+    (authorization, Delta audit columns, change log).
 
-    Examples:
-        "MJOADM@BECOC001.onmicrosoft.com" -> "MJO"  (documented corporate format)
-        "mjo@bec.dk"                      -> "MJO"  (bare initials)
-        "alice.brown@company.com"         -> "AB"
-        "local-dev-user@mock"             -> "LDU"  (fallback: first letters)
-        None / ""                         -> "??"
+    The username must have an accepted domain. The longest configured suffix is
+    stripped from the user part, the rest is upper-cased and must match the
+    initials pattern. Nothing is guessed: a username that does not follow the
+    format gets no initials, so it can never be mapped to someone else's.
+
+    Examples (default settings):
+        "x0wadm@becoc001.onmicrosoft.com" -> "X0W"
+        "X0WADM@BECOC001.onmicrosoft.com" -> "X0W"
+        "x0w@becoc001.onmicrosoft.com"    -> None  (no "adm" suffix)
+        "x0wadm@company.com"              -> None  (unknown domain)
+        None / ""                         -> None
 
     Returns:
-        Upper-case initials, or "??" when nothing usable is available.
+        Upper-case initials, or None when the username is not recognised.
 
     """
-    local_part = (username or "").split("@", 1)[0].strip()
-    corporate = _CORPORATE_USERNAME.match(local_part)
-    if corporate:
-        return corporate.group(1).upper()
-    if _PLAIN_INITIALS.match(local_part):
-        return local_part.upper()
-    tokens = [token for token in _SEPARATORS.split(local_part) if token]
-    if len(tokens) >= _MIN_PARTS:
-        return "".join(token[0] for token in tokens[:_MAX_PARTS]).upper()
-    if tokens:
-        return tokens[0][:3].upper()
-    return "??"
+    local_part, at, domain = (username or "").strip().partition("@")
+    if not at or domain.lower() not in config.user_domains:
+        return None
+    local_part = local_part.lower()
+    for suffix in config.username_suffixes:  # longest first
+        if local_part.endswith(suffix):
+            initials = local_part.removesuffix(suffix).upper()
+            if initials and config.initials_pattern.match(initials):
+                return initials
+    return None
 
 
 def display_name_from_username(username: str) -> str:
     """Best-effort human-readable name from a username (no directory lookup).
 
+    Only used when the username gives no initials; see ``resolve_current_user``.
+
     Examples:
         "alice.brown@company.com" -> "Alice Brown"
-        "MJOADM@BECOC001.onmicrosoft.com" -> "MJO"
 
     """
     if not username:
         return "Unknown user"
     local_part = username.split("@", 1)[0].strip()
-    corporate = _CORPORATE_USERNAME.match(local_part)
-    if corporate:
-        return corporate.group(1).upper()
     parts = [p for p in _SEPARATORS.split(local_part) if p]
     return " ".join(p.capitalize() for p in parts) or username
 
 
-def resolve_current_user(username: str) -> CurrentUser:
-    """Build the CurrentUser for an authenticated username."""
+def resolve_current_user(username: str, config: AppConfig) -> CurrentUser:
+    """Build the CurrentUser for an authenticated username.
+
+    ``initials`` is empty when the username is not recognised
+    (``initials_from_username`` returns None); such a user matches no Owner,
+    SME, Approver or Admin. The display name is the initials until the name is
+    read from the directory (User_Identity_And_Access_Plan.md Phase 5).
+    """
+    initials = initials_from_username(username, config)
     return CurrentUser(
         username=username,
-        initials=initials_from_username(username),
-        display_name=display_name_from_username(username),
+        initials=initials or "",
+        display_name=initials or display_name_from_username(username),
     )
 
 

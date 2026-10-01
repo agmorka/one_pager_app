@@ -8,7 +8,6 @@ import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.help_content import (
@@ -25,6 +24,7 @@ from onepagerapp.help_content import (
 from onepagerapp.state_machine import DP_STATUSES, OP_STATUSES, TRANSITIONS, Actor
 from onepagerapp.workflow import get_workflow_reference
 from tests.conftest import FIXTURES_DIR
+from tests.users import make_user
 
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
 
@@ -175,7 +175,7 @@ def switched(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 
 def _app(data_access: MockDataAccess) -> AppTest:
-    user = resolve_current_user("zoe.viewer@company.com")
+    user = make_user("ZVI", "Zoe Viewer")
     at = AppTest.from_file(str(APP_DIR / "views" / "help.py"), default_timeout=30)
     state = {
         "services_initialized": True,

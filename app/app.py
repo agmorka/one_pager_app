@@ -19,6 +19,7 @@ from onepagerapp.data_access import create_data_access
 from onepagerapp.data_access.factory import create_document_store
 from onepagerapp.permissions import can_administer, can_review
 from onepagerapp.state_machine import Actor
+from onepagerapp.validation import set_initials_pattern
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,7 @@ def init_services() -> None:
         return
 
     config = AppConfig.from_env()
+    set_initials_pattern(config.initials_pattern)
     document_store = create_document_store(config)
     data_access = create_data_access(config, document_store)
 
@@ -81,7 +83,7 @@ def resolve_user() -> None:
     except Exception:
         logger.exception("Failed to retrieve current user")
         return
-    user = resolve_current_user(username)
+    user = resolve_current_user(username, st.session_state.config)
     st.session_state.current_user = username
     st.session_state.current_user_info = user
     st.session_state.current_user_roles = resolve_roles(

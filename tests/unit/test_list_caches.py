@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.config import AppConfig
 from onepagerapp.data_access import lakehouse
 from onepagerapp.data_access.mock import MockDataAccess
@@ -20,6 +19,7 @@ from onepagerapp.models import (
     UseCasePage,
 )
 from tests.conftest import FIXTURES_DIR
+from tests.users import make_user
 
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
 sys.path.insert(0, str(APP_DIR))
@@ -189,7 +189,7 @@ def test__lakehouse_sessions_share_one_cache_scope(
 
 
 def _app(page: str, data_access: MockDataAccess) -> AppTest:
-    user = resolve_current_user("alice.brown@company.com")
+    user = make_user("ABR", "Alice Brown")
     at = AppTest.from_file(str(APP_DIR / "views" / page), default_timeout=30)
     for key, value in {
         "services_initialized": True,

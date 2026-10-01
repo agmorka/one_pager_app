@@ -2,6 +2,7 @@ from dataclasses import replace
 
 import pytest
 
+from onepagerapp.config import AppConfig
 from onepagerapp.models import (
     CurrentUser,
     NewOnePagerInput,
@@ -9,14 +10,18 @@ from onepagerapp.models import (
     ValidationError,
 )
 from onepagerapp.validation import (
+    INITIALS_RULE,
     MAX_NAME_LENGTH,
     MAX_TEXT_LENGTH,
+    initials_pattern,
     load_schema,
     normalize_new_one_pager,
     sanitize_text,
+    set_initials_pattern,
     validate_create,
     validate_schema,
 )
+from tests.users import make_user
 
 DOMAINS = ["Customer", "Sales"]
 TYPES = ["Foundational", "Integrated", "Augmented"]
@@ -112,6 +117,52 @@ def test__validate_create__invalid_email_and_initials(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("initials", ["X0W", "x0w", " x0w ", "AB1", "123"])
+def test__validate_create__accepts_corporate_initials(
+    valid_input: NewOnePagerInput, creator: CurrentUser, initials: str
+) -> None:
+    smes = [PersonRef(name="X", initials=initials, email="x@bec.dk")]
+    data = normalize_new_one_pager(replace(valid_input, smes=smes))
+
+    assert validate_create(data, creator, DOMAINS, TYPES) == []
+    assert data.smes[0].initials == initials.strip().upper()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("initials", ["X", "X0", "X0WA", "X0W!", "X-W", "ÆØÅ"])
+def test__validate_create__rejects_invalid_initials(
+    valid_input: NewOnePagerInput, creator: CurrentUser, initials: str
+) -> None:
+    smes = [PersonRef(name="X", initials=initials, email="x@bec.dk")]
+    errors = _validate(replace(valid_input, smes=smes), creator)
+
+    assert [(e.field_path, e.message) for e in errors] == [
+        ("smes[0].initials", INITIALS_RULE)
+    ]
+
+
+@pytest.mark.unit
+def test__validate_create__configured_initials_pattern(
+    valid_input: NewOnePagerInput, creator: CurrentUser
+) -> None:
+    default = initials_pattern()
+    smes = [PersonRef(name="X", initials="X0WA", email="x@bec.dk")]
+    try:
+        set_initials_pattern(
+            AppConfig(
+                ONE_PAGER_APP_VOLUME_PATH="/Volumes/x",
+                ONE_PAGER_APP_INITIALS_PATTERN=r"^[A-Z0-9]{3,4}$",
+            ).initials_pattern
+        )
+        assert _validate(replace(valid_input, smes=smes), creator) == []
+    finally:
+        set_initials_pattern(default)
+    assert _paths(_validate(replace(valid_input, smes=smes), creator)) == {
+        "smes[0].initials"
+    }
+
+
+@pytest.mark.unit
 def test__validate_create__sme_row_missing_fields(
     valid_input: NewOnePagerInput, creator: CurrentUser
 ) -> None:
@@ -151,13 +202,13 @@ def test__validate_create__duplicate_sme(
 def test__validate_create__creator_must_be_owner_or_sme(
     valid_input: NewOnePagerInput,
 ) -> None:
-    outsider = CurrentUser(username="zz@bec.dk", initials="ZZ", display_name="Z Z")
+    outsider = make_user("ZZZ", "Z Z")
     errors = _validate(valid_input, outsider)
     assert _paths(errors) == {"smes"}
 
     as_sme = replace(
         valid_input,
-        smes=[PersonRef(name="Z Z", initials="ZZ", email="zz@bec.dk")],
+        smes=[PersonRef(name="Z Z", initials="ZZZ", email="zz@bec.dk")],
     )
     assert _validate(as_sme, outsider) == []
 

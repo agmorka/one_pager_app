@@ -107,13 +107,13 @@ def test__insert_one_pager_status__binds_every_column() -> None:
         data_product_status="In Definition",
         version="0.1.0",
         owner_name="A",
-        owner_initials="AB",
+        owner_initials="ABR",
         owner_email="a@b.dk",
         owner_team=None,
-        created_by="AB",
+        created_by="ABR",
         created_at=NOW,
         last_updated_at=NOW,
-        last_updated_by="AB",
+        last_updated_by="ABR",
         structure_definition="structure_one_pager_v_1.json",
     )
     _access(conn).insert_one_pager_status(row)
@@ -132,8 +132,8 @@ def test__insert_authorized_users__multi_row_parameters() -> None:
     conn = _FakeConnection()
     _access(conn).insert_authorized_users(
         [
-            AuthorizedUser("OP-0007", "AB", NASTY, "a@b.dk", "owner"),
-            AuthorizedUser("OP-0007", "CD", "C D", "c@d.dk", "sme", "Team"),
+            AuthorizedUser("OP-0007", "ABR", NASTY, "a@b.dk", "owner"),
+            AuthorizedUser("OP-0007", "CDA", "C D", "c@d.dk", "sme", "Team"),
         ]
     )
     statement, params = conn.calls[0]
@@ -159,7 +159,7 @@ def test__append_change_log__omits_identity_column() -> None:
             one_pager_id="OP-0007",
             version="0.1.0",
             event_type="creation",
-            author_initials="AB",
+            author_initials="ABR",
             author_name="A B",
             summary=NASTY,
             created_at=NOW,
@@ -210,14 +210,14 @@ def test__get_one_pager_status__parses_timestamps() -> None:
                         "OP-0007",
                         "P",
                         "A",
-                        "AB",
+                        "ABR",
                         "a@b.dk",
                         "0.1.0",
                         "Draft",
                         "In Definition",
                         "2026-09-29T10:00:00Z",
                         "2026-09-29T10:00:00.000Z",
-                        "AB",
+                        "ABR",
                     ]
                 ],
             )
@@ -257,7 +257,7 @@ def test__write_lock__single_guarded_merge_with_bound_parameters() -> None:
     assert params["now"] == NOW
 
     conn = _FakeConnection([_response(["num_affected_rows"], [["0"]])])
-    assert _access(conn).write_lock(_lock("AB"), now=NOW) is False
+    assert _access(conn).write_lock(_lock("ABR"), now=NOW) is False
 
 
 @pytest.mark.unit
@@ -265,7 +265,7 @@ def test__write_lock__concurrent_conflict_is_not_acquired() -> None:
     conn = _FakeConnection(
         error=StatementFailedError("SQL statement FAILED: ConcurrentAppendException")
     )
-    assert _access(conn).write_lock(_lock("AB"), now=NOW) is False
+    assert _access(conn).write_lock(_lock("ABR"), now=NOW) is False
 
 
 @pytest.mark.unit
@@ -288,7 +288,7 @@ def test__refresh_lock__updates_only_the_holders_session() -> None:
     conn = _FakeConnection([_response(["num_affected_rows"], [["0"]])])
     assert not _access(conn).refresh_lock(
         "OP-0001",
-        locked_by_initials="AB",
+        locked_by_initials="ABR",
         session_id="s1",
         last_heartbeat=NOW,
         expires_at=NOW,
@@ -319,7 +319,7 @@ def test__get_locks__one_parameterized_in_query() -> None:
     ]
     ts = "2026-09-29T10:00:00.000Z"
     conn = _FakeConnection(
-        [_response(columns, [["OP-0001", "AB", "Alice", "s1", ts, ts, ts]])]
+        [_response(columns, [["OP-0001", "ABR", "Alice", "s1", ts, ts, ts]])]
     )
 
     locks = _access(conn).get_locks(["OP-0001", NASTY])
@@ -328,7 +328,7 @@ def test__get_locks__one_parameterized_in_query() -> None:
     assert "FROM cat.sch.locks WHERE one_pager_id IN (:id_0, :id_1)" in statement
     _assert_not_interpolated(statement)
     assert params == {"id_0": "OP-0001", "id_1": NASTY}
-    assert [lock.locked_by_initials for lock in locks] == ["AB"]
+    assert [lock.locked_by_initials for lock in locks] == ["ABR"]
     assert locks[0].expires_at == NOW
 
 
@@ -349,13 +349,13 @@ _STATUS_ROW_VALUES = {
     "data_product_status": "In Definition",
     "version": "0.2.0",
     "owner_name": "A",
-    "owner_initials": "AB",
+    "owner_initials": "ABR",
     "owner_email": "a@b.dk",
     "owner_team": None,
-    "created_by": "AB",
+    "created_by": "ABR",
     "created_at": "2026-09-29T10:00:00Z",
     "last_updated_at": "2026-09-29T10:00:00Z",
-    "last_updated_by": "AB",
+    "last_updated_by": "ABR",
     "reviewed_at": None,
     "reviewed_by": None,
     "structure_definition": "structure_one_pager_v_2.json",
@@ -417,7 +417,7 @@ def test__authorized_users_update_and_delete__bound_parameters() -> None:
     access.update_authorized_users(
         [AuthorizedUser("OP-0001", NASTY, NASTY, "a@b.dk", "sme")]
     )
-    access.delete_authorized_users("OP-0001", ["AB", NASTY])
+    access.delete_authorized_users("OP-0001", ["ABR", NASTY])
     access.delete_authorized_users("OP-0001", [])
 
     assert len(conn.calls) == 2
@@ -427,7 +427,7 @@ def test__authorized_users_update_and_delete__bound_parameters() -> None:
     delete, params = conn.calls[1]
     assert "user_initials IN (:initials_0, :initials_1)" in delete
     assert params == {
-        "initials_0": "AB",
+        "initials_0": "ABR",
         "initials_1": NASTY,
         "one_pager_id": "OP-0001",
     }
@@ -462,7 +462,7 @@ def test__append_change_log_entries__single_insert() -> None:
             "OP-1",
             "0.1.0",
             "status_transition",
-            "AB",
+            "ABR",
             "A",
             NASTY,
             NOW,
@@ -475,7 +475,7 @@ def test__append_change_log_entries__single_insert() -> None:
             "OP-1",
             "0.1.0",
             "status_transition",
-            "AB",
+            "ABR",
             "A",
             "s",
             NOW,
@@ -556,7 +556,7 @@ def test__get_review_comments__parses_string_booleans() -> None:
     rows = [
         ["1", "OP-1", "0.1.0", None, "CJ", "C", "x", "false", None,
          "2026-09-29T10:00:00Z", None],
-        ["2", "OP-1", "0.1.0", "dataSources", "CJ", "C", "y", "true", "AB",
+        ["2", "OP-1", "0.1.0", "dataSources", "CJ", "C", "y", "true", "ABR",
          "2026-09-29T10:00:00Z", "2026-09-29T10:00:00Z"],
     ]
     conn = _FakeConnection([_response(columns, rows)])
@@ -571,7 +571,7 @@ def test__get_review_comments__parses_string_booleans() -> None:
 def test__resolve_review_comment__conditional_update() -> None:
     conn = _FakeConnection([_response(["num_affected_rows"], [["1"]])])
     resolved = _access(conn).resolve_review_comment(
-        NASTY, 7, resolved_by="BS", resolved_at=NOW
+        NASTY, 7, resolved_by="BSM", resolved_at=NOW
     )
 
     assert resolved is True
@@ -582,14 +582,14 @@ def test__resolve_review_comment__conditional_update() -> None:
     assert params == {
         "id": 7,
         "one_pager_id": NASTY,
-        "resolved_by": "BS",
+        "resolved_by": "BSM",
         "resolved_at": NOW,
     }
 
     conn = _FakeConnection([_response(["num_affected_rows"], [["0"]])])
     assert (
         _access(conn).resolve_review_comment(
-            "OP-1", 7, resolved_by="BS", resolved_at=NOW
+            "OP-1", 7, resolved_by="BSM", resolved_at=NOW
         )
         is False
     )
