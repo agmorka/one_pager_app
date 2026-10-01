@@ -116,7 +116,7 @@ def lookup_directory_user(
       token there is no lookup; never with the service principal, which
       would return the app's own entry.
     - ``local-integration``: SCIM ``Me`` with the CLI profile (the developer).
-    - ``local-mock``: no lookup.
+    - ``local-mock``: no lookup; the name is ``ONE_PAGER_APP_MOCK_USER_NAME``.
 
     Returns:
         The entry, or None (no lookup, or it failed); the caller then shows
@@ -131,4 +131,5 @@ def lookup_directory_user(
         return get_me(token)
     if config.APP_MODE is AppMode.LOCAL_INTEGRATION:
         return get_me(None)
-    return None
+    name = config.ONE_PAGER_APP_MOCK_USER_NAME.strip()
+    return DirectoryUser(display_name=name) if name else None

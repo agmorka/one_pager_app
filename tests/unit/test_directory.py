@@ -144,11 +144,26 @@ def test__lookup__local_integration_uses_the_cli_profile(
 
 
 @pytest.mark.unit
-def test__lookup__no_call_in_mock_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+def test__lookup__mock_mode_uses_the_configured_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[str | None] = []
     monkeypatch.setattr(directory, "get_me", calls.append)
     monkeypatch.setattr(directory, "WorkspaceClient", calls.append)
+    config = AppConfig(
+        APP_MODE="local-mock",
+        ONE_PAGER_APP_VOLUME_PATH="/Volumes/x",
+        ONE_PAGER_APP_MOCK_USER_NAME="Agnieszka Kępkowska",
+    )
 
-    lookup_directory_user(_config("local-mock"), {USER_TOKEN_HEADER: "user-token"})
+    result = lookup_directory_user(config, {USER_TOKEN_HEADER: "user-token"})
 
-    assert calls == []
+    assert result == DirectoryUser(display_name="Agnieszka Kępkowska")
+    assert calls == []  # no directory call in mock mode
+
+
+@pytest.mark.unit
+def test__lookup__mock_mode_default_name() -> None:
+    result = lookup_directory_user(_config("local-mock"), {})
+
+    assert result == DirectoryUser(display_name="Local Dev User")

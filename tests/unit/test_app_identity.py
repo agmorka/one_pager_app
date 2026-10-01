@@ -125,6 +125,7 @@ def test__app__recognised_user_gets_the_app(monkeypatch: pytest.MonkeyPatch) -> 
     assert not at.exception
     assert at.session_state["current_user_info"].initials == "X0W"
     assert "data_access" in at.session_state
+    assert at.session_state["current_user_info"].display_name == "Local Dev User"
     assert not [t for t in at.title if t.value == "Access denied"]
 
 
