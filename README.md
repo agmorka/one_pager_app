@@ -48,6 +48,7 @@ Usernames look like `x0wadm@becoc001.onmicrosoft.com`. The app derives the user'
 | `ONE_PAGER_APP_USERNAME_SUFFIXES` | `adm` | Suffixes stripped from the user part. An empty entry means "no suffix" (`adm,` accepts `x0wadm@` and `x0w@`). |
 | `ONE_PAGER_APP_INITIALS_PATTERN` | `^[A-Z0-9]{3}$` | Valid initials after upper-casing. Also used for Owner/SME initials. |
 | `ONE_PAGER_APP_MOCK_USER` | `lduadm@becoc001.onmicrosoft.com` | Signed-in user in `local-mock` mode. |
+| `ONE_PAGER_APP_MOCK_USER_NAME` | `Local Dev User` | Name shown for the `local-mock` user (the other modes read the name from the workspace directory). |
 
 A username that does not match these settings gets no initials and cannot edit or manage anything.
 

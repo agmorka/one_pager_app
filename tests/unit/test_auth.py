@@ -1,11 +1,12 @@
 import pytest
 
 from onepagerapp.auth import (
-    display_name_from_username,
+    display_name,
     initials_from_username,
     resolve_current_user,
 )
 from onepagerapp.config import AppConfig
+from onepagerapp.directory import DirectoryUser
 
 
 def _config(**overrides: str) -> AppConfig:
@@ -83,9 +84,27 @@ def test__initials_from_username__configured_pattern() -> None:
 
 
 @pytest.mark.unit
-def test__display_name_from_username__email_is_title_cased() -> None:
-    assert display_name_from_username("alice.brown@company.com") == "Alice Brown"
-    assert display_name_from_username("") == "Unknown user"
+@pytest.mark.parametrize(
+    ("directory_user", "expected"),
+    [
+        (
+            DirectoryUser(
+                display_name="A. Kępkowska",
+                given_name="Agnieszka",
+                family_name="Kępkowska",
+            ),
+            "Agnieszka Kępkowska",
+        ),
+        (DirectoryUser(display_name="A. Kępkowska"), "A. Kępkowska"),
+        (DirectoryUser(given_name="Agnieszka"), "Agnieszka"),
+        (DirectoryUser(), "X0W"),
+        (None, "X0W"),
+    ],
+)
+def test__display_name__directory_then_initials(
+    directory_user: DirectoryUser | None, expected: str
+) -> None:
+    assert display_name(directory_user, "X0W") == expected
 
 
 @pytest.mark.unit
@@ -94,7 +113,24 @@ def test__resolve_current_user__recognised_username() -> None:
 
     assert user.username == "x0wadm@becoc001.onmicrosoft.com"
     assert user.initials == "X0W"
-    assert user.display_name == "X0W"
+    assert user.display_name == "X0W"  # no directory entry: the initials
+
+
+@pytest.mark.unit
+def test__resolve_current_user__name_from_the_directory() -> None:
+    user = resolve_current_user(
+        "x0wadm@becoc001.onmicrosoft.com",
+        _config(),
+        DirectoryUser(
+            given_name="Agnieszka",
+            family_name="Kępkowska",
+            emails=("agnieszka.kepkowska@bec.dk",),
+        ),
+    )
+
+    assert user.initials == "X0W"
+    assert user.display_name == "Agnieszka Kępkowska"
+    assert user.email == "agnieszka.kepkowska@bec.dk"
 
 
 @pytest.mark.unit
@@ -102,4 +138,4 @@ def test__resolve_current_user__unrecognised_username_has_no_initials() -> None:
     user = resolve_current_user("alice.brown@company.com", _config())
 
     assert user.initials == ""
-    assert user.display_name == "Alice Brown"
+    assert user.display_name == "alice.brown@company.com"  # never guessed

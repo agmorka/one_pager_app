@@ -13,6 +13,7 @@ from streamlit.testing.v1 import AppTest
 
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
+from onepagerapp.models import CurrentUser
 from tests.conftest import FIXTURES_DIR
 from tests.users import make_user
 
@@ -83,6 +84,33 @@ def test__editor__owner_prefilled_from_current_user(
     assert at.text_input(key="create_owner_name").value == "Alice Brown"
     assert at.text_input(key="create_owner_initials").value == "ABR"
     assert at.text_input(key="create_owner_email").value == services["current_user"]
+
+
+@pytest.mark.unit
+def test__editor__owner_prefilled_from_the_directory(
+    services: dict, switched: list[str]
+) -> None:
+    user = CurrentUser(
+        username="x0wadm@becoc001.onmicrosoft.com",
+        initials="X0W",
+        display_name="Agnieszka Kępkowska",
+        email="agnieszka.kepkowska@bec.dk",
+    )
+    state = {
+        **services,
+        "current_user": user.username,
+        "current_user_info": user,
+        "editor_mode": "create",
+    }
+
+    at = _app("editor.py", state).run()
+
+    assert not at.exception
+    assert at.text_input(key="create_owner_name").value == "Agnieszka Kępkowska"
+    assert at.text_input(key="create_owner_initials").value == "X0W"
+    assert at.text_input(key="create_owner_email").value == (
+        "agnieszka.kepkowska@bec.dk"
+    )
 
 
 @pytest.mark.unit

@@ -11,8 +11,10 @@ import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from onepagerapp import data_access as data_access_package
+from onepagerapp import directory
 from onepagerapp.config import AppConfig
 from onepagerapp.data_access.mock import MockDataAccess
+from onepagerapp.directory import DirectoryUser
 from onepagerapp.documents import OnePagerDocumentStore
 from tests.conftest import FIXTURES_DIR
 
@@ -123,6 +125,7 @@ def test__app__recognised_user_gets_the_app(monkeypatch: pytest.MonkeyPatch) -> 
     assert not at.exception
     assert at.session_state["current_user_info"].initials == "X0W"
     assert "data_access" in at.session_state
+    assert at.session_state["current_user_info"].display_name == "Local Dev User"
     assert not [t for t in at.title if t.value == "Access denied"]
 
 
@@ -238,3 +241,53 @@ def test__app__failed_identity_lookup_is_denied(
     assert "action=access_app outcome=permission_denied user=- username=-" in (
         caplog.messages
     )
+
+
+@pytest.mark.unit
+def test__app__name_from_the_directory(monkeypatch: pytest.MonkeyPatch) -> None:
+    data_access = _RecordingDataAccess()
+    _patch_services(
+        monkeypatch,
+        data_access,
+        {"x-forwarded-preferred-username": CORPORATE, "x-forwarded-access-token": "t"},
+    )
+    lookups: list[str | None] = []
+
+    def get_me(token: str | None) -> DirectoryUser:
+        lookups.append(token)
+        return DirectoryUser(given_name="Agnieszka", family_name="Kępkowska")
+
+    monkeypatch.setattr(directory, "get_me", get_me)
+
+    at = _run_app(monkeypatch, APP_MODE="databricks")
+    at.run()
+
+    assert not at.exception
+    user = at.session_state["current_user_info"]
+    assert (user.initials, user.display_name) == ("X0W", "Agnieszka Kępkowska")
+    assert lookups == ["t"]  # once per session
+    assert "Logged user: Agnieszka Kępkowska (X0W)" in [c.value for c in at.caption]
+
+
+@pytest.mark.unit
+def test__app__directory_failure_shows_the_initials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_services(
+        monkeypatch,
+        _RecordingDataAccess(),
+        {"x-forwarded-preferred-username": CORPORATE, "x-forwarded-access-token": "t"},
+    )
+
+    def broken(*_: object) -> None:
+        msg = "directory down"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(directory, "lookup_directory_user", broken)
+
+    at = _run_app(monkeypatch, APP_MODE="databricks")
+
+    assert not at.exception
+    assert not [t for t in at.title if t.value == "Access denied"]
+    assert at.session_state["current_user_info"].display_name == "X0W"
+    assert "Logged user: X0W" in [c.value for c in at.caption]

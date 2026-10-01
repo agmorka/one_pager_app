@@ -82,6 +82,13 @@ class AppConfig(BaseModel):
             "ONE_PAGER_APP_USER_DOMAINS and ONE_PAGER_APP_USERNAME_SUFFIXES."
         ),
     )
+    ONE_PAGER_APP_MOCK_USER_NAME: str = Field(
+        "Local Dev User",
+        description=(
+            "Name shown for the local-mock user, in place of the name read "
+            "from the workspace directory in the other modes."
+        ),
+    )
     ONE_PAGER_APP_APPROVERS: str = Field(
         "",
         description=(

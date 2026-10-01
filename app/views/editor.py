@@ -56,6 +56,16 @@ def _get_type_options(_data_access) -> list[str]:  # noqa: ANN001
 # ============================================================================
 
 
+def _prefill_email(user: CurrentUser | None) -> str:
+    """The directory email, else the username when it looks like an email."""
+    if user is None:
+        return ""
+    for candidate in (user.email, user.username):
+        if candidate and EMAIL_PATTERN.match(candidate):
+            return candidate
+    return ""
+
+
 def _init_form_state(user: CurrentUser | None) -> None:
     """Initialize blank form values once; Owner is pre-filled with the user (D3)."""
     if "create_initialized" in st.session_state:
@@ -69,9 +79,7 @@ def _init_form_state(user: CurrentUser | None) -> None:
         "create_problem": "",
         "create_owner_name": user.display_name if user else "",
         "create_owner_initials": user.initials if user else "",
-        "create_owner_email": (
-            user.username if user and EMAIL_PATTERN.match(user.username) else ""
-        ),
+        "create_owner_email": _prefill_email(user),
         "create_owner_team": "",
     }
     for key, value in defaults.items():
