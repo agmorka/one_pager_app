@@ -17,7 +17,7 @@ def theme(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("environment", ["DEV", "INT", "UAT", "PRD"])
+@pytest.mark.parametrize("environment", ["DEV", "INT", "TST", "UAT", "PRD"])
 def test__environment_badge__shows_label_as_text(
     theme: ModuleType, environment: str
 ) -> None:

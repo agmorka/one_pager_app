@@ -20,6 +20,7 @@ DEFAULT_BADGE_COLOR = "#808080"
 ENVIRONMENT_BADGE_COLORS: dict[str, tuple[str, str]] = {
     "DEV": ("#808080", "#FFFFFF"),
     "INT": ("#3599B8", "#FFFFFF"),
+    "TST": ("#7E57C2", "#FFFFFF"),
     "UAT": ("#F9BD00", "#343333"),
     "PRD": ("#F34421", "#FFFFFF"),
 }

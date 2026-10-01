@@ -52,6 +52,16 @@ Usernames look like `x0wadm@becoc001.onmicrosoft.com`. The app derives the user'
 
 A username that does not match these settings gets no initials and cannot edit or manage anything.
 
+Roles come from group membership, checked once per session (see [docs/Architecture.md](docs/Architecture.md) §4). Every signed-in user is a Viewer. `{env}` in a group name is replaced with the environment (`DEV`, `INT`, `TST`, `UAT`, `PRD`):
+
+| Setting | Default | Role |
+|---|---|---|
+| `ONE_PAGER_APP_GROUP_OWNER_SME` | `BEC_BECOC001_LHX_{env}_DataPlatEng` | Owner/SME: may create One Pagers and manage Use Cases. |
+| `ONE_PAGER_APP_GROUP_APPROVER` | `BEC_BECOC001_LHX_{env}_DataPlatEng` | Approver: reviews One Pagers. |
+| `ONE_PAGER_APP_GROUP_ADMIN` | `BEC_BECOC001_LHX_{env}_DataPlatEng` | Admin: uses the Admin page. |
+
+The defaults are the interim Data Platform Engineering group until the dedicated role groups exist; switching is a configuration change only.
+
 ### Option 1: Run with Databricks Apps (recommended)
 
 ```bash

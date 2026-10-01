@@ -68,7 +68,7 @@ Changes to the Terraform configuration needed by the identity and access design 
 2. Grant `account users` `USE CATALOG`, `USE SCHEMA` and `SELECT` on the app tables, and `CAN_USE` on the warehouse.
 3. Confirm that no user group has `MODIFY` on the app tables or `WRITE VOLUME` on the registry volume.
 4. No change to app access: in UAT/PRD all users can already use the app (all employees are Viewers); DEV/INT/TST stay limited to the base groups.
-5. TST: the app's `Environment` setting knows DEV, INT, UAT and PRD only. If the app runs in TST, the setting and the `BEC_BECOC001_LHX_TST_DataPlatEng` group must be added.
+5. TST: the app's `Environment` setting knows TST (badge, and `BEC_BECOC001_LHX_TST_DataPlatEng` as the interim role group). Check that this group exists in the TST account.
 
 ## Service Principal
 

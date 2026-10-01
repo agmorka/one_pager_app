@@ -17,8 +17,20 @@ class AppMode(str, Enum):
 class Environment(str, Enum):
     DEV = "DEV"
     INT = "INT"
+    TST = "TST"
     UAT = "UAT"
     PRD = "PRD"
+
+
+# Interim group for every role until the dedicated role groups exist
+# (User_Identity_And_Access_Plan.md §4.1, Decision_Log §21). ``{env}`` is
+# replaced with the environment (DEV, INT, TST, UAT, PRD).
+INTERIM_ROLE_GROUP = "BEC_BECOC001_LHX_{env}_DataPlatEng"
+ROLE_GROUP_SETTINGS = (
+    "ONE_PAGER_APP_GROUP_OWNER_SME",
+    "ONE_PAGER_APP_GROUP_APPROVER",
+    "ONE_PAGER_APP_GROUP_ADMIN",
+)
 
 
 class AppConfig(BaseModel):
@@ -89,6 +101,27 @@ class AppConfig(BaseModel):
             "from the workspace directory in the other modes."
         ),
     )
+    ONE_PAGER_APP_GROUP_OWNER_SME: str = Field(
+        INTERIM_ROLE_GROUP,
+        description=(
+            "Group whose members may create One Pagers and manage Use Cases "
+            "(Owner/SME role). {env} is replaced with the environment."
+        ),
+    )
+    ONE_PAGER_APP_GROUP_APPROVER: str = Field(
+        INTERIM_ROLE_GROUP,
+        description=(
+            "Group whose members review One Pagers (Approver role). {env} is "
+            "replaced with the environment."
+        ),
+    )
+    ONE_PAGER_APP_GROUP_ADMIN: str = Field(
+        INTERIM_ROLE_GROUP,
+        description=(
+            "Group whose members use the Admin page (Admin role). {env} is "
+            "replaced with the environment."
+        ),
+    )
     ONE_PAGER_APP_APPROVERS: str = Field(
         "",
         description=(
@@ -115,6 +148,15 @@ class AppConfig(BaseModel):
             msg = f"ONE_PAGER_APP_INITIALS_PATTERN is not a valid regex: {exc}"
             raise ValueError(msg) from exc
         return value
+
+    @field_validator(*ROLE_GROUP_SETTINGS)
+    @classmethod
+    def _check_role_group(cls, value: str) -> str:
+        group = value.strip()
+        if not group or "," in group:
+            msg = f"A role group setting must be one group name, got {value!r}."
+            raise ValueError(msg)
+        return group
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -153,6 +195,20 @@ class AppConfig(BaseModel):
     def initials_pattern(self) -> re.Pattern[str]:
         """Compiled ONE_PAGER_APP_INITIALS_PATTERN."""
         return re.compile(self.ONE_PAGER_APP_INITIALS_PATTERN)
+
+    @property
+    def role_groups(self) -> dict[str, str]:
+        """Group name per role (``owner_sme``, ``approver``, ``admin``).
+
+        ``{env}`` is replaced with ``environment``; a value without it is used
+        as is.
+        """
+        env = self.environment.value
+        return {
+            "owner_sme": self.ONE_PAGER_APP_GROUP_OWNER_SME.replace("{env}", env),
+            "approver": self.ONE_PAGER_APP_GROUP_APPROVER.replace("{env}", env),
+            "admin": self.ONE_PAGER_APP_GROUP_ADMIN.replace("{env}", env),
+        }
 
     @property
     def approver_initials(self) -> frozenset[str]:

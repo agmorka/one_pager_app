@@ -111,3 +111,44 @@ def test__mock_user__configurable() -> None:
 
     assert username == "x0wadm@becoc001.onmicrosoft.com"
     assert initials_from_username(username, config) == "X0W"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("environment", ["DEV", "INT", "TST", "UAT", "PRD"])
+def test__role_groups__default_is_the_interim_group_per_environment(
+    environment: str,
+) -> None:
+    groups = _config(ONE_PAGER_APP_ENVIRONMENT=environment).role_groups
+
+    expected = f"BEC_BECOC001_LHX_{environment}_DataPlatEng"
+    assert groups == {"owner_sme": expected, "approver": expected, "admin": expected}
+
+
+@pytest.mark.unit
+def test__role_groups__configured_values() -> None:
+    groups = _config(
+        ONE_PAGER_APP_ENVIRONMENT="UAT",
+        ONE_PAGER_APP_GROUP_OWNER_SME="OPA-OwnerSME-{env}",
+        ONE_PAGER_APP_GROUP_APPROVER=" OPA-Approver ",
+        ONE_PAGER_APP_GROUP_ADMIN="OPA-Admin-{env}",
+    ).role_groups
+
+    assert groups == {
+        "owner_sme": "OPA-OwnerSME-UAT",
+        "approver": "OPA-Approver",
+        "admin": "OPA-Admin-UAT",
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value", ["", "  ", "GroupA,GroupB"])
+def test__role_groups__must_be_one_group(value: str) -> None:
+    with pytest.raises(ValueError, match="one group name"):
+        _config(ONE_PAGER_APP_GROUP_APPROVER=value)
+
+
+@pytest.mark.unit
+def test__environment__tst_from_catalog_prefix() -> None:
+    assert _config(ONE_PAGER_APP_DATABRICKS_CATALOG="tst_bia_meta").environment is (
+        Environment.TST
+    )
