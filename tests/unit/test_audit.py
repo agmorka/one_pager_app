@@ -12,6 +12,7 @@ from onepagerapp.audit import (
     log_lock_override,
     log_permission_denied,
     log_status_transition,
+    log_unrecognised_user,
 )
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
@@ -146,3 +147,17 @@ def test__create_one_pager__logs_permission_denied(
         "action=create_one_pager outcome=permission_denied user=-"
     )
     assert record.levelno == logging.WARNING
+
+
+@pytest.mark.unit
+def test__log_unrecognised_user__logs_username(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.WARNING, logger=AUDIT_LOGGER_NAME):
+        log_unrecognised_user("x0wadm@guest.com")
+        log_unrecognised_user(None)
+
+    assert caplog.messages == [
+        "action=access_app outcome=permission_denied user=- username=x0wadm@guest.com",
+        "action=access_app outcome=permission_denied user=- username=-",
+    ]

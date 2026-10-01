@@ -13,6 +13,7 @@ import streamlit as st
 
 from adapters.edit_mode import navigation_guard
 from adapters.theme import apply_theme, environment_badge
+from onepagerapp.audit import log_unrecognised_user
 from onepagerapp.auth import resolve_current_user, resolve_roles
 from onepagerapp.config import AppConfig, AppMode
 from onepagerapp.data_access.base import DataAccess
@@ -112,6 +113,8 @@ def resolve_user() -> CurrentUser | None:
         username = None
     user = resolve_current_user(username, config) if username else None
     if user is None or not user.initials:
+        if "unrecognised_user" not in st.session_state:  # log once per session
+            log_unrecognised_user(username)
         st.session_state.unrecognised_user = username or ""
         return None
     st.session_state.current_user = username

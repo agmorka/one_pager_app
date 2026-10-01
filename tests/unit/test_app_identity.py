@@ -123,16 +123,22 @@ def test__app__recognised_user_gets_the_app(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 @pytest.mark.unit
-def test__app__unknown_domain_is_denied(monkeypatch: pytest.MonkeyPatch) -> None:
+def test__app__unknown_domain_is_denied(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     at = _run_app(
         monkeypatch, APP_MODE="local-mock", ONE_PAGER_APP_MOCK_USER="x0wadm@guest.com"
     )
+    at.run()  # a rerun shows the page again but logs only once per session
 
     assert not at.exception
     assert [t.value for t in at.title] == ["Access denied"]
     assert "`x0wadm@guest.com` is not recognised" in at.error[0].value
     assert "current_user_info" not in at.session_state
     assert "data_access" not in at.session_state  # no data access for the session
+    assert [m for m in caplog.messages if "action=access_app" in m] == [
+        "action=access_app outcome=permission_denied user=- username=x0wadm@guest.com"
+    ]
 
 
 @pytest.mark.unit
