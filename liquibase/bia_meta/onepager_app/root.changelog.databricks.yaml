@@ -32,3 +32,7 @@ databaseChangeLog:
         file: ddl/use_cases.sql
     - include:
         file: ddl/use_case_references.sql
+
+    # Actor columns on the reference tables (after the tables exist)
+    - include:
+        file: ddl/ref_audit_columns.sql
