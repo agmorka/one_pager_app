@@ -11,3 +11,16 @@ env:
     valueFrom: one-pager-registry-volume
   - name: DATABRICKS_WAREHOUSE_ID
     valueFrom: serverless-starter-warehouse
+  # User identity (Architecture.md §4). The same in every environment; the
+  # environment itself (badge, role group names) is derived from the catalog
+  # of the registry volume above.
+  - name: ONE_PAGER_APP_USER_DOMAINS
+    value: "becoc001.onmicrosoft.com"
+  - name: ONE_PAGER_APP_USERNAME_SUFFIXES
+    value: "adm"
+  - name: ONE_PAGER_APP_INITIALS_PATTERN
+    value: "^[A-Z0-9]{3}$"
+  # Role groups: unset while the interim BEC_BECOC001_LHX_{env}_DataPlatEng
+  # group is used. Once the dedicated groups exist, add for example:
+  # - name: ONE_PAGER_APP_GROUP_APPROVER
+  #   value: "OPA-Approver-{env}"

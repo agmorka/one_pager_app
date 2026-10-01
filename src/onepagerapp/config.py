@@ -229,13 +229,20 @@ class AppConfig(BaseModel):
 
     @property
     def environment(self) -> Environment:
-        """Environment for the sidebar badge (UI_Design.md §2).
+        """Environment for the sidebar badge and the role group names.
 
         Uses ONE_PAGER_APP_ENVIRONMENT when it names a known environment,
-        otherwise the catalog prefix (``prd_one_pager`` -> PRD), otherwise DEV.
+        otherwise the catalog prefix of the registry volume
+        (``/Volumes/prd_bia_meta/...`` -> PRD), otherwise the prefix of
+        ONE_PAGER_APP_DATABRICKS_CATALOG, otherwise DEV.
+
+        The volume comes first because deployed, ONE_PAGER_APP_VOLUME_PATH is
+        set per environment by the app resource (``app.yml``), while the
+        catalog setting falls back to its DEV default.
         """
         candidates = (
             self.ONE_PAGER_APP_ENVIRONMENT,
+            _volume_catalog(self.ONE_PAGER_APP_VOLUME_PATH).split("_", 1)[0],
             self.ONE_PAGER_APP_DATABRICKS_CATALOG.split("_", 1)[0],
         )
         for candidate in candidates:
@@ -249,3 +256,8 @@ class AppConfig(BaseModel):
     def uses_databricks(self) -> bool:
         return self.APP_MODE in (AppMode.DATABRICKS, AppMode.LOCAL_INTEGRATION)
 
+
+def _volume_catalog(volume_path: str) -> str:
+    """Catalog of a Unity Catalog volume path ``/Volumes/<catalog>/...``, or ""."""
+    parts = volume_path.strip().strip("/").split("/")
+    return parts[1] if len(parts) > 1 and parts[0] == "Volumes" else ""

@@ -69,6 +69,16 @@ Changes to the Terraform configuration needed by the identity and access design 
 3. Confirm that no user group has `MODIFY` on the app tables or `WRITE VOLUME` on the registry volume.
 4. No change to app access: in UAT/PRD all users can already use the app (all employees are Viewers); DEV/INT/TST stay limited to the base groups.
 5. TST: the app's `Environment` setting knows TST (badge, and `BEC_BECOC001_LHX_TST_DataPlatEng` as the interim role group). Check that this group exists in the TST account.
+6. Before deploying to an environment, check that `BEC_BECOC001_LHX_<ENV>_DataPlatEng` exists in that environment's account (for example `SELECT is_account_group_member('BEC_BECOC001_LHX_DEV_DataPlatEng')` as a member returns `true`). A missing group means every user is only a Viewer.
+
+## App Settings per Environment
+
+The app's environment variables are in `app/app.yml`, which is the same for every environment:
+
+- `ONE_PAGER_APP_VOLUME_PATH` and `DATABRICKS_WAREHOUSE_ID` come from the app resources (`valueFrom`), so they differ per environment.
+- The environment (sidebar badge and the `{env}` in role group names) is derived from the catalog of the registry volume, e.g. `/Volumes/prd_bia_meta/...` → `PRD`. `ONE_PAGER_APP_ENVIRONMENT` overrides it if ever needed.
+- The identity settings (`ONE_PAGER_APP_USER_DOMAINS`, `ONE_PAGER_APP_USERNAME_SUFFIXES`, `ONE_PAGER_APP_INITIALS_PATTERN`) are the same everywhere and set explicitly.
+- The role group settings stay unset while the interim DataPlatEng group is used; add them once the dedicated groups exist (the `{env}` placeholder keeps one value valid for all environments).
 
 ## Service Principal
 
