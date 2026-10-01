@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from onepagerapp.config import AppConfig
+from onepagerapp.data_access.connection import Identity
 from onepagerapp.data_access.factory import create_data_access, create_document_store
 from onepagerapp.data_access.lakehouse import LakehouseAccess
 from onepagerapp.models import (
@@ -131,10 +132,10 @@ def test_sequence(data_access: LakehouseAccess) -> Iterator[str]:
     conn = data_access._connection
     delete = f"DELETE FROM {fqn} WHERE id_type = :t"  # noqa: S608
     insert = f"INSERT INTO {fqn} (id_type, last_value) VALUES (:t, 0)"  # noqa: S608
-    conn.execute_statement(delete, parameters={"t": TEST_SEQUENCE})
-    conn.execute_statement(insert, parameters={"t": TEST_SEQUENCE})
+    conn.execute_statement(delete, {"t": TEST_SEQUENCE}, identity=Identity.APP)
+    conn.execute_statement(insert, {"t": TEST_SEQUENCE}, identity=Identity.APP)
     yield TEST_SEQUENCE
-    conn.execute_statement(delete, parameters={"t": TEST_SEQUENCE})
+    conn.execute_statement(delete, {"t": TEST_SEQUENCE}, identity=Identity.APP)
 
 
 def test__compare_and_set__concurrent_writers_do_not_collide(

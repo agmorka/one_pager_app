@@ -14,7 +14,7 @@ import pytest
 from onepagerapp.config import AppConfig
 from onepagerapp.data_access import lakehouse
 from onepagerapp.data_access.base import NotFoundError
-from onepagerapp.data_access.connection import StatementFailedError
+from onepagerapp.data_access.connection import Identity, StatementFailedError
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.id_generator import MAX_ATTEMPTS
 from onepagerapp.models import UseCaseFilter, UseCaseInput
@@ -75,13 +75,19 @@ class FakeConnection:
 
     def __init__(self) -> None:  # noqa: D107
         self.calls: list[tuple[str, dict]] = []
+        self.identities: list[Identity] = []
         self.handler: Callable[[str, dict], object] = lambda _s, _p: _response([], [])
 
     def execute_statement(
-        self, statement: str, parameters: dict | None = None
+        self,
+        statement: str,
+        parameters: dict | None = None,
+        *,
+        identity: Identity,
     ) -> object:
         params = dict(parameters or {})
         self.calls.append((statement, params))
+        self.identities.append(identity)
         return self.handler(statement, params)
 
 

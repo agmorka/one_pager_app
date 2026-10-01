@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from onepagerapp.config import AppConfig
+from onepagerapp.data_access.connection import Identity
 from onepagerapp.data_access.lakehouse import LakehouseAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import UseCaseFilter, UseCaseInput
@@ -57,6 +58,7 @@ def tracked() -> Iterator[_Tracked]:
             f"DELETE FROM {access._fqn_prefix}.use_cases "  # noqa: S608
             f"WHERE use_case_id = :use_case_id",
             {"use_case_id": use_case_id},
+            identity=Identity.APP,
         )
 
 

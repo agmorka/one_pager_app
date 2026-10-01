@@ -10,6 +10,7 @@ from streamlit.testing.v1 import AppTest
 
 from onepagerapp.config import AppConfig
 from onepagerapp.data_access import lakehouse
+from onepagerapp.data_access.connection import Identity
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import (
@@ -159,6 +160,8 @@ class _FakeConnection:
         self,
         statement: str,
         parameters: dict | None = None,  # noqa: ARG002
+        *,
+        identity: Identity,  # noqa: ARG002
     ) -> object:
         self.statements.append(statement)
         columns = ["total"] if "COUNT(*) as total" in statement else []
