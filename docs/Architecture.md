@@ -287,7 +287,7 @@ Platform rule: users have no direct privileges on Databricks resources; privileg
 
 **Audit-trail tradeoff.** Because writes run as the service principal, platform logs (Delta history, volume access logs, Git commit author) show the service principal, not the person. The app's own audit columns (`created_by`, `last_updated_by`, `author_initials`, …, always the user's initials), the change log (requirements doc §7) and the security-event log are the record of who did what. Every write must therefore carry the acting user's initials. Reads, in contrast, appear under the user's own name in the platform audit logs.
 
-**Token lifetime.** The user's token is taken from the headers of the first connection of the Streamlit session. If it expires during a long session, reads fail with a clear "please reload the page" message; writes are not affected.
+**Token lifetime.** The user's token is taken from the headers of the first connection of the Streamlit session. If it expires during a long session, reads fail with a clear "please reload the page" message; writes are not affected. The connection recognises a refused user token (the SDK's `Unauthenticated`, or an expired / invalid token message) and raises `SessionExpiredError`, whose message the pages show; reloading starts a new session with a fresh token.
 
 ## 9. Notifications
 

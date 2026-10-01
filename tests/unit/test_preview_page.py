@@ -9,7 +9,10 @@ import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
-from onepagerapp.data_access.connection import ReadAccessDeniedError
+from onepagerapp.data_access.connection import (
+    ReadAccessDeniedError,
+    SessionExpiredError,
+)
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import CurrentUser, LockInfo
@@ -38,6 +41,11 @@ class _DeniedDataAccess(MockDataAccess):
     def get_one_pager(self, one_pager_id: str) -> NoReturn:  # noqa: ARG002
         msg = "Your role does not have access to table cat.sch.one_pager_status."
         raise ReadAccessDeniedError(msg)
+
+
+class _ExpiredDataAccess(MockDataAccess):
+    def get_one_pager(self, one_pager_id: str) -> NoReturn:  # noqa: ARG002
+        raise SessionExpiredError
 
 
 def _services(tmp_path: Path, data_access_cls: type = MockDataAccess) -> dict:
@@ -408,3 +416,16 @@ def test__preview__read_refused_by_unity_catalog_says_so(
     assert at.error[0].value == (
         "Your role does not have access to table cat.sch.one_pager_status."
     )
+
+
+@pytest.mark.unit
+def test__preview__expired_session_asks_to_reload(
+    tmp_path: Path, switched: list[str]
+) -> None:
+    state = _services(tmp_path, _ExpiredDataAccess)
+    state["preview_one_pager_id"] = "OP-0001"
+
+    at = _app(state).run()
+
+    assert not at.exception
+    assert at.error[0].value == "Your session has expired. Please reload the page."

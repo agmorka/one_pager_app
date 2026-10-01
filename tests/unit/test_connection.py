@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 import streamlit as st
-from databricks.sdk.errors import PermissionDenied
+from databricks.sdk.errors import PermissionDenied, Unauthenticated
 from databricks.sdk.service.sql import StatementState
 
 from onepagerapp.config import AppConfig
@@ -18,6 +18,7 @@ from onepagerapp.data_access.connection import (
     Identity,
     MissingUserTokenError,
     ReadAccessDeniedError,
+    SessionExpiredError,
     StatementFailedError,
     WriteAccessDeniedError,
     _raise_if_failed,
@@ -257,3 +258,52 @@ def test__other_failures_stay_statement_failed(
         conn.execute_statement("SELECT 1", identity=Identity.USER)
     assert not isinstance(raised.value, AccessDeniedError)
     assert user_error_message(raised.value, "default") == "default"
+
+
+# ============================================================================
+# Expired user token (identity plan Phase 7, step 3)
+# ============================================================================
+
+
+@pytest.mark.unit
+def test__expired_user_token__asks_to_reload(monkeypatch: pytest.MonkeyPatch) -> None:
+    conn, api = _connection_answering(monkeypatch, Unauthenticated("Token is expired"))
+
+    with pytest.raises(SessionExpiredError) as raised:
+        conn.execute_statement("SELECT 1", identity=Identity.USER)
+
+    assert str(raised.value) == "Your session has expired. Please reload the page."
+    assert user_error_message(raised.value, "default") == str(raised.value)
+    assert api.calls == 1  # not retried
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "message",
+    ["Invalid access token.", "UNAUTHENTICATED: token has expired"],
+)
+def test__expired_token_in_a_failed_statement(
+    monkeypatch: pytest.MonkeyPatch, message: str
+) -> None:
+    conn, _ = _connection_answering(
+        monkeypatch, _status(StatementState.FAILED, message)
+    )
+
+    with pytest.raises(SessionExpiredError):
+        conn.execute_statement("SELECT 1", identity=Identity.USER)
+
+
+@pytest.mark.unit
+def test__service_principal_auth_failure_is_not_a_session_expiry(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    conn, _ = _connection_answering(monkeypatch, Unauthenticated("invalid client"))
+
+    with (
+        caplog.at_level(logging.ERROR, logger=connection_module.__name__),
+        pytest.raises(RuntimeError) as raised,
+    ):
+        conn.execute_statement("UPDATE t SET a = 1", identity=Identity.APP)
+
+    assert not isinstance(raised.value, SessionExpiredError)
+    assert "could not authenticate" in caplog.text
