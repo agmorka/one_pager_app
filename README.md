@@ -47,7 +47,7 @@ Usernames look like `x0wadm@becoc001.onmicrosoft.com`. The app derives the user'
 | `ONE_PAGER_APP_USER_DOMAINS` | `becoc001.onmicrosoft.com` | Accepted username domains, comma-separated. |
 | `ONE_PAGER_APP_USERNAME_SUFFIXES` | `adm` | Suffixes stripped from the user part. An empty entry means "no suffix" (`adm,` accepts `x0wadm@` and `x0w@`). |
 | `ONE_PAGER_APP_INITIALS_PATTERN` | `^[A-Z0-9]{3}$` | Valid initials after upper-casing. Also used for Owner/SME initials. |
-| `ONE_PAGER_APP_MOCK_USER` | `lduadm@mock.local` | Signed-in user in `local-mock` mode. |
+| `ONE_PAGER_APP_MOCK_USER` | `lduadm@becoc001.onmicrosoft.com` | Signed-in user in `local-mock` mode. |
 
 A username that does not match these settings gets no initials and cannot edit or manage anything.
 
@@ -102,7 +102,7 @@ Start Streamlit from the `app/` directory so it picks up the BEC theme in `app/.
    ONE_PAGER_APP_VOLUME_PATH=/Volumes/dev_bia_meta/onepager_app/one_pager_registry
    ```
 
-   In `local-mock` mode the signed-in user is `ONE_PAGER_APP_MOCK_USER` (default `lduadm@mock.local`, initials `LDU`). It goes through the same username parsing as a real login, so its domain must be listed in `ONE_PAGER_APP_USER_DOMAINS` (the template adds `mock.local`). To try the app as a corporate user, set for example `ONE_PAGER_APP_MOCK_USER=x0wadm@becoc001.onmicrosoft.com`.
+   In `local-mock` mode the signed-in user is `ONE_PAGER_APP_MOCK_USER` (default `lduadm@becoc001.onmicrosoft.com`, initials `LDU`). It goes through the same username parsing as a real login, so it must match `ONE_PAGER_APP_USER_DOMAINS` and `ONE_PAGER_APP_USERNAME_SUFFIXES`; otherwise the app shows "Access denied". To try the app as a corporate user, set for example `ONE_PAGER_APP_MOCK_USER=x0wadm@becoc001.onmicrosoft.com`.
 
 5. Open your browser and navigate to `http://localhost:8501`. The app opens on the Registry page, and the sidebar shows the environment badge (`ONE_PAGER_APP_ENVIRONMENT`, or derived from the catalog prefix).
 

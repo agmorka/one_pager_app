@@ -103,7 +103,7 @@ Record every answer in [Decision_Log.md](../docs/Decision_Log.md).
 
 **Status (2026-09-30): implemented.** Notes on the implementation:
 
-- The mock user default is `lduadm@mock.local` (not `ldu@mock.local`), so it is accepted with the default suffix `adm`.
+- The mock user default is `lduadm@becoc001.onmicrosoft.com` (not `ldu@mock.local`), so it is accepted with the default domain and suffix and needs no extra setting.
 - The sample One Pagers and the `MockDataAccess` seed use 3-character initials (`ABR`, `BSM`, `CDA`, `DPI` instead of `AB`, `BS`, `CD`, `DP`). Tests build users with `tests/users.make_user` instead of parsing usernames.
 - Until Phase 2, an unrecognised username gets a `CurrentUser` with empty initials (and the username-based display name). Empty initials match no Owner, SME, Approver or Admin, and the Use Cases page refuses writes without initials.
 - A recognised user's display name is their initials until Phase 5 reads the name from the directory.

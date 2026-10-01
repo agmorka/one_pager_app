@@ -75,11 +75,11 @@ class AppConfig(BaseModel):
         ),
     )
     ONE_PAGER_APP_MOCK_USER: str = Field(
-        "lduadm@mock.local",
+        "lduadm@becoc001.onmicrosoft.com",
         description=(
             "Username of the signed-in user in local-mock mode. It goes through "
-            "the same parsing as a real username, so its domain must be in "
-            "ONE_PAGER_APP_USER_DOMAINS."
+            "the same parsing as a real username, so it must match "
+            "ONE_PAGER_APP_USER_DOMAINS and ONE_PAGER_APP_USERNAME_SUFFIXES."
         ),
     )
     ONE_PAGER_APP_APPROVERS: str = Field(

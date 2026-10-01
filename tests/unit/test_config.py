@@ -94,13 +94,10 @@ def test__initials_pattern__invalid_regex_rejected() -> None:
 
 @pytest.mark.unit
 def test__mock_user__default_is_parsed_like_a_real_username() -> None:
-    config = _config(
-        APP_MODE="local-mock",
-        ONE_PAGER_APP_USER_DOMAINS="becoc001.onmicrosoft.com,mock.local",
-    )
+    config = _config(APP_MODE="local-mock")  # default domains and suffixes
     username = create_data_access(config).get_current_user()
 
-    assert username == "lduadm@mock.local"
+    assert username == "lduadm@becoc001.onmicrosoft.com"
     assert initials_from_username(username, config) == "LDU"
 
 
