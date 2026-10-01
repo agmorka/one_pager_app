@@ -13,6 +13,7 @@ from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.help_content import (
     DEFAULT_NODE_COLOR,
     QUICK_REFERENCE,
+    ROLE_REQUEST,
     ROLES,
     combinations_table,
     dp_legend,
@@ -139,6 +140,7 @@ def test__static_content__roles_and_quick_reference() -> None:
     assert "Create a One Pager" in titles
     assert "Review (Approvers)" in titles
     assert all(q.steps for q in QUICK_REFERENCE)
+    assert "Entra ID groups" in ROLE_REQUEST.steps[0]
 
 
 @pytest.mark.unit
@@ -209,7 +211,8 @@ def test__help_page__renders_every_section(
     expected = {"One Pager status", "Data Product status", "Valid status combinations"}
     assert expected <= set(subheaders)
     assert len(at.get("graphviz_chart")) == 2
-    assert len(at.expander) == 2 + len(QUICK_REFERENCE)
+    assert len(at.expander) == 3 + len(QUICK_REFERENCE)
+    assert ROLE_REQUEST.title in [e.label for e in at.expander]
 
 
 @pytest.mark.unit

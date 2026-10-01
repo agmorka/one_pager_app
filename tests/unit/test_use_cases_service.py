@@ -16,7 +16,7 @@ from onepagerapp.use_cases import (
     set_use_case_deprecated,
     update_use_case,
 )
-from tests.users import make_user
+from tests.users import CREATOR_ROLES, make_user
 
 X0W = make_user("X0W")
 DATA = UseCaseInput(
@@ -39,10 +39,14 @@ def test__use_case_writes__record_actor_and_log(
     mock_data_access: MockDataAccess, caplog: pytest.LogCaptureFixture
 ) -> None:
     with caplog.at_level(logging.INFO, logger=AUDIT_LOGGER_NAME):
-        use_case_id = create_use_case(mock_data_access, DATA, X0W)
-        update_use_case(mock_data_access, "UC-001", DATA, X0W)
-        set_use_case_deprecated(mock_data_access, "UC-002", deprecated=True, user=X0W)
-        set_use_case_deprecated(mock_data_access, "UC-002", deprecated=False, user=X0W)
+        use_case_id = create_use_case(mock_data_access, DATA, X0W, roles=CREATOR_ROLES)
+        update_use_case(mock_data_access, "UC-001", DATA, X0W, roles=CREATOR_ROLES)
+        set_use_case_deprecated(
+            mock_data_access, "UC-002", deprecated=True, user=X0W, roles=CREATOR_ROLES
+        )
+        set_use_case_deprecated(
+            mock_data_access, "UC-002", deprecated=False, user=X0W, roles=CREATOR_ROLES
+        )
 
     created = mock_data_access.get_use_case(use_case_id)
     assert created.created_by == "X0W"
@@ -65,11 +69,13 @@ def test__use_case_writes__refuse_unrecognised_user(
     before = mock_data_access.get_use_case("UC-001")
 
     with pytest.raises(PermissionDeniedError):
-        create_use_case(mock_data_access, DATA, user)
+        create_use_case(mock_data_access, DATA, user, roles=CREATOR_ROLES)
     with pytest.raises(PermissionDeniedError):
-        update_use_case(mock_data_access, "UC-001", DATA, user)
+        update_use_case(mock_data_access, "UC-001", DATA, user, roles=CREATOR_ROLES)
     with pytest.raises(PermissionDeniedError):
-        set_use_case_deprecated(mock_data_access, "UC-001", deprecated=True, user=user)
+        set_use_case_deprecated(
+            mock_data_access, "UC-001", deprecated=True, user=user, roles=CREATOR_ROLES
+        )
 
     assert mock_data_access.get_use_case("UC-001") == before
 
@@ -84,7 +90,7 @@ def test__use_case_write__failure_is_logged(
         caplog.at_level(logging.INFO, logger=AUDIT_LOGGER_NAME),
         pytest.raises(RuntimeError),
     ):
-        update_use_case(broken, "UC-001", DATA, X0W)
+        update_use_case(broken, "UC-001", DATA, X0W, roles=CREATOR_ROLES)
 
     assert caplog.messages == [
         "action=update_use_case outcome=failed user=X0W use_case_id=UC-001"

@@ -16,6 +16,7 @@ from onepagerapp.config import AppConfig
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.directory import DirectoryUser
 from onepagerapp.documents import OnePagerDocumentStore
+from onepagerapp.state_machine import Actor
 from tests.conftest import FIXTURES_DIR
 
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
@@ -291,3 +292,139 @@ def test__app__directory_failure_shows_the_initials(
     assert not [t for t in at.title if t.value == "Access denied"]
     assert at.session_state["current_user_info"].display_name == "X0W"
     assert "Logged user: X0W" in [c.value for c in at.caption]
+
+
+@pytest.mark.unit
+def test__app__roles_from_mock_groups(monkeypatch: pytest.MonkeyPatch) -> None:
+    at = _run_app(monkeypatch, APP_MODE="local-mock")  # default: interim group
+
+    assert at.session_state["current_user_roles"] == {
+        Actor.OWNER_SME_GROUP,
+        Actor.APPROVER,
+        Actor.ADMIN,
+    }
+
+
+@pytest.mark.unit
+def test__app__no_group_is_viewer(monkeypatch: pytest.MonkeyPatch) -> None:
+    at = _run_app(monkeypatch, APP_MODE="local-mock", ONE_PAGER_APP_MOCK_GROUPS="")
+
+    assert not at.exception
+    assert at.session_state["current_user_roles"] == frozenset()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("roles", "expected"),
+    [
+        (frozenset(), ["Viewer"]),
+        (frozenset({Actor.APPROVER}), ["Approver"]),
+        (
+            frozenset({Actor.ADMIN, Actor.OWNER_SME_GROUP, Actor.APPROVER}),
+            ["Owner/SME", "Approver", "Admin"],
+        ),
+    ],
+)
+def test__role_names__viewer_only_without_other_roles(
+    app_module: ModuleType, roles: frozenset[Actor], expected: list[str]
+) -> None:
+    assert app_module.role_names(roles) == expected
+
+
+@pytest.mark.unit
+def test__app__sidebar_shows_role_badges(monkeypatch: pytest.MonkeyPatch) -> None:
+    at = _run_app(monkeypatch, APP_MODE="local-mock")
+
+    sidebar_html = " ".join(m.value for m in at.sidebar.markdown)
+    for role in ("Owner/SME", "Approver", "Admin"):
+        assert f">{role}</span>" in sidebar_html
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("environment", "overrides", "expected"),
+    [
+        ("DEV", {}, None),
+        (
+            "UAT",
+            {},
+            "Interim roles: DataPlatEng members act as Owner/SME, Approver and Admin.",
+        ),
+        (
+            "PRD",
+            {"ONE_PAGER_APP_GROUP_OWNER_SME": "OPA-OwnerSME-{env}"},
+            "Interim roles: DataPlatEng members act as Approver and Admin.",
+        ),
+        (
+            "INT",
+            {
+                "ONE_PAGER_APP_GROUP_OWNER_SME": "A",
+                "ONE_PAGER_APP_GROUP_APPROVER": "B",
+                "ONE_PAGER_APP_GROUP_ADMIN": "C",
+            },
+            None,
+        ),
+    ],
+)
+def test__interim_roles_notice__outside_dev_while_interim(
+    app_module: ModuleType,
+    environment: str,
+    overrides: dict[str, str],
+    expected: str | None,
+) -> None:
+    config = _config("local-mock", ONE_PAGER_APP_ENVIRONMENT=environment, **overrides)
+
+    assert app_module.interim_roles_notice(config) == expected
+
+
+@pytest.mark.unit
+def test__app__interim_roles_warning_and_notice(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    at = _run_app(monkeypatch, APP_MODE="local-mock", ONE_PAGER_APP_ENVIRONMENT="UAT")
+
+    assert not at.exception
+    assert any("Interim roles: DataPlatEng" in c.value for c in at.sidebar.caption)
+    assert any(
+        "Interim role groups in use" in m and "BEC_BECOC001_LHX_UAT_DataPlatEng" in m
+        for m in caplog.messages
+    )
+
+
+@pytest.mark.unit
+def test__app__no_interim_notice_in_dev(monkeypatch: pytest.MonkeyPatch) -> None:
+    at = _run_app(monkeypatch, APP_MODE="local-mock", ONE_PAGER_APP_ENVIRONMENT="DEV")
+
+    assert not any("Interim roles" in c.value for c in at.sidebar.caption)
+
+
+def _page_titles(app_module: ModuleType, roles: frozenset[Actor]) -> list[str]:
+    return [title for _, title in app_module.navigation_entries(roles)]
+
+
+@pytest.mark.unit
+def test__done_when__dataplateng_member_sees_review_and_admin(
+    monkeypatch: pytest.MonkeyPatch, app_module: ModuleType
+) -> None:
+    """Identity plan Phase 6, done when: roles follow the groups per session."""
+    member = _run_app(monkeypatch, APP_MODE="local-mock")
+    member_pages = _page_titles(app_module, member.session_state["current_user_roles"])
+    assert {"Review", "Admin"} <= set(member_pages)
+
+    non_member = _run_app(
+        monkeypatch, APP_MODE="local-mock", ONE_PAGER_APP_MOCK_GROUPS="Other"
+    )
+    viewer_pages = _page_titles(
+        app_module, non_member.session_state["current_user_roles"]
+    )
+    assert viewer_pages == ["Registry", "Preview", "Editor", "Use Cases", "Help"]
+
+    # Another Approver group: the member loses Review from the next session.
+    moved = _run_app(
+        monkeypatch,
+        APP_MODE="local-mock",
+        ONE_PAGER_APP_GROUP_APPROVER="OPA-Approver-{env}",
+    )
+    moved_pages = _page_titles(app_module, moved.session_state["current_user_roles"])
+    assert "Review" not in moved_pages
+    assert "Admin" in moved_pages

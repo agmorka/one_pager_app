@@ -16,7 +16,7 @@ from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import NewOnePagerInput, PersonRef
 from onepagerapp.workflow import create_one_pager
 from tests.conftest import FIXTURES_DIR
-from tests.users import make_user
+from tests.users import CREATOR_ROLES, make_user
 
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
 NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
@@ -49,6 +49,7 @@ def services(tmp_path: Path) -> dict:
         data_access,
         store,
         now=NOW,
+        roles=CREATOR_ROLES,
     )
     assert result.one_pager_id == "OP-0003"
     return {
@@ -57,6 +58,7 @@ def services(tmp_path: Path) -> dict:
         "document_store": store,
         "current_user": user.username,
         "current_user_info": user,
+        "current_user_roles": CREATOR_ROLES,
     }
 
 

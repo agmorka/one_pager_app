@@ -15,7 +15,7 @@ from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import CurrentUser
 from tests.conftest import FIXTURES_DIR
-from tests.users import make_user
+from tests.users import CREATOR_ROLES, make_user
 
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
 
@@ -38,6 +38,7 @@ def services(tmp_path: Path) -> dict:
         "document_store": store,
         "current_user": user.username,
         "current_user_info": user,
+        "current_user_roles": CREATOR_ROLES,
     }
 
 
@@ -63,6 +64,23 @@ def test__registry__new_button_opens_editor_in_create_mode(
 
     assert switched == ["views/editor.py"]
     assert at.session_state["editor_mode"] == "create"
+
+
+@pytest.mark.unit
+def test__viewer__no_new_button_and_editor_refuses_create(
+    services: dict, switched: list[str]
+) -> None:
+    viewer = {**services, "current_user_roles": frozenset()}
+
+    at = _app("registry.py", viewer).run()
+    assert not at.exception
+    assert not [b for b in at.button if b.key == "registry_new"]
+
+    at = _app("editor.py", {**viewer, "editor_mode": "create"}).run()
+    assert not at.exception
+    assert "You don't have permission to create One Pagers." in [
+        e.value for e in at.error
+    ]
 
 
 @pytest.mark.unit

@@ -329,9 +329,17 @@ def _navigate_to_create() -> None:
     st.switch_page("views/editor.py")
 
 
+def _can_create() -> bool:
+    """Whether the signed-in user may create One Pagers (Owner/SME group)."""
+    return can_create_one_pager(
+        st.session_state.get("current_user_info"),
+        st.session_state.get("current_user_roles", frozenset()),
+    )
+
+
 def _render_new_button(key: str) -> None:
     """Render [+ New] for users allowed to create One Pagers (UI_Design §4.1)."""
-    if can_create_one_pager(st.session_state.get("current_user_info")):
+    if _can_create():
         # Button labels are Markdown; a leading "+" would render as a bullet.
         if st.button("➕ New", key=key, type="primary", help="Create a new One Pager"):
             _navigate_to_create()
@@ -511,7 +519,7 @@ def _render_page_state_populated(
 
 def _render_page_state_empty_no_filters() -> None:
     """Render page state when no One Pagers exist and no filters are applied."""
-    if can_create_one_pager(st.session_state.get("current_user_info")):
+    if _can_create():
         st.info("📋 **No One Pagers yet** — create the first one.")
         _render_new_button("registry_new_empty")
     else:

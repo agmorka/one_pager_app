@@ -7,12 +7,14 @@ import pytest
 
 from onepagerapp.models import PRIORITY_OPTIONS, UseCaseInput, UseCasePage
 from onepagerapp.permissions import can_manage_use_cases
+from onepagerapp.state_machine import Actor
 from onepagerapp.use_cases import (
     USE_CASE_FIELDS,
     clean_use_case_input,
     format_use_case_id,
     validate_use_case_input,
 )
+from tests.users import CREATOR_ROLES
 
 
 def _input(**overrides: str) -> UseCaseInput:
@@ -95,10 +97,12 @@ def test_format_use_case_id_rejects_out_of_range(value: int) -> None:
 
 
 @pytest.mark.unit
-def test_can_manage_use_cases_requires_authentication() -> None:
-    assert can_manage_use_cases("MJO")
-    assert not can_manage_use_cases(None)  # not signed in or not recognised
-    assert not can_manage_use_cases("")
+def test_can_manage_use_cases_requires_the_owner_sme_group() -> None:
+    assert can_manage_use_cases("MJO", CREATOR_ROLES)
+    assert not can_manage_use_cases("MJO", frozenset())  # Viewer
+    assert not can_manage_use_cases("MJO", {Actor.APPROVER, Actor.ADMIN})
+    assert not can_manage_use_cases(None, CREATOR_ROLES)  # not recognised
+    assert not can_manage_use_cases("", CREATOR_ROLES)
 
 
 @pytest.mark.unit

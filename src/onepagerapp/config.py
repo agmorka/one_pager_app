@@ -17,8 +17,20 @@ class AppMode(str, Enum):
 class Environment(str, Enum):
     DEV = "DEV"
     INT = "INT"
+    TST = "TST"
     UAT = "UAT"
     PRD = "PRD"
+
+
+# Interim group for every role until the dedicated role groups exist
+# (User_Identity_And_Access_Plan.md §4.1, Decision_Log §21). ``{env}`` is
+# replaced with the environment (DEV, INT, TST, UAT, PRD).
+INTERIM_ROLE_GROUP = "BEC_BECOC001_LHX_{env}_DataPlatEng"
+ROLE_GROUP_SETTINGS = (
+    "ONE_PAGER_APP_GROUP_OWNER_SME",
+    "ONE_PAGER_APP_GROUP_APPROVER",
+    "ONE_PAGER_APP_GROUP_ADMIN",
+)
 
 
 class AppConfig(BaseModel):
@@ -89,19 +101,33 @@ class AppConfig(BaseModel):
             "from the workspace directory in the other modes."
         ),
     )
-    ONE_PAGER_APP_APPROVERS: str = Field(
-        "",
+    ONE_PAGER_APP_GROUP_OWNER_SME: str = Field(
+        INTERIM_ROLE_GROUP,
         description=(
-            "Comma-separated initials of the users who act as Approvers. "
-            "Interim stand-in for the Approver UC group until group names are "
-            "decided (Architecture.md §4)."
+            "Group whose members may create One Pagers and manage Use Cases "
+            "(Owner/SME role). {env} is replaced with the environment."
         ),
     )
-    ONE_PAGER_APP_ADMINS: str = Field(
-        "",
+    ONE_PAGER_APP_GROUP_APPROVER: str = Field(
+        INTERIM_ROLE_GROUP,
         description=(
-            "Comma-separated initials of the users who act as Admins. Interim "
-            "stand-in for the Admin UC group (Architecture.md §4)."
+            "Group whose members review One Pagers (Approver role). {env} is "
+            "replaced with the environment."
+        ),
+    )
+    ONE_PAGER_APP_GROUP_ADMIN: str = Field(
+        INTERIM_ROLE_GROUP,
+        description=(
+            "Group whose members use the Admin page (Admin role). {env} is "
+            "replaced with the environment."
+        ),
+    )
+    ONE_PAGER_APP_MOCK_GROUPS: str = Field(
+        INTERIM_ROLE_GROUP,
+        description=(
+            "Comma-separated groups the local-mock user belongs to, so roles "
+            "can be tried locally. {env} is replaced with the environment. The "
+            "default is the interim role group: every role. Empty: Viewer only."
         ),
     )
     CLOUD_ROLE_NAME: str = "OnePagerApp"
@@ -115,6 +141,15 @@ class AppConfig(BaseModel):
             msg = f"ONE_PAGER_APP_INITIALS_PATTERN is not a valid regex: {exc}"
             raise ValueError(msg) from exc
         return value
+
+    @field_validator(*ROLE_GROUP_SETTINGS)
+    @classmethod
+    def _check_role_group(cls, value: str) -> str:
+        group = value.strip()
+        if not group or "," in group:
+            msg = f"A role group setting must be one group name, got {value!r}."
+            raise ValueError(msg)
+        return group
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -155,14 +190,38 @@ class AppConfig(BaseModel):
         return re.compile(self.ONE_PAGER_APP_INITIALS_PATTERN)
 
     @property
-    def approver_initials(self) -> frozenset[str]:
-        """Initials configured in ONE_PAGER_APP_APPROVERS (upper case)."""
-        return _initials_list(self.ONE_PAGER_APP_APPROVERS)
+    def role_groups(self) -> dict[str, str]:
+        """Group name per role (``owner_sme``, ``approver``, ``admin``).
+
+        ``{env}`` is replaced with ``environment``; a value without it is used
+        as is.
+        """
+        env = self.environment.value
+        return {
+            "owner_sme": self.ONE_PAGER_APP_GROUP_OWNER_SME.replace("{env}", env),
+            "approver": self.ONE_PAGER_APP_GROUP_APPROVER.replace("{env}", env),
+            "admin": self.ONE_PAGER_APP_GROUP_ADMIN.replace("{env}", env),
+        }
 
     @property
-    def admin_initials(self) -> frozenset[str]:
-        """Initials configured in ONE_PAGER_APP_ADMINS (upper case)."""
-        return _initials_list(self.ONE_PAGER_APP_ADMINS)
+    def interim_roles(self) -> list[str]:
+        """Roles (``owner_sme``, ``approver``, ``admin``) still on the interim group.
+
+        True while a role group setting resolves to the interim DataPlatEng
+        group; empty once all three dedicated groups are configured.
+        """
+        interim = INTERIM_ROLE_GROUP.replace("{env}", self.environment.value)
+        return [role for role, group in self.role_groups.items() if group == interim]
+
+    @property
+    def mock_groups(self) -> frozenset[str]:
+        """Groups of the local-mock user, with ``{env}`` replaced."""
+        env = self.environment.value
+        return frozenset(
+            part.strip().replace("{env}", env)
+            for part in self.ONE_PAGER_APP_MOCK_GROUPS.split(",")
+            if part.strip()
+        )
 
     @property
     def is_mock(self) -> bool:
@@ -190,8 +249,3 @@ class AppConfig(BaseModel):
     def uses_databricks(self) -> bool:
         return self.APP_MODE in (AppMode.DATABRICKS, AppMode.LOCAL_INTEGRATION)
 
-
-def _initials_list(value: str) -> frozenset[str]:
-    return frozenset(
-        part.strip().upper() for part in value.split(",") if part.strip()
-    )

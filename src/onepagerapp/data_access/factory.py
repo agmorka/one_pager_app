@@ -40,4 +40,6 @@ def create_data_access(
     store = document_store or create_document_store(config)
     if config.uses_databricks:
         return LakehouseAccess(config, store)
-    return MockDataAccess(store, current_user=config.ONE_PAGER_APP_MOCK_USER)
+    return MockDataAccess(
+        store, current_user=config.ONE_PAGER_APP_MOCK_USER, groups=config.mock_groups
+    )

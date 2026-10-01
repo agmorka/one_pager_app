@@ -66,6 +66,7 @@ class _UserMayNotWrite:
 # through the volume mount, which is always the service principal (§8).
 READS: dict[str, Callable[[LakehouseAccess], object]] = {
     "get_current_user": lambda a: a.get_current_user(),
+    "get_group_memberships": lambda a: a.get_group_memberships({"admin": "G"}),
     "read_table": lambda a: a.read_table("ref_op_status"),
     "get_ref_op_status": lambda a: a.get_ref_op_status(),
     "get_ref_dp_status": lambda a: a.get_ref_dp_status(),

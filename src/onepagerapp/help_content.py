@@ -51,28 +51,29 @@ class RoleInfo:
 ROLES: tuple[RoleInfo, ...] = (
     RoleInfo(
         "Owner / SME",
-        "The Data Product Owner, or a Subject Matter Expert assigned to that "
-        "Data Product. Edit rights are per Data Product.",
+        "A member of the Owner/SME group may create One Pagers and manage "
+        "Use Cases. Editing is per Data Product: only its Owner and SMEs.",
         "Creates and edits the One Pager, manages the shared Use Cases, "
         "submits for review, resolves review comments, starts updates of "
         "approved One Pagers, moves the Data Product status on, cancels.",
     ),
     RoleInfo(
         "Approver",
-        "A reviewer from the partner institution.",
+        "A member of the Approver group (reviewers from the partner "
+        "institution).",
         "Approves or rejects One Pagers in review and adds section-level "
         "review comments. Never on a One Pager where they are Owner or SME.",
     ),
     RoleInfo(
         "Admin",
-        "A Platform team representative.",
+        "A member of the Admin group (Platform team).",
         "Maintains reference data (business domains, product types, source "
         "systems, status definitions), watches pending Git PRs, may cancel a "
         "One Pager.",
     ),
     RoleInfo(
         "Viewer",
-        "Any authenticated employee.",
+        "Every employee who can sign in; no group needed.",
         "Browses, views and exports every One Pager and Use Case (read-only).",
     ),
 )
@@ -82,6 +83,24 @@ ROLES: tuple[RoleInfo, ...] = (
 class QuickReference:
     title: str
     steps: tuple[str, ...]
+
+
+# Roles come from Entra ID groups; the app has no role administration
+# (User_Identity_And_Access_Plan.md §4.1 A3, Architecture.md §4).
+ROLE_REQUEST = QuickReference(
+    "How do I get a role, e.g. become an Approver?",
+    (
+        "Roles come from Entra ID groups, one per role (Owner/SME, Approver, "
+        "Admin). There is nothing to request inside the One Pager App, and "
+        "nobody can grant a role in the app.",
+        "Ask the team that manages the group to add you, using the usual "
+        "group access request. Until the dedicated role groups exist, the "
+        "roles are held by the Data Platform Engineering group of the "
+        "environment.",
+        "Your role badges in the sidebar show what you have. A change applies "
+        "from your next session: close the app and open it again.",
+    ),
+)
 
 
 QUICK_REFERENCE: tuple[QuickReference, ...] = (

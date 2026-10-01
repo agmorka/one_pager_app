@@ -19,7 +19,7 @@ from onepagerapp.models import (
     UseCasePage,
 )
 from tests.conftest import FIXTURES_DIR
-from tests.users import make_user
+from tests.users import CREATOR_ROLES, make_user
 
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
 sys.path.insert(0, str(APP_DIR))
@@ -197,6 +197,7 @@ def _app(page: str, data_access: MockDataAccess) -> AppTest:
         "document_store": data_access._document_store,
         "current_user": user.username,
         "current_user_info": user,
+        "current_user_roles": CREATOR_ROLES,
     }.items():
         at.session_state[key] = value
     return at

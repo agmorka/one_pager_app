@@ -11,6 +11,10 @@ data (``tests/fixtures`` and ``MockDataAccess``) uses these people:
 """
 
 from onepagerapp.models import CurrentUser
+from onepagerapp.state_machine import Actor
+
+# Group role needed to create One Pagers and manage Use Cases.
+CREATOR_ROLES = frozenset({Actor.OWNER_SME_GROUP})
 
 
 def make_user(initials: str, display_name: str | None = None) -> CurrentUser:

@@ -111,3 +111,94 @@ def test__mock_user__configurable() -> None:
 
     assert username == "x0wadm@becoc001.onmicrosoft.com"
     assert initials_from_username(username, config) == "X0W"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("environment", ["DEV", "INT", "TST", "UAT", "PRD"])
+def test__role_groups__default_is_the_interim_group_per_environment(
+    environment: str,
+) -> None:
+    groups = _config(ONE_PAGER_APP_ENVIRONMENT=environment).role_groups
+
+    expected = f"BEC_BECOC001_LHX_{environment}_DataPlatEng"
+    assert groups == {"owner_sme": expected, "approver": expected, "admin": expected}
+
+
+@pytest.mark.unit
+def test__role_groups__configured_values() -> None:
+    groups = _config(
+        ONE_PAGER_APP_ENVIRONMENT="UAT",
+        ONE_PAGER_APP_GROUP_OWNER_SME="OPA-OwnerSME-{env}",
+        ONE_PAGER_APP_GROUP_APPROVER=" OPA-Approver ",
+        ONE_PAGER_APP_GROUP_ADMIN="OPA-Admin-{env}",
+    ).role_groups
+
+    assert groups == {
+        "owner_sme": "OPA-OwnerSME-UAT",
+        "approver": "OPA-Approver",
+        "admin": "OPA-Admin-UAT",
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value", ["", "  ", "GroupA,GroupB"])
+def test__role_groups__must_be_one_group(value: str) -> None:
+    with pytest.raises(ValueError, match="one group name"):
+        _config(ONE_PAGER_APP_GROUP_APPROVER=value)
+
+
+@pytest.mark.unit
+def test__environment__tst_from_catalog_prefix() -> None:
+    assert _config(ONE_PAGER_APP_DATABRICKS_CATALOG="tst_bia_meta").environment is (
+        Environment.TST
+    )
+
+
+@pytest.mark.unit
+def test__mock_groups__default_is_the_interim_group() -> None:
+    assert _config(ONE_PAGER_APP_ENVIRONMENT="INT").mock_groups == frozenset(
+        {"BEC_BECOC001_LHX_INT_DataPlatEng"}
+    )
+
+
+@pytest.mark.unit
+def test__mock_groups__configured_and_empty() -> None:
+    assert _config(ONE_PAGER_APP_MOCK_GROUPS=" A, B ,").mock_groups == frozenset(
+        {"A", "B"}
+    )
+    assert _config(ONE_PAGER_APP_MOCK_GROUPS="").mock_groups == frozenset()
+
+
+@pytest.mark.unit
+def test__mock_data_access__memberships_from_mock_groups() -> None:
+    config = _config(APP_MODE="local-mock", ONE_PAGER_APP_MOCK_GROUPS="OPA-Approver")
+    data_access = create_data_access(config)
+
+    assert data_access.get_group_memberships(
+        {"approver": "OPA-Approver", "admin": "OPA-Admin"}
+    ) == {"approver": True, "admin": False}
+
+
+@pytest.mark.unit
+def test__interim_roles__all_while_on_the_default_group() -> None:
+    assert _config().interim_roles == ["owner_sme", "approver", "admin"]
+
+
+@pytest.mark.unit
+def test__interim_roles__only_the_roles_still_on_it() -> None:
+    config = _config(
+        ONE_PAGER_APP_ENVIRONMENT="UAT",
+        ONE_PAGER_APP_GROUP_APPROVER="OPA-Approver-{env}",
+        ONE_PAGER_APP_GROUP_ADMIN="OPA-Admin-{env}",
+    )
+    assert config.interim_roles == ["owner_sme"]
+
+
+@pytest.mark.unit
+def test__interim_roles__none_with_dedicated_groups() -> None:
+    config = _config(
+        ONE_PAGER_APP_GROUP_OWNER_SME="OPA-OwnerSME-{env}",
+        ONE_PAGER_APP_GROUP_APPROVER="OPA-Approver-{env}",
+        ONE_PAGER_APP_GROUP_ADMIN="OPA-Admin-{env}",
+    )
+    assert config.interim_roles == []

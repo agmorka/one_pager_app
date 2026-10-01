@@ -8,7 +8,7 @@ from streamlit.testing.v1 import AppTest
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import CurrentUser, UseCaseFilter, UseCaseInput, UseCasePage
-from tests.users import make_user
+from tests.users import CREATOR_ROLES, make_user
 
 MJO = make_user("MJO")
 PAGE = str(Path(__file__).parents[2] / "app" / "views" / "use_cases.py")
@@ -31,6 +31,7 @@ def _app(data_access: MockDataAccess, user: CurrentUser | None = MJO) -> AppTest
     if user:
         at.session_state["current_user"] = user.username
         at.session_state["current_user_info"] = user
+        at.session_state["current_user_roles"] = CREATOR_ROLES
     return at.run()
 
 

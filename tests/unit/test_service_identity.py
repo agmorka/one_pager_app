@@ -18,7 +18,7 @@ from onepagerapp.permissions import (
     require_identity,
 )
 from onepagerapp.state_machine import Actor
-from tests.users import make_user
+from tests.users import CREATOR_ROLES, make_user
 
 ALL_ROLES = frozenset({Actor.APPROVER, Actor.ADMIN})
 UNRECOGNISED = CurrentUser("guest@example.com", "", "Guest")
@@ -30,7 +30,12 @@ EMPTY_INPUT = NewOnePagerInput("", "", "", "", "", PersonRef("", "", ""))
 # (logged action, entry point, positional args, keyword args). Without the
 # identity check, each call would read or write data.
 ENTRY_POINTS: list[tuple[str, Callable[..., object], tuple, dict]] = [
-    ("create_one_pager", workflow.create_one_pager, (EMPTY_INPUT, USER, DA, STORE), {}),
+    (
+        "create_one_pager",
+        workflow.create_one_pager,
+        (EMPTY_INPUT, USER, DA, STORE),
+        {"roles": CREATOR_ROLES},
+    ),
     ("submit_for_review", workflow.submit_for_review, (DA, "OP-0001", USER, "s1"), {}),
     (
         "cancel_one_pager",

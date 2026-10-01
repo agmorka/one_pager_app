@@ -19,6 +19,7 @@ from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import CurrentUser, NewOnePagerInput
 from onepagerapp.permissions import PermissionDeniedError
 from onepagerapp.workflow import create_one_pager
+from tests.users import CREATOR_ROLES
 
 
 def _records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
@@ -119,7 +120,7 @@ def test__create_one_pager__logs_success_event(
 ) -> None:
     with caplog.at_level(logging.INFO, logger=AUDIT_LOGGER_NAME):
         result = create_one_pager(
-            valid_input, creator, mock_data_access, document_store
+            valid_input, creator, mock_data_access, document_store, roles=CREATOR_ROLES
         )
 
     (record,) = _records(caplog)
@@ -140,7 +141,9 @@ def test__create_one_pager__logs_permission_denied(
         caplog.at_level(logging.INFO, logger=AUDIT_LOGGER_NAME),
         pytest.raises(PermissionDeniedError),
     ):
-        create_one_pager(valid_input, None, mock_data_access, document_store)
+        create_one_pager(
+            valid_input, None, mock_data_access, document_store, roles=CREATOR_ROLES
+        )
 
     (record,) = _records(caplog)
     assert record.getMessage() == (

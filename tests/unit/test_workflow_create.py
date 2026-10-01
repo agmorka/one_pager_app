@@ -23,6 +23,7 @@ from onepagerapp.validation import (
 )
 from onepagerapp.workflow import CreateError, active_reference_values, create_one_pager
 from tests.conftest import FIXTURES_DIR
+from tests.users import CREATOR_ROLES
 
 NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
 
@@ -41,7 +42,12 @@ def test__create__happy_path(
     fixtures_before = _fixture_files()
 
     result = create_one_pager(
-        valid_input, creator, mock_data_access, document_store, now=NOW
+        valid_input,
+        creator,
+        mock_data_access,
+        document_store,
+        now=NOW,
+        roles=CREATOR_ROLES,
     )
 
     assert result.ok
@@ -98,7 +104,14 @@ def test__create__status_row_audit_fields(
     mock_data_access: MockDataAccess,
     document_store: OnePagerDocumentStore,
 ) -> None:
-    create_one_pager(valid_input, creator, mock_data_access, document_store, now=NOW)
+    create_one_pager(
+        valid_input,
+        creator,
+        mock_data_access,
+        document_store,
+        now=NOW,
+        roles=CREATOR_ROLES,
+    )
     row = mock_data_access._status_rows["OP-0003"]
     assert row.created_by == "MJO"
     assert row.created_at == NOW
@@ -118,6 +131,7 @@ def test__create__validation_errors_write_nothing(
         creator,
         mock_data_access,
         document_store,
+        roles=CREATOR_ROLES,
     )
     assert not result.ok
     assert [e.field_path for e in result.errors] == ["productName"]
@@ -137,6 +151,7 @@ def test__create__duplicate_data_product(
         creator,
         mock_data_access,
         document_store,
+        roles=CREATOR_ROLES,
     )
     assert not result.ok
     assert result.errors[0].field_path == "dataProduct"
@@ -150,12 +165,15 @@ def test__create__second_create_gets_next_id(
     mock_data_access: MockDataAccess,
     document_store: OnePagerDocumentStore,
 ) -> None:
-    first = create_one_pager(valid_input, creator, mock_data_access, document_store)
+    first = create_one_pager(
+        valid_input, creator, mock_data_access, document_store, roles=CREATOR_ROLES
+    )
     second = create_one_pager(
         replace(valid_input, data_product="customer_master_v2"),
         creator,
         mock_data_access,
         document_store,
+        roles=CREATOR_ROLES,
     )
     assert (first.one_pager_id, second.one_pager_id) == ("OP-0003", "OP-0004")
 
@@ -168,7 +186,13 @@ def test__create__permission_denied(
 ) -> None:
     anonymous = CurrentUser(username="", initials="", display_name="")
     with pytest.raises(PermissionDeniedError):
-        create_one_pager(valid_input, anonymous, mock_data_access, document_store)
+        create_one_pager(
+            valid_input,
+            anonymous,
+            mock_data_access,
+            document_store,
+            roles=CREATOR_ROLES,
+        )
 
 
 class _FailingStore(OnePagerDocumentStore):
@@ -189,7 +213,7 @@ def test__create__document_write_fails(
     store = _FailingStore(FIXTURES_DIR, write_path=tmp_path)
     data_access = MockDataAccess(store)
     with pytest.raises(CreateError, match="changes are preserved"):
-        create_one_pager(valid_input, creator, data_access, store)
+        create_one_pager(valid_input, creator, data_access, store, roles=CREATOR_ROLES)
     assert data_access.get_one_pager_status("OP-0003") is None
     assert data_access.get_authorized_users("OP-0003") == []
 
@@ -208,7 +232,9 @@ def test__create__status_insert_fails_is_compensated(
 ) -> None:
     data_access = _StatusInsertFails(document_store)
     with pytest.raises(CreateError):
-        create_one_pager(valid_input, creator, data_access, document_store)
+        create_one_pager(
+            valid_input, creator, data_access, document_store, roles=CREATOR_ROLES
+        )
     # Rows from the earlier steps were removed; nothing is visible.
     assert data_access.get_authorized_users("OP-0003") == []
     assert data_access.get_change_log("OP-0003") == []
@@ -233,7 +259,9 @@ def test__create__race_on_data_product_lower_id_wins(
     document_store: OnePagerDocumentStore,
 ) -> None:
     data_access = _RaceLoser(document_store)
-    result = create_one_pager(valid_input, creator, data_access, document_store)
+    result = create_one_pager(
+        valid_input, creator, data_access, document_store, roles=CREATOR_ROLES
+    )
     assert not result.ok
     assert "OP-0000" in result.errors[0].message
     assert data_access.get_one_pager_status("OP-0003") is None
@@ -247,7 +275,9 @@ def test__create__input_is_sanitized(
     document_store: OnePagerDocumentStore,
 ) -> None:
     data = replace(valid_input, product_name="  <b>Customer</b> Master  ")
-    result = create_one_pager(data, creator, mock_data_access, document_store)
+    result = create_one_pager(
+        data, creator, mock_data_access, document_store, roles=CREATOR_ROLES
+    )
     assert mock_data_access.get_one_pager_status(result.one_pager_id).product_name == (
         "Customer Master"
     )

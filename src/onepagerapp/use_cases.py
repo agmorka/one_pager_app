@@ -15,6 +15,7 @@ never entered by the user.
 """
 
 import re
+from collections.abc import Collection
 from typing import TYPE_CHECKING
 
 from onepagerapp.audit import Outcome, log_event, log_permission_denied
@@ -24,6 +25,7 @@ from onepagerapp.permissions import (
     can_manage_use_cases,
     require_identity,
 )
+from onepagerapp.state_machine import Actor
 
 if TYPE_CHECKING:
     from onepagerapp.data_access.base import DataAccess
@@ -119,16 +121,22 @@ def format_use_case_id(value: int) -> str:
 MANAGE_DENIED_MESSAGE = "You are not allowed to manage Use Cases."
 
 
-def _check_can_manage(user: CurrentUser | None, action: str) -> CurrentUser:
+def _check_can_manage(
+    user: CurrentUser | None, roles: Collection[Actor], action: str
+) -> CurrentUser:
     actor = require_identity(user, action)
-    if not can_manage_use_cases(actor.initials):
+    if not can_manage_use_cases(actor.initials, roles):
         log_permission_denied(action, user=actor.initials)
         raise PermissionDeniedError(MANAGE_DENIED_MESSAGE)
     return actor
 
 
 def create_use_case(
-    data_access: "DataAccess", data: UseCaseInput, user: CurrentUser | None
+    data_access: "DataAccess",
+    data: UseCaseInput,
+    user: CurrentUser | None,
+    *,
+    roles: Collection[Actor],
 ) -> str:
     """Create a Use Case from cleaned, validated input; return its UC-### ID.
 
@@ -136,7 +144,7 @@ def create_use_case(
         PermissionDeniedError: No recognised user, or not allowed (logged).
 
     """
-    actor = _check_can_manage(user, "create_use_case")
+    actor = _check_can_manage(user, roles, "create_use_case")
     try:
         use_case_id = data_access.create_use_case(data, actor.initials)
     except Exception:
@@ -153,6 +161,8 @@ def update_use_case(
     use_case_id: str,
     data: UseCaseInput,
     user: CurrentUser | None,
+    *,
+    roles: Collection[Actor],
 ) -> None:
     """Save the edited fields of a Use Case.
 
@@ -161,7 +171,7 @@ def update_use_case(
         NotFoundError: No Use Case has this ID.
 
     """
-    actor = _check_can_manage(user, "update_use_case")
+    actor = _check_can_manage(user, roles, "update_use_case")
     try:
         data_access.update_use_case(use_case_id, data, actor.initials)
     except Exception:
@@ -183,6 +193,7 @@ def set_use_case_deprecated(
     *,
     deprecated: bool,
     user: CurrentUser | None,
+    roles: Collection[Actor],
 ) -> None:
     """Deprecate (``deprecated=True``) or restore a Use Case.
 
@@ -192,7 +203,7 @@ def set_use_case_deprecated(
 
     """
     action = "deprecate_use_case" if deprecated else "restore_use_case"
-    actor = _check_can_manage(user, action)
+    actor = _check_can_manage(user, roles, action)
     try:
         data_access.set_use_case_deprecated(
             use_case_id, deprecated=deprecated, user_initials=actor.initials

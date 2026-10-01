@@ -22,6 +22,7 @@ from onepagerapp.data_access.connection import user_error_message
 from onepagerapp.help_content import (
     LIFECYCLE_INTRO,
     QUICK_REFERENCE,
+    ROLE_REQUEST,
     ROLES,
     VERSIONING_NOTE,
     BadgeInfo,
@@ -142,6 +143,11 @@ st.caption(
     "(e.g. X0W for the username x0wadm@…; 3 letters or digits, which may differ "
     "from the initials of your name)."
 )
+
+with st.expander(ROLE_REQUEST.title):
+    st.markdown(
+        "\n".join(f"{n}. {step}" for n, step in enumerate(ROLE_REQUEST.steps, 1))
+    )
 
 st.header("Workflow quick reference")
 for item in QUICK_REFERENCE:

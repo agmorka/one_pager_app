@@ -17,7 +17,7 @@ from onepagerapp.permissions import (
     is_owner_or_sme,
 )
 from onepagerapp.workflow import create_one_pager
-from tests.users import make_user
+from tests.users import CREATOR_ROLES, make_user
 
 NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
 
@@ -37,7 +37,12 @@ def draft_id(
     document_store,  # noqa: ANN001
 ) -> str:
     result = create_one_pager(
-        valid_input, creator, mock_data_access, document_store, now=NOW
+        valid_input,
+        creator,
+        mock_data_access,
+        document_store,
+        now=NOW,
+        roles=CREATOR_ROLES,
     )
     assert result.one_pager_id
     return result.one_pager_id

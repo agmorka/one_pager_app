@@ -83,6 +83,21 @@ class DataAccess(ABC):
     def get_current_user(self) -> str: ...
 
     @abstractmethod
+    def get_group_memberships(self, groups: dict[str, str]) -> dict[str, bool]:
+        """Whether the signed-in user is a member of each group.
+
+        Args:
+            groups: Group name per key, e.g. ``{"approver": "OPA-Approver"}``.
+
+        Returns:
+            Membership per key. Account groups (Entra ID groups through
+            automatic identity management, including nested groups) and
+            workspace-local groups both count.
+
+        """
+        ...
+
+    @abstractmethod
     def read_table(self, table_name: str) -> pd.DataFrame: ...
 
     @abstractmethod

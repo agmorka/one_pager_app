@@ -12,10 +12,10 @@ from typing import NoReturn
 import streamlit as st
 
 from adapters.edit_mode import navigation_guard
-from adapters.theme import apply_theme, environment_badge
+from adapters.theme import apply_theme, environment_badge, role_badges
 from onepagerapp.audit import log_unrecognised_user
 from onepagerapp.auth import resolve_current_user, resolve_roles
-from onepagerapp.config import AppConfig, AppMode
+from onepagerapp.config import AppConfig, AppMode, Environment
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.data_access import create_data_access
 from onepagerapp.data_access.factory import create_document_store
@@ -66,8 +66,44 @@ def init_config() -> AppConfig:
     if "config" not in st.session_state:
         config = AppConfig.from_env()
         set_initials_pattern(config.initials_pattern)
+        warn_if_interim_roles(config)
         st.session_state.config = config
     return st.session_state.config
+
+
+def interim_roles_notice(config: AppConfig) -> str | None:
+    """Sidebar notice while roles use the interim group; None in DEV or after.
+
+    The dedicated role groups do not exist yet, so DataPlatEng members hold
+    those roles (User_Identity_And_Access_Plan.md §4.1).
+    """
+    roles = [INTERIM_ROLE_LABELS[r] for r in config.interim_roles]
+    if not roles or config.environment is Environment.DEV:
+        return None
+    return f"Interim roles: DataPlatEng members act as {_join(roles)}."
+
+
+def warn_if_interim_roles(config: AppConfig) -> None:
+    """Log once per session that roles still use the interim group."""
+    if config.interim_roles:
+        logger.warning(
+            "Interim role groups in use for %s: %s members hold these roles. "
+            "Configure ONE_PAGER_APP_GROUP_* once the dedicated groups exist.",
+            ", ".join(config.interim_roles),
+            config.role_groups[config.interim_roles[0]],
+        )
+
+
+INTERIM_ROLE_LABELS = {
+    "owner_sme": "Owner/SME",
+    "approver": "Approver",
+    "admin": "Admin",
+}
+
+
+def _join(names: list[str]) -> str:
+    """Join names as "A", "A and B" or "A, B and C"."""
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
 
 
 def init_services() -> None:
@@ -94,7 +130,8 @@ def resolve_user() -> CurrentUser | None:
     ``st.session_state.current_user_info`` (CurrentUser with initials and the
     name from the directory), ``st.session_state.current_user_directory``
     (the directory entry, or None) and
-    ``st.session_state.current_user_roles`` (group roles: Approver, Admin).
+    ``st.session_state.current_user_roles`` (group roles, set by
+    ``resolve_session_roles`` once the data access exists).
     These are set only for a recognised user (non-empty initials).
 
     Returns:
@@ -131,8 +168,24 @@ def resolve_user() -> CurrentUser | None:
     st.session_state.current_user_directory = directory_user
     st.session_state.current_user = username
     st.session_state.current_user_info = user
-    st.session_state.current_user_roles = resolve_roles(user, config)
     return user
+
+
+def resolve_session_roles() -> frozenset[Actor]:
+    """Group roles of the user, checked once per session (needs the data access).
+
+    A role change applies from the next session. A failed check gives the
+    Viewer role only (``auth.resolve_roles``).
+    """
+    roles: frozenset[Actor] | None = st.session_state.get("current_user_roles")
+    if roles is None:
+        roles = resolve_roles(
+            st.session_state.current_user_info,
+            st.session_state.config,
+            st.session_state.data_access,
+        )
+        st.session_state.current_user_roles = roles
+    return roles
 
 
 def render_access_denied(username: str) -> None:
@@ -161,7 +214,21 @@ def sidebar_user_label(user: CurrentUser) -> str:
     return user.initials
 
 
-ROLE_LABELS = {Actor.APPROVER: "Approver", Actor.ADMIN: "Admin"}
+# Sidebar role badges, in this order (UI_Design.md §2).
+ROLE_LABELS = {
+    Actor.OWNER_SME_GROUP: "Owner/SME",
+    Actor.APPROVER: "Approver",
+    Actor.ADMIN: "Admin",
+}
+
+
+def role_names(roles: frozenset[Actor]) -> list[str]:
+    """Badge labels: the group roles, or "Viewer" when the user has none.
+
+    Every signed-in user can view; "Viewer" is shown only when it is the
+    user's only role, so the badges say what the user can do beyond viewing.
+    """
+    return [ROLE_LABELS[r] for r in ROLE_LABELS if r in roles] or ["Viewer"]
 
 
 def navigation_entries(roles: frozenset[Actor]) -> list[tuple[str, str]]:
@@ -235,7 +302,7 @@ def main() -> None:
     except Exception:
         _stop_on_service_error()
 
-    roles: frozenset[Actor] = st.session_state.get("current_user_roles", frozenset())
+    roles = resolve_session_roles()
     pg = st.navigation(build_pages(roles))
 
     # Rendered before pg.run() so it stays visible when a page calls st.stop().
@@ -246,9 +313,10 @@ def main() -> None:
         st.divider()
         user_label = sidebar_user_label(st.session_state.current_user_info)
         st.caption(f"Logged user: {user_label}")
-        role_names = [ROLE_LABELS[r] for r in ROLE_LABELS if r in roles]
-        if role_names:
-            st.caption(f"Role: {', '.join(role_names)}")
+        st.markdown(role_badges(role_names(roles)), unsafe_allow_html=True)
+        notice = interim_roles_notice(config)
+        if notice:
+            st.caption(f"⚠️ {notice}")
 
     navigation_guard(
         pg.title, st.session_state.data_access, st.session_state.current_user_info
