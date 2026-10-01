@@ -122,6 +122,14 @@ class AppConfig(BaseModel):
             "replaced with the environment."
         ),
     )
+    ONE_PAGER_APP_MOCK_GROUPS: str = Field(
+        INTERIM_ROLE_GROUP,
+        description=(
+            "Comma-separated groups the local-mock user belongs to, so roles "
+            "can be tried locally. {env} is replaced with the environment. The "
+            "default is the interim role group: every role. Empty: Viewer only."
+        ),
+    )
     ONE_PAGER_APP_APPROVERS: str = Field(
         "",
         description=(
@@ -209,6 +217,16 @@ class AppConfig(BaseModel):
             "approver": self.ONE_PAGER_APP_GROUP_APPROVER.replace("{env}", env),
             "admin": self.ONE_PAGER_APP_GROUP_ADMIN.replace("{env}", env),
         }
+
+    @property
+    def mock_groups(self) -> frozenset[str]:
+        """Groups of the local-mock user, with ``{env}`` replaced."""
+        env = self.environment.value
+        return frozenset(
+            part.strip().replace("{env}", env)
+            for part in self.ONE_PAGER_APP_MOCK_GROUPS.split(",")
+            if part.strip()
+        )
 
     @property
     def approver_initials(self) -> frozenset[str]:

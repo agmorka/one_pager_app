@@ -787,3 +787,43 @@ def test__every_write_method_is_covered() -> None:
 
     assert write_methods == set(ACTOR_WRITES) | set(WRITES_WITHOUT_ACTOR)
     assert not set(ACTOR_WRITES) & set(WRITES_WITHOUT_ACTOR)
+
+
+
+# ============================================================================
+# Group membership (identity plan Phase 6)
+# ============================================================================
+
+
+@pytest.mark.unit
+def test__get_group_memberships__one_statement_with_bound_group_names() -> None:
+    conn = _FakeConnection(
+        [_response(["member_0", "member_1", "member_2"], [["true", "false", "true"]])]
+    )
+    groups = {"owner_sme": NASTY, "approver": "OPA-Approver", "admin": "OPA-Admin"}
+
+    result = _access(conn).get_group_memberships(groups)
+
+    assert result == {"owner_sme": True, "approver": False, "admin": True}
+    [(statement, params)] = conn.calls
+    _assert_not_interpolated(statement)
+    assert "is_member(:group_0) OR is_account_group_member(:group_0)" in statement
+    assert params == {
+        "group_0": NASTY,
+        "group_1": "OPA-Approver",
+        "group_2": "OPA-Admin",
+    }
+    assert conn.identities == [Identity.USER]
+
+
+@pytest.mark.unit
+def test__get_group_memberships__no_row_raises() -> None:
+    with pytest.raises(RuntimeError, match="no row"):
+        _access(_FakeConnection()).get_group_memberships({"admin": "G"})
+
+
+@pytest.mark.unit
+def test__get_group_memberships__nothing_to_check_runs_no_query() -> None:
+    conn = _FakeConnection()
+    assert _access(conn).get_group_memberships({}) == {}
+    assert conn.calls == []

@@ -152,6 +152,28 @@ class LakehouseAccess(DataAccess):
             raise RuntimeError(msg)
         return str(rows[0][0])
 
+    def get_group_memberships(self, groups: dict[str, str]) -> dict[str, bool]:
+        if not groups:
+            return {}
+        # One statement, as the user: is_account_group_member covers Entra ID
+        # (account) groups, including nested ones; is_member workspace groups.
+        keys = list(groups)
+        markers = {key: f"group_{i}" for i, key in enumerate(keys)}
+        columns = ", ".join(
+            f"is_member(:{markers[key]}) OR is_account_group_member(:{markers[key]})"
+            f" AS member_{i}"
+            for i, key in enumerate(keys)
+        )
+        response = self._read(
+            f"SELECT {columns}",
+            {markers[key]: groups[key] for key in keys},
+        )
+        rows = (response.result.data_array if response.result else None) or []
+        if not rows:
+            msg = "The group membership check returned no row"
+            raise RuntimeError(msg)
+        return {key: self._parse_bool(rows[0][i]) for i, key in enumerate(keys)}
+
     def read_table(self, table_name: str) -> pd.DataFrame:
         query = f"SELECT * FROM {self._fqn_prefix}.{table_name}"  # noqa: S608
         fqn = f"{self._fqn_prefix}.{table_name}"

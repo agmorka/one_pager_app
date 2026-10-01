@@ -152,3 +152,28 @@ def test__environment__tst_from_catalog_prefix() -> None:
     assert _config(ONE_PAGER_APP_DATABRICKS_CATALOG="tst_bia_meta").environment is (
         Environment.TST
     )
+
+
+@pytest.mark.unit
+def test__mock_groups__default_is_the_interim_group() -> None:
+    assert _config(ONE_PAGER_APP_ENVIRONMENT="INT").mock_groups == frozenset(
+        {"BEC_BECOC001_LHX_INT_DataPlatEng"}
+    )
+
+
+@pytest.mark.unit
+def test__mock_groups__configured_and_empty() -> None:
+    assert _config(ONE_PAGER_APP_MOCK_GROUPS=" A, B ,").mock_groups == frozenset(
+        {"A", "B"}
+    )
+    assert _config(ONE_PAGER_APP_MOCK_GROUPS="").mock_groups == frozenset()
+
+
+@pytest.mark.unit
+def test__mock_data_access__memberships_from_mock_groups() -> None:
+    config = _config(APP_MODE="local-mock", ONE_PAGER_APP_MOCK_GROUPS="OPA-Approver")
+    data_access = create_data_access(config)
+
+    assert data_access.get_group_memberships(
+        {"approver": "OPA-Approver", "admin": "OPA-Admin"}
+    ) == {"approver": True, "admin": False}

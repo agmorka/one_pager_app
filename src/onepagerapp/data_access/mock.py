@@ -58,9 +58,11 @@ class MockDataAccess(DataAccess):
         self,
         document_store: OnePagerDocumentStore,
         current_user: str = DEFAULT_MOCK_USER,
+        groups: frozenset[str] = frozenset(),
     ) -> None:
         self._document_store = document_store
         self._current_user = current_user
+        self._groups = groups
         self._status_rows: dict[str, OnePagerStatusRow] = {
             row.one_pager_id: row for row in _seed_status_rows()
         }
@@ -115,6 +117,10 @@ class MockDataAccess(DataAccess):
 
     def get_current_user(self) -> str:
         return self._current_user
+
+    def get_group_memberships(self, groups: dict[str, str]) -> dict[str, bool]:
+        """Membership from ONE_PAGER_APP_MOCK_GROUPS (``groups`` of __init__)."""
+        return {key: name in self._groups for key, name in groups.items()}
 
     def read_table(self, table_name: str) -> pd.DataFrame:  # noqa: ARG002
         return pd.DataFrame()
