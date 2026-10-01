@@ -183,26 +183,52 @@ class LakehouseAccess(DataAccess):
     # REFERENCE_TABLES / STATUS_TABLES whitelists; every value is a parameter.
 
     def insert_reference_value(
-        self, table: str, value: str, *, sort_order: int, active: bool
+        self,
+        table: str,
+        value: str,
+        *,
+        sort_order: int,
+        active: bool,
+        user_initials: str,
     ) -> bool:
         key = check_reference_table(table)
         fqn = f"{self._fqn_prefix}.{table}"
         response = self._connection.execute_statement(
-            f"INSERT INTO {fqn} ({key}, sort_order, active) "  # noqa: S608
-            f"SELECT :value, :sort_order, :active "
+            f"INSERT INTO {fqn} "  # noqa: S608
+            f"({key}, sort_order, active, last_updated_by, last_updated_at) "
+            f"SELECT :value, :sort_order, :active, :user_initials, "
+            f"current_timestamp() "
             f"WHERE NOT EXISTS (SELECT 1 FROM {fqn} WHERE {key} = :value)",
-            parameters={"value": value, "sort_order": sort_order, "active": active},
+            parameters={
+                "value": value,
+                "sort_order": sort_order,
+                "active": active,
+                "user_initials": user_initials,
+            },
         )
         return self._affected_rows(response) == 1
 
     def update_reference_value(
-        self, table: str, value: str, *, sort_order: int, active: bool
+        self,
+        table: str,
+        value: str,
+        *,
+        sort_order: int,
+        active: bool,
+        user_initials: str,
     ) -> bool:
         key = check_reference_table(table)
         response = self._connection.execute_statement(
             f"UPDATE {self._fqn_prefix}.{table} "  # noqa: S608
-            f"SET sort_order = :sort_order, active = :active WHERE {key} = :value",
-            parameters={"value": value, "sort_order": sort_order, "active": active},
+            f"SET sort_order = :sort_order, active = :active, "
+            f"last_updated_by = :user_initials, "
+            f"last_updated_at = current_timestamp() WHERE {key} = :value",
+            parameters={
+                "value": value,
+                "sort_order": sort_order,
+                "active": active,
+                "user_initials": user_initials,
+            },
         )
         return self._affected_rows(response) == 1
 
@@ -214,7 +240,7 @@ class LakehouseAccess(DataAccess):
         )
         return self._affected_rows(response) == 1
 
-    def update_status_definition(
+    def update_status_definition(  # noqa: PLR0913 - the display columns of one status
         self,
         table: str,
         status: str,
@@ -222,17 +248,20 @@ class LakehouseAccess(DataAccess):
         display_label: str,
         sort_order: int,
         badge_color: str,
+        user_initials: str,
     ) -> bool:
         check_status_table(table)
         response = self._connection.execute_statement(
             f"UPDATE {self._fqn_prefix}.{table} "  # noqa: S608
             f"SET display_label = :display_label, sort_order = :sort_order, "
-            f"badge_color = :badge_color WHERE status = :status",
+            f"badge_color = :badge_color, last_updated_by = :user_initials, "
+            f"last_updated_at = current_timestamp() WHERE status = :status",
             parameters={
                 "status": status,
                 "display_label": display_label,
                 "sort_order": sort_order,
                 "badge_color": badge_color,
+                "user_initials": user_initials,
             },
         )
         return self._affected_rows(response) == 1

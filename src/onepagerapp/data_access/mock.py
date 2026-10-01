@@ -39,6 +39,11 @@ from onepagerapp.validation import CURRENT_STRUCTURE_DEFINITION
 DEFAULT_MOCK_USER = "lduadm@mock.local"
 
 
+def _actor_columns(user_initials: str) -> dict[str, object]:
+    """``last_updated_by`` / ``last_updated_at`` of a changed reference row."""
+    return {"last_updated_by": user_initials, "last_updated_at": datetime.now(UTC)}
+
+
 class MockDataAccess(DataAccess):
     """In-memory fake for tabular data; documents come from the YAML store.
 
@@ -140,23 +145,42 @@ class MockDataAccess(DataAccess):
         return next((r for r in self._reference[table] if r[key] == value), None)
 
     def insert_reference_value(
-        self, table: str, value: str, *, sort_order: int, active: bool
+        self,
+        table: str,
+        value: str,
+        *,
+        sort_order: int,
+        active: bool,
+        user_initials: str,
     ) -> bool:
         if self._reference_row(table, value) is not None:
             return False
         key = check_reference_table(table)
         self._reference[table].append(
-            {key: value, "sort_order": sort_order, "active": active}
+            {
+                key: value,
+                "sort_order": sort_order,
+                "active": active,
+                **_actor_columns(user_initials),
+            }
         )
         return True
 
     def update_reference_value(
-        self, table: str, value: str, *, sort_order: int, active: bool
+        self,
+        table: str,
+        value: str,
+        *,
+        sort_order: int,
+        active: bool,
+        user_initials: str,
     ) -> bool:
         row = self._reference_row(table, value)
         if row is None:
             return False
-        row.update(sort_order=sort_order, active=active)
+        row.update(
+            sort_order=sort_order, active=active, **_actor_columns(user_initials)
+        )
         return True
 
     def delete_reference_value(self, table: str, value: str) -> bool:
@@ -166,7 +190,7 @@ class MockDataAccess(DataAccess):
         self._reference[table].remove(row)
         return True
 
-    def update_status_definition(
+    def update_status_definition(  # noqa: PLR0913 - the display columns of one status
         self,
         table: str,
         status: str,
@@ -174,6 +198,7 @@ class MockDataAccess(DataAccess):
         display_label: str,
         sort_order: int,
         badge_color: str,
+        user_initials: str,
     ) -> bool:
         check_status_table(table)
         row = next(
@@ -183,7 +208,10 @@ class MockDataAccess(DataAccess):
         if row is None:
             return False
         row.update(
-            display_label=display_label, sort_order=sort_order, badge_color=badge_color
+            display_label=display_label,
+            sort_order=sort_order,
+            badge_color=badge_color,
+            **_actor_columns(user_initials),
         )
         return True
 
