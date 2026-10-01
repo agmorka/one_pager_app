@@ -66,7 +66,7 @@ The app uses Databricks Apps' native user authentication; the authenticated user
 
 ### Coarse-grained role (which of Owner / Approver / Admin / Viewer a user can act as)
 Backed by three **Entra ID groups**, one per role that isn't purely per-record. Automatic identity management is enabled on the Databricks account, so Entra ID groups (including nested groups) are available in Databricks without a separate sync:
-- **Owner/SME group** — all DP Owners/SMEs company-wide; gates the "Create New One Pager" action and managing Use Cases (general eligibility to be an owner/SME at all). This is separate from, and a prerequisite to, the per-Data-Product ownership check below, which governs editing a *specific* existing One Pager.
+- **Owner/SME group** — all DP Owners/SMEs company-wide; gates the "Create New One Pager" action and managing Use Cases (general eligibility to be an owner/SME at all). This is separate from the per-Data-Product ownership check below, which governs editing a *specific* existing One Pager; being listed as Owner or SME of a One Pager is enough to edit it, without the group.
 - **Approver group** — Nykredit reviewers
 - **Admin group** — Platform team representatives
 - **Viewer** — every employee. There is no Viewer group: every signed-in, recognised user who is in none of the groups above is a Viewer. Access to the app itself is controlled by the Databricks App's `CAN_USE` permission.
