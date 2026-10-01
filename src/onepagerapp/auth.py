@@ -1,18 +1,16 @@
 """User identity helpers.
 
-Derives the corporate initials (the authorization key, Architecture.md §4) and
-a display name from the authenticated Databricks username. The username format
-(accepted domains, suffixes, valid initials) is configuration, not code
-(``AppConfig.user_domains``, ``username_suffixes``, ``initials_pattern``).
+Derives the corporate initials (the authorization key, Architecture.md §4) from
+the authenticated Databricks username, and the display name from the workspace
+directory (``directory.py``). The username format (accepted domains, suffixes,
+valid initials) is configuration, not code (``AppConfig.user_domains``,
+``username_suffixes``, ``initials_pattern``).
 """
 
-import re
-
 from onepagerapp.config import AppConfig
+from onepagerapp.directory import DirectoryUser
 from onepagerapp.models import CurrentUser
 from onepagerapp.state_machine import Actor
-
-_SEPARATORS = re.compile(r"[.\-_\s]+")
 
 
 def initials_from_username(username: str | None, config: AppConfig) -> str | None:
@@ -49,35 +47,34 @@ def initials_from_username(username: str | None, config: AppConfig) -> str | Non
     return None
 
 
-def display_name_from_username(username: str) -> str:
-    """Best-effort human-readable name from a username (no directory lookup).
+def display_name(directory_user: DirectoryUser | None, initials: str) -> str:
+    """Return the name shown for the user: ``givenName familyName``, ``displayName``.
 
-    Only used when the username gives no initials; see ``resolve_current_user``.
-
-    Examples:
-        "alice.brown@company.com" -> "Alice Brown"
-
+    Falls back to the initials when the directory has no name (or could not be
+    read). A name is never guessed from the username.
     """
-    if not username:
-        return "Unknown user"
-    local_part = username.split("@", 1)[0].strip()
-    parts = [p for p in _SEPARATORS.split(local_part) if p]
-    return " ".join(p.capitalize() for p in parts) or username
+    if directory_user is not None:
+        name = directory_user.full_name or directory_user.display_name
+        if name:
+            return name
+    return initials
 
 
-def resolve_current_user(username: str, config: AppConfig) -> CurrentUser:
+def resolve_current_user(
+    username: str, config: AppConfig, directory_user: DirectoryUser | None = None
+) -> CurrentUser:
     """Build the CurrentUser for an authenticated username.
 
     ``initials`` is empty when the username is not recognised
     (``initials_from_username`` returns None); such a user matches no Owner,
-    SME, Approver or Admin. The display name is the initials until the name is
-    read from the directory (User_Identity_And_Access_Plan.md Phase 5).
+    SME, Approver or Admin (and app.py refuses them access). The display name
+    comes from ``directory_user`` (``display_name``); it is for display only.
     """
     initials = initials_from_username(username, config)
     return CurrentUser(
         username=username,
         initials=initials or "",
-        display_name=initials or display_name_from_username(username),
+        display_name=display_name(directory_user, initials or "") or username,
     )
 
 
