@@ -35,8 +35,9 @@ from onepagerapp.models import (
 from onepagerapp.validation import CURRENT_STRUCTURE_DEFINITION
 
 # Signed-in user in local-mock mode unless ONE_PAGER_APP_MOCK_USER says
-# otherwise (initials LDU with the mock.local domain accepted).
-DEFAULT_MOCK_USER = "lduadm@mock.local"
+# otherwise. It uses the default domain and suffix, so it gets the initials LDU
+# without any extra setting.
+DEFAULT_MOCK_USER = "lduadm@becoc001.onmicrosoft.com"
 
 
 def _actor_columns(user_initials: str) -> dict[str, object]:
