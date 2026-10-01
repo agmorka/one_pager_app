@@ -16,6 +16,7 @@ from onepagerapp.config import AppConfig
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.directory import DirectoryUser
 from onepagerapp.documents import OnePagerDocumentStore
+from onepagerapp.state_machine import Actor
 from tests.conftest import FIXTURES_DIR
 
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
@@ -291,3 +292,22 @@ def test__app__directory_failure_shows_the_initials(
     assert not [t for t in at.title if t.value == "Access denied"]
     assert at.session_state["current_user_info"].display_name == "X0W"
     assert "Logged user: X0W" in [c.value for c in at.caption]
+
+
+@pytest.mark.unit
+def test__app__roles_from_mock_groups(monkeypatch: pytest.MonkeyPatch) -> None:
+    at = _run_app(monkeypatch, APP_MODE="local-mock")  # default: interim group
+
+    assert at.session_state["current_user_roles"] == {
+        Actor.OWNER_SME_GROUP,
+        Actor.APPROVER,
+        Actor.ADMIN,
+    }
+
+
+@pytest.mark.unit
+def test__app__no_group_is_viewer(monkeypatch: pytest.MonkeyPatch) -> None:
+    at = _run_app(monkeypatch, APP_MODE="local-mock", ONE_PAGER_APP_MOCK_GROUPS="")
+
+    assert not at.exception
+    assert at.session_state["current_user_roles"] == frozenset()

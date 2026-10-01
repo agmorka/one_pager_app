@@ -7,10 +7,18 @@ valid initials) is configuration, not code (``AppConfig.user_domains``,
 ``username_suffixes``, ``initials_pattern``).
 """
 
+import logging
+from typing import TYPE_CHECKING
+
 from onepagerapp.config import AppConfig
 from onepagerapp.directory import DirectoryUser
 from onepagerapp.models import CurrentUser
 from onepagerapp.state_machine import Actor
+
+if TYPE_CHECKING:
+    from onepagerapp.data_access.base import DataAccess
+
+logger = logging.getLogger(__name__)
 
 
 def initials_from_username(username: str | None, config: AppConfig) -> str | None:
@@ -79,20 +87,37 @@ def resolve_current_user(
     )
 
 
-def resolve_roles(user: CurrentUser | None, config: AppConfig) -> frozenset[Actor]:
-    """Group roles (Approver, Admin) of the user.
+# Role per key of AppConfig.role_groups.
+_GROUP_ROLES = {
+    "owner_sme": Actor.OWNER_SME_GROUP,
+    "approver": Actor.APPROVER,
+    "admin": Actor.ADMIN,
+}
 
-    Architecture.md §4 backs these roles with Unity Catalog groups whose names
-    are not decided yet (Phase 2, item 4.1). Until then the members are
-    configured by initials in ``ONE_PAGER_APP_APPROVERS`` and
-    ``ONE_PAGER_APP_ADMINS``; switching to the group lookup only changes this
-    function. Owner/SME is per record and never returned here.
+
+def resolve_roles(
+    user: CurrentUser | None, config: AppConfig, data_access: "DataAccess"
+) -> frozenset[Actor]:
+    """Group roles of the user: Owner/SME group, Approver, Admin.
+
+    Membership of the groups in ``AppConfig.role_groups`` is checked once, as
+    the user (``DataAccess.get_group_memberships``). Every recognised user is
+    also a Viewer, which needs no role. Owner/SME of a specific One Pager is
+    per record (``one_pager_authorized_users``) and never returned here.
+
+    Fails closed: if the check fails, the user gets no role (Viewer only) and
+    the error is logged; the app still opens.
     """
     if not (user and user.initials):
         return frozenset()
-    roles: set[Actor] = set()
-    if user.initials in config.approver_initials:
-        roles.add(Actor.APPROVER)
-    if user.initials in config.admin_initials:
-        roles.add(Actor.ADMIN)
-    return frozenset(roles)
+    try:
+        memberships = data_access.get_group_memberships(config.role_groups)
+    except Exception:
+        logger.exception(
+            "Group membership check failed; %s gets the Viewer role only",
+            user.initials,
+        )
+        return frozenset()
+    return frozenset(
+        role for key, role in _GROUP_ROLES.items() if memberships.get(key) is True
+    )

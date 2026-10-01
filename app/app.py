@@ -94,7 +94,8 @@ def resolve_user() -> CurrentUser | None:
     ``st.session_state.current_user_info`` (CurrentUser with initials and the
     name from the directory), ``st.session_state.current_user_directory``
     (the directory entry, or None) and
-    ``st.session_state.current_user_roles`` (group roles: Approver, Admin).
+    ``st.session_state.current_user_roles`` (group roles, set by
+    ``resolve_session_roles`` once the data access exists).
     These are set only for a recognised user (non-empty initials).
 
     Returns:
@@ -131,8 +132,24 @@ def resolve_user() -> CurrentUser | None:
     st.session_state.current_user_directory = directory_user
     st.session_state.current_user = username
     st.session_state.current_user_info = user
-    st.session_state.current_user_roles = resolve_roles(user, config)
     return user
+
+
+def resolve_session_roles() -> frozenset[Actor]:
+    """Group roles of the user, checked once per session (needs the data access).
+
+    A role change applies from the next session. A failed check gives the
+    Viewer role only (``auth.resolve_roles``).
+    """
+    roles: frozenset[Actor] | None = st.session_state.get("current_user_roles")
+    if roles is None:
+        roles = resolve_roles(
+            st.session_state.current_user_info,
+            st.session_state.config,
+            st.session_state.data_access,
+        )
+        st.session_state.current_user_roles = roles
+    return roles
 
 
 def render_access_denied(username: str) -> None:
@@ -235,7 +252,7 @@ def main() -> None:
     except Exception:
         _stop_on_service_error()
 
-    roles: frozenset[Actor] = st.session_state.get("current_user_roles", frozenset())
+    roles = resolve_session_roles()
     pg = st.navigation(build_pages(roles))
 
     # Rendered before pg.run() so it stays visible when a page calls st.stop().

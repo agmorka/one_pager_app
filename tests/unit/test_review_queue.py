@@ -1,12 +1,10 @@
-"""Review queue (UI_Design.md §4.3) and the interim Approver/Admin roles."""
+"""Review queue (UI_Design.md §4.3) and the Approver role."""
 
 from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
 
-from onepagerapp.auth import resolve_roles
-from onepagerapp.config import AppConfig
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.permissions import PermissionDeniedError, can_review
 from onepagerapp.review import get_review_queue
@@ -14,25 +12,6 @@ from onepagerapp.state_machine import Actor
 from tests.users import make_user
 
 APPROVER = make_user("CJO")
-
-
-def _config(**overrides: str) -> AppConfig:
-    return AppConfig(ONE_PAGER_APP_VOLUME_PATH="/Volumes/x", **overrides)
-
-
-@pytest.mark.unit
-def test__resolve_roles__from_configured_initials() -> None:
-    config = _config(ONE_PAGER_APP_APPROVERS="cjo, XY", ONE_PAGER_APP_ADMINS="adm")
-
-    assert resolve_roles(APPROVER, config) == {Actor.APPROVER}
-    assert resolve_roles(make_user("ADM"), config) == {Actor.ADMIN}
-    assert resolve_roles(make_user("ABC"), config) == frozenset()
-    assert resolve_roles(None, config) == frozenset()
-
-
-@pytest.mark.unit
-def test__resolve_roles__nobody_by_default() -> None:
-    assert resolve_roles(APPROVER, _config()) == frozenset()
 
 
 @pytest.mark.unit

@@ -78,6 +78,9 @@ class Actor(str, Enum):
 
     OWNER_SME = "owner_sme"
     """Owner or SME of this Data Product (per-record check)."""
+    OWNER_SME_GROUP = "owner_sme_group"
+    """Member of the Owner/SME group: may create One Pagers and manage Use
+    Cases. Never a transition actor; editing a One Pager needs OWNER_SME."""
     APPROVER = "approver"
     """Member of the Approver group."""
     ADMIN = "admin"
