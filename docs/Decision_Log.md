@@ -420,8 +420,10 @@ Deleting `change_log` rows is permitted only in this compensation path, for an O
 **Decision (option B):**
 
 - **Reads run as the user** (`x-forwarded-access-token`, scope `sql`). All employees (`account users`) have `SELECT` on the app tables.
-- **Writes run as the service principal**, and so do reads that are part of a write (ID-sequence compare-and-set, lock checks). No user group has `MODIFY` on the app tables or `WRITE VOLUME` on the registry volume.
-- The connection takes an explicit identity on every statement; a test fails if a write statement is sent as the user. In `databricks` mode a missing user token raises instead of falling back to the service principal.
+- **Writes run as the service principal**, and so does the ID-sequence read that is part of a write. The lock and conditional-update checks are part of the guarded write statements themselves (`MERGE … WHEN MATCHED AND …`, `UPDATE … WHERE version = :expected_version`). No user group has `MODIFY` on the app tables or `WRITE VOLUME` on the registry volume.
+- The connection takes an explicit identity on every statement (`Identity.USER` / `Identity.APP`, no default); `LakehouseAccess` runs every statement through `_read` or `_write`. Tests fail if a write statement is sent as the user or a new method is not classified. In `databricks` mode a missing user token raises (`MissingUserTokenError`) instead of falling back to the service principal.
+- A missing grant on a **read** is shown to the user ("Your role does not have access to … Contact the platform team."); on a **write** it is a deployment error, logged with the details, with a generic message. An expired user token on a read gives "Your session has expired. Please reload the page." (Streamlit keeps the token of the first connection for the session); writes are not affected.
+- The YAML documents on the volume are read and written through the app's volume mount, i.e. as the service principal; accepted because every user may view every One Pager.
 - Every write carries the acting user's corporate initials (audit columns or the change-log entry of the same operation), because Delta history now shows only the service principal.
 - `local-integration` uses the CLI profile for both identities.
 
@@ -438,11 +440,10 @@ Deleting `change_log` rows is permitted only in this compensation path, for an O
 - Settings `ONE_PAGER_APP_USER_DOMAINS` (default `becoc001.onmicrosoft.com`), `ONE_PAGER_APP_USERNAME_SUFFIXES` (default `adm`; an empty entry allows usernames without a suffix) and `ONE_PAGER_APP_INITIALS_PATTERN` (default `^[A-Z0-9]{3}$`: corporate initials are always 3 letters or digits, case does not matter).
 - Old and new domains are never valid at the same time; a domain change is a configuration change at the switch. `X0Wadm` is today's Databricks username for the initials `X0W`; if usernames are later aligned to `X0W`, the suffix setting changes to `adm,` for the switch and then to empty.
 - Initials are extracted by domain check, suffix strip (longest match), upper-casing and pattern check. A username that does not match gives **no** initials; the guessing fallbacks are removed.
-- In deployed mode the username comes only from the Databricks Apps proxy headers. No username or no initials → the user is refused access ("account not recognised"). There is no read-only mode for unrecognised accounts.
 - The same pattern validates the Owner/SME `initials` in One Pagers; the value is upper-cased first, so `x0w` is stored as `X0W`.
-- First name and surname come from the SCIM `Me` endpoint (user token, scope `iam.current-user:read`); when unavailable, the initials are shown. The name is for display only.
+- What happens to a username without initials is §23; where the name comes from is §24.
 
-**Why:** A format change becomes a configuration change, a wrong or unknown account can never be mapped to someone else's initials, and users with digits in their corporate initials can own One Pagers. Implementation: `..dev/User_Identity_And_Access_Plan.md` Phases 1, 2 and 5.
+**Why:** A format change becomes a configuration change, a wrong or unknown account can never be mapped to someone else's initials, and users with digits in their corporate initials can own One Pagers. Implementation: `..dev/User_Identity_And_Access_Plan.md` Phase 1.
 
 ---
 
@@ -453,13 +454,14 @@ Deleting `change_log` rows is permitted only in this compensation path, for an O
 **Decision:**
 
 - One Entra ID group per role; the names are settings `ONE_PAGER_APP_GROUP_OWNER_SME`, `ONE_PAGER_APP_GROUP_APPROVER`, `ONE_PAGER_APP_GROUP_ADMIN`, with a `{env}` placeholder for the environment.
-- **Interim:** the dedicated groups do not exist yet. All three settings default to `BEC_BECOC001_LHX_{env}_DataPlatEng` (`…_DEV_…`, `…_INT_…`, `…_UAT_…`, `…_PRD_…`). Its members act as Owner/SME, Approver and Admin; everyone else is a Viewer. The app logs a warning and shows an "interim roles" notice while the default is in use.
+- **Interim:** the dedicated groups do not exist yet. All three settings default to `BEC_BECOC001_LHX_{env}_DataPlatEng` (`…_DEV_…`, `…_INT_…`, `…_TST_…`, `…_UAT_…`, `…_PRD_…`). Its members act as Owner/SME, Approver and Admin; everyone else is a Viewer. The app logs a warning and, outside DEV, shows an "interim roles" notice while the default is in use.
 - **Viewer = every employee**; there is no Viewer group.
 - Membership is checked once per session as the user: `is_account_group_member(:group) OR is_member(:group)`. A failed check gives Viewer only.
-- `can_create_one_pager` and `can_manage_use_cases` require the Owner/SME group. `ONE_PAGER_APP_APPROVERS` / `ONE_PAGER_APP_ADMINS` are removed; local mock mode uses `ONE_PAGER_APP_MOCK_GROUPS`.
+- `can_create_one_pager` and `can_manage_use_cases` require the Owner/SME group (`Actor.OWNER_SME_GROUP`), in the pages and in the services (`create_one_pager` and the Use Case writes take the session's roles). Editing an existing One Pager still needs only the per-record Owner/SME listing, so business Owners/SMEs listed on a One Pager can edit it without the group.
+- `ONE_PAGER_APP_APPROVERS` / `ONE_PAGER_APP_ADMINS` are removed; local mock mode uses `ONE_PAGER_APP_MOCK_GROUPS` (default: the interim group, i.e. every role).
 - Membership is managed in Entra ID by the Data Platform Engineering team; the app has no role administration.
 
-**Why:** Access is managed through the company's standard group process and access reviews, nobody can grant themselves a role in the app, and moving from the interim group to dedicated groups is a configuration change only. Business Owners/SMEs and Nykredit reviewers outside DataPlatEng cannot create or review until the dedicated groups exist, which is accepted for the interim. Implementation: `..dev/User_Identity_And_Access_Plan.md` Phase 6.
+**Why:** Access is managed through the company's standard group process and access reviews, nobody can grant themselves a role in the app, and moving from the interim group to dedicated groups is a configuration change only. Business Owners/SMEs and Nykredit reviewers outside DataPlatEng cannot create One Pagers or review until the dedicated groups exist, which is accepted for the interim. Implementation: `..dev/User_Identity_And_Access_Plan.md` Phase 6.
 
 ---
 
@@ -470,3 +472,44 @@ Deleting `change_log` rows is permitted only in this compensation path, for an O
 **Decision:** Add nullable `last_updated_by` (initials) and `last_updated_at` columns to all five `ref_*` tables (Liquibase `ddl/ref_audit_columns.sql`). Every Admin add or edit sets them; the data access write methods require the actor, so a write without one does not type-check. Seeded rows keep NULL until an Admin changes them. A deleted value leaves no row, so its record is the `delete_reference_value` security event (deletes are allowed only for unused values). The security event per change stays as the second record.
 
 **Why:** Who changed a reference value is visible next to the value itself and survives log retention, at the cost of two columns per table. An audit-event-only approach was rejected because it depends on log retention and is not visible in the data.
+
+---
+
+## 23. Fail Closed on an Unrecognised Account
+
+**Context:** The app used to fall back to `SELECT current_user()` when the proxy headers were missing, and guessed initials from usernames that did not follow the corporate format. With writes running as the service principal (§19), a wrong or guessed identity would be written into the audit columns and could match someone else's initials.
+
+**Decision:**
+
+- The username comes from one source per mode: deployed, only the Databricks Apps proxy headers (`x-forwarded-preferred-username`, then `x-forwarded-email`); `local-integration`, `SELECT current_user()` with the CLI profile; `local-mock`, `ONE_PAGER_APP_MOCK_USER`.
+- No username, a username that gives no initials (§20) or a failed identity lookup → an "Access denied" page and `st.stop()`, before any page or data access is created. There is no read-only mode (the answer to the open question was "deny access").
+- The refusal is logged once per session as `action=access_app outcome=permission_denied`, with the username, because there are no initials (the one exception to "initials only" in the security log).
+- Every service entry point checks again (`permissions.require_identity`), so a missing identity can never reach a write even if a page is reached.
+
+**Why:** Nobody can act under a guessed identity, and an unknown account (guest, service account, changed domain without a configuration change) is visible in the log instead of silently getting someone's rights. Implementation: `..dev/User_Identity_And_Access_Plan.md` Phase 2.
+
+---
+
+## 24. First Name and Surname from the Workspace Directory
+
+**Context:** The username contains only the corporate initials, which differ from personal initials, and the app showed a name guessed from the username ("X0wadm").
+
+**Decision:**
+
+- Once per session, the app reads the user's entry from the workspace directory: SCIM `Me` (`GET /api/2.0/preview/scim/v2/Me`) with the user's forwarded token and the user API scope `iam.current-user:read`. Never with the service principal, which would return the app's own entry.
+- The name shown is `givenName familyName`, else `displayName`, else the initials; nothing is guessed from the username. The primary email pre-fills the Owner row when creating a One Pager.
+- A failed lookup is logged and the initials are shown; it never blocks the app. `local-integration` uses the CLI profile; `local-mock` uses `ONE_PAGER_APP_MOCK_USER_NAME`.
+- The name is for display only (sidebar, change log, YAML, comments, locks, PDF), never for authorization.
+- If the directory turns out to have no names, a `ref_users` table managed on the Admin page is the fallback (not built).
+
+**Why:** Users see real names without another system or an Entra app registration (Microsoft Graph would need one and admin consent), and the lookup runs with the user's own, minimal scope. Implementation: `..dev/User_Identity_And_Access_Plan.md` Phase 5.
+
+---
+
+## 25. Environment Derived from the Registry Volume
+
+**Context:** The environment decides the sidebar badge and the `{env}` of the role group names (§21). `app.yml` is the same for every environment, so it cannot set a per-environment value, and the catalog setting falls back to its DEV default, so every environment would have resolved the DEV DataPlatEng group.
+
+**Decision:** The environment is `ONE_PAGER_APP_ENVIRONMENT` when set, otherwise the catalog prefix of the registry volume (`ONE_PAGER_APP_VOLUME_PATH`, set per environment by the app resource: `/Volumes/prd_bia_meta/...` → `PRD`), otherwise the catalog setting's prefix, otherwise DEV. TST was added as an environment, because the app is deployed there.
+
+**Why:** The one value that already differs per environment determines the environment, so no per-environment app configuration is needed. `ONE_PAGER_APP_DATABRICKS_CATALOG` itself still defaults to `dev_bia_meta`; deriving it the same way is an open follow-up, needed before the app uses the tables of a non-DEV environment. Implementation: `..dev/User_Identity_And_Access_Plan.md` Phase 7.
