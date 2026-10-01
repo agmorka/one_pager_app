@@ -88,9 +88,16 @@ class LakehouseAccess(DataAccess):
     Focuses on building queries and transforming results into business objects.
     Document content is delegated to OnePagerDocumentStore.
 
-    On Databricks: uses the end-user's token (from x-forwarded-access-token)
-    so that Unity Catalog permissions are enforced per user.
-    Locally (local-integration): falls back to the Databricks CLI profile.
+    Two identities (Architecture.md §8, Decision_Log §19):
+
+    - Reads go through ``_read`` and run as the signed-in user (token from
+      ``x-forwarded-access-token``), so Unity Catalog grants of their groups
+      apply. A missing token raises instead of falling back.
+    - Writes, and the ID-sequence read that is part of a write, go through
+      ``_write`` and run as the app's service principal; users have no
+      ``MODIFY``. Every write carries the acting user's initials.
+
+    Locally (local-integration) both use the Databricks CLI profile.
     """
 
     def __init__(self, config: AppConfig, document_store: OnePagerDocumentStore) -> None:  # noqa: D107
