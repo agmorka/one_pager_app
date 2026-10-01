@@ -13,7 +13,7 @@ import streamlit as st
 from adapters.edit_mode import navigation_guard
 from adapters.theme import apply_theme, environment_badge
 from onepagerapp.auth import resolve_current_user, resolve_roles
-from onepagerapp.config import AppConfig
+from onepagerapp.config import AppConfig, AppMode
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.data_access import create_data_access
 from onepagerapp.data_access.factory import create_document_store
@@ -24,27 +24,37 @@ from onepagerapp.validation import set_initials_pattern
 logger = logging.getLogger(__name__)
 
 
-def get_logged_user(data_access: DataAccess, headers: Mapping[str, str]) -> str:
-    """Resolve the current user with priority chain: headers > database.
+# Headers set by the Databricks Apps proxy for the signed-in user. They are
+# the only trusted identity source in deployed mode (Architecture.md §4).
+PROXY_USER_HEADERS = ("x-forwarded-preferred-username", "x-forwarded-email")
 
-    In Databricks Apps: headers are trusted (set by proxy) and instant (no DB query).
-    Fallback to database for local-integration and mock modes where headers unavailable.
 
-    Priority order:
-    1. x-forwarded-preferred-username (Databricks Apps - fastest, trusted)
-    2. x-forwarded-email (Databricks Apps - fallback header)
-    3. data_access.get_current_user() (Database query - used locally)
+def get_logged_user(
+    config: AppConfig, headers: Mapping[str, str], data_access: DataAccess | None
+) -> str | None:
+    """Return the signed-in username from the identity source of the app mode.
+
+    - ``databricks``: only the Databricks Apps proxy headers. There is no
+      database fallback: writes run as the service principal, so a wrong
+      identity would be written into the audit columns.
+    - ``local-integration``: ``SELECT current_user()`` with the CLI profile.
+    - ``local-mock``: ``ONE_PAGER_APP_MOCK_USER``.
+
+    Returns:
+        The username, or None when the source provides none.
+
     """
-    # Try headers first: instant, no database round-trip, trusted proxy source
-    proxied_user = (
-        headers.get("x-forwarded-preferred-username")
-        or headers.get("x-forwarded-email")
-    )
-    if proxied_user:
-        return proxied_user
-
-    # Fallback to database for local development and non-Apps environments
-    return data_access.get_current_user()
+    if config.APP_MODE is AppMode.DATABRICKS:
+        for header in PROXY_USER_HEADERS:
+            value = (headers.get(header) or "").strip()
+            if value:
+                return value
+        return None
+    if config.APP_MODE is AppMode.LOCAL_MOCK:
+        return config.ONE_PAGER_APP_MOCK_USER
+    if data_access is None:
+        return None
+    return data_access.get_current_user() or None
 
 
 def init_services() -> None:
@@ -77,11 +87,14 @@ def resolve_user() -> None:
         return
     try:
         username = get_logged_user(
-            st.session_state.data_access,
+            st.session_state.config,
             st.context.headers,
+            st.session_state.data_access,
         )
     except Exception:
         logger.exception("Failed to retrieve current user")
+        return
+    if username is None:
         return
     user = resolve_current_user(username, st.session_state.config)
     st.session_state.current_user = username
