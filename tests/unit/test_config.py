@@ -202,3 +202,40 @@ def test__interim_roles__none_with_dedicated_groups() -> None:
         ONE_PAGER_APP_GROUP_ADMIN="OPA-Admin-{env}",
     )
     assert config.interim_roles == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("volume", "expected"),
+    [
+        ("/Volumes/prd_bia_meta/onepager_app/one_pager_registry", Environment.PRD),
+        ("/Volumes/tst_bia_meta/onepager_app/one_pager_registry/", Environment.TST),
+        ("/Volumes/uat_bia_meta/onepager_app/one_pager_registry", Environment.UAT),
+    ],
+)
+def test__environment__from_the_volume_catalog_before_the_catalog_default(
+    volume: str, expected: Environment
+) -> None:
+    config = AppConfig(ONE_PAGER_APP_VOLUME_PATH=volume)  # catalog: dev default
+
+    assert config.environment is expected
+    env = expected.value
+    assert config.role_groups["approver"] == f"BEC_BECOC001_LHX_{env}_DataPlatEng"
+
+
+@pytest.mark.unit
+def test__environment__explicit_setting_beats_the_volume() -> None:
+    config = AppConfig(
+        ONE_PAGER_APP_VOLUME_PATH="/Volumes/prd_bia_meta/onepager_app/v",
+        ONE_PAGER_APP_ENVIRONMENT="UAT",
+    )
+    assert config.environment is Environment.UAT
+
+
+@pytest.mark.unit
+def test__environment__local_folder_falls_back_to_the_catalog() -> None:
+    config = AppConfig(
+        ONE_PAGER_APP_VOLUME_PATH="../tests/fixtures/sample_one_pagers",
+        ONE_PAGER_APP_DATABRICKS_CATALOG="int_bia_meta",
+    )
+    assert config.environment is Environment.INT

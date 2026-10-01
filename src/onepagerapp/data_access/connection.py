@@ -8,7 +8,7 @@ from datetime import date, datetime
 from enum import Enum
 
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.errors import PermissionDenied
+from databricks.sdk.errors import PermissionDenied, Unauthenticated
 from databricks.sdk.service.sql import (
     StatementParameterListItem,
     StatementResponse,
@@ -121,13 +121,43 @@ def access_denied_error(identity: "Identity", detail: str) -> AccessDeniedError:
     return ReadAccessDeniedError(READ_ACCESS_DENIED_MESSAGE.format(target=target))
 
 
-def user_error_message(error: BaseException, default: str) -> str:
-    """Return the message for a failed read: the access message, else ``default``.
+SESSION_EXPIRED_MESSAGE = "Your session has expired. Please reload the page."
 
-    Pages never show exception text; a ``ReadAccessDeniedError`` is the one
-    exception, because its message is written for the user.
+
+class SessionExpiredError(RuntimeError):
+    """The user's token was refused (expired) on a statement run as the user.
+
+    Streamlit keeps the token of the first connection for the whole session;
+    after it expires, reads fail until the page is reloaded, which starts a
+    new session with a fresh token. Writes run as the service principal and
+    are not affected. The message is meant for the user.
     """
-    if isinstance(error, ReadAccessDeniedError):
+
+    def __init__(self) -> None:  # noqa: D107
+        super().__init__(SESSION_EXPIRED_MESSAGE)
+
+
+# Wording of a refused (expired or revoked) token in a failed statement.
+_EXPIRED_TOKEN_ERROR = re.compile(
+    r"token (?:is |has )?expired|expired token|invalid access token"
+    r"|UNAUTHENTICATED|credential was not sent",
+    re.IGNORECASE,
+)
+
+
+def is_expired_token_error(message: str) -> bool:
+    """Whether an error message means the token was refused (expired)."""
+    return bool(_EXPIRED_TOKEN_ERROR.search(message))
+
+
+def user_error_message(error: BaseException, default: str) -> str:
+    """Return the message for a failed read: a message for the user, else ``default``.
+
+    Pages never show exception text. ``ReadAccessDeniedError`` and
+    ``SessionExpiredError`` are the exceptions, because their messages are
+    written for the user.
+    """
+    if isinstance(error, (ReadAccessDeniedError, SessionExpiredError)):
         return str(error)
     return default
 
@@ -284,6 +314,9 @@ class DatabricksConnection:
             except PermissionDenied as exc:
                 # A missing grant (e.g. CAN_USE on the warehouse) is not retried.
                 raise access_denied_error(identity, str(exc)) from exc
+            except Unauthenticated as exc:
+                # Not retried: the same token is refused again.
+                raise _refused_token_error(identity, str(exc)) from exc
             except Exception as exc:
                 last_err = exc
                 if attempt == _MAX_RETRIES:
@@ -301,6 +334,8 @@ class DatabricksConnection:
                 except StatementFailedError as exc:
                     if is_permission_error(str(exc)):
                         raise access_denied_error(identity, str(exc)) from exc
+                    if is_expired_token_error(str(exc)):
+                        raise _refused_token_error(identity, str(exc)) from exc
                     raise
                 return response
         msg = "All connection attempts failed"
@@ -319,3 +354,12 @@ def _raise_if_failed(response: StatementResponse) -> None:
     detail = status.error.message if status.error else "no error details"
     msg = f"SQL statement {status.state.value}: {detail}"
     raise StatementFailedError(msg)
+
+
+def _refused_token_error(identity: Identity, detail: str) -> Exception:
+    """Return the error for a refused token: reload (user) or deployment error."""
+    if identity is Identity.USER:
+        logger.info("The user's token was refused (expired?): %s", detail)
+        return SessionExpiredError()
+    logger.error("The app's service principal could not authenticate: %s", detail)
+    return RuntimeError("The app could not authenticate to the SQL warehouse.")

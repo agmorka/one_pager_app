@@ -293,6 +293,13 @@ Record every answer in [Decision_Log.md](../docs/Decision_Log.md).
 4. **Smoke test in DEV**: browse, create, edit, submit, approve (as a second user who is not Owner/SME), reject, admin edit. Check the audit columns and `DESCRIBE HISTORY`. While the DataPlatEng group is used, run the Owner/SME, Approver and Admin steps as DataPlatEng members and the Viewer steps as a non-member. Repeat with real Viewer, Owner/SME and Approver test users once the real groups exist.
 5. **Promote** to INT, TST, UAT, PRD with the per-environment settings and grants.
 
+**Status (2026-10-01): prepared in the repository; the Terraform changes, the DEV smoke test and the promotion are still to be done.** Notes:
+
+- The app resource, its scopes and `CAN_USE` are managed in Terraform, not in this repository (there is no bundle app resource). The required Terraform changes are listed in [One_Pager_App_Infrastructure_Setup.md](../docs/One_Pager_App_Infrastructure_Setup.md) ("Required Changes"), with the grants as SQL.
+- `app.yml` is the same in every environment. The environment (badge and `{env}` of the role groups) is therefore derived from the catalog of the registry volume, which the app resource sets per environment; before, every environment would have resolved to DEV through the catalog default. Note that `ONE_PAGER_APP_DATABRICKS_CATALOG` itself still defaults to `dev_bia_meta`, so the tables of a non-DEV environment are only used if that setting is changed (not part of this plan).
+- An expired user token gives "Your session has expired. Please reload the page." on reads (step 3); the one-hour test itself is item 14 of the smoke test.
+- The smoke test checklist is in [Testing_Strategy.md](../docs/Testing_Strategy.md) §8; the promotion checklist in the infrastructure doc. `databricks.yml` has no `tst` target yet.
+
 ## 12. Phase 8 — Documentation and Close-out
 
 1. [Architecture.md](../docs/Architecture.md) §4: identity (configurable format, directory name), Option B (reads as user, writes as service principal), and why.

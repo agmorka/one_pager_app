@@ -47,6 +47,28 @@ Users have no direct privileges on Databricks resources; privileges are granted 
 
 Unity Catalog grants must go to an account-level group; the workspace-local `users` group cannot receive them. The role groups below need no Unity Catalog grants, because all writes go through the service principal.
 
+### Grants as SQL (for the platform team)
+
+Terraform is the source of truth; these statements show the same grants for review, or for checking an environment by hand. Replace `<catalog>` (e.g. `dev_bia_meta`) and `<spn-application-id>` (the application ID of `bp-spn-lhx-opa-<env>-001`). Grants on the schema apply to every table in it, including tables added later.
+
+```sql
+-- App service principal: reads and writes (all writes run as the app).
+GRANT USE CATALOG ON CATALOG <catalog> TO `<spn-application-id>`;
+GRANT USE SCHEMA, SELECT, MODIFY ON SCHEMA <catalog>.onepager_app TO `<spn-application-id>`;
+GRANT READ VOLUME, WRITE VOLUME
+  ON VOLUME <catalog>.onepager_app.one_pager_registry TO `<spn-application-id>`;
+
+-- All employees: read only (reads run as the signed-in user).
+GRANT USE CATALOG ON CATALOG <catalog> TO `account users`;
+GRANT USE SCHEMA, SELECT ON SCHEMA <catalog>.onepager_app TO `account users`;
+
+-- Check: only the service principal may have MODIFY / WRITE VOLUME.
+SHOW GRANTS ON SCHEMA <catalog>.onepager_app;
+SHOW GRANTS ON VOLUME <catalog>.onepager_app.one_pager_registry;
+```
+
+`CAN_USE` on the SQL warehouse is a workspace permission, not a Unity Catalog grant; it is set in Terraform for the service principal and for all employees.
+
 ## Application Roles
 
 Application roles come from Entra ID groups (automatic identity management is enabled, so Entra ID groups are available in Databricks without a sync job). Group names are app settings:
@@ -69,6 +91,28 @@ Changes to the Terraform configuration needed by the identity and access design 
 3. Confirm that no user group has `MODIFY` on the app tables or `WRITE VOLUME` on the registry volume.
 4. No change to app access: in UAT/PRD all users can already use the app (all employees are Viewers); DEV/INT/TST stay limited to the base groups.
 5. TST: the app's `Environment` setting knows TST (badge, and `BEC_BECOC001_LHX_TST_DataPlatEng` as the interim role group). Check that this group exists in the TST account.
+6. Before deploying to an environment, check that `BEC_BECOC001_LHX_<ENV>_DataPlatEng` exists in that environment's account (for example `SELECT is_account_group_member('BEC_BECOC001_LHX_DEV_DataPlatEng')` as a member returns `true`). A missing group means every user is only a Viewer.
+
+## App Settings per Environment
+
+The app's environment variables are in `app/app.yml`, which is the same for every environment:
+
+- `ONE_PAGER_APP_VOLUME_PATH` and `DATABRICKS_WAREHOUSE_ID` come from the app resources (`valueFrom`), so they differ per environment.
+- The environment (sidebar badge and the `{env}` in role group names) is derived from the catalog of the registry volume, e.g. `/Volumes/prd_bia_meta/...` → `PRD`. `ONE_PAGER_APP_ENVIRONMENT` overrides it if ever needed.
+- The identity settings (`ONE_PAGER_APP_USER_DOMAINS`, `ONE_PAGER_APP_USERNAME_SUFFIXES`, `ONE_PAGER_APP_INITIALS_PATTERN`) are the same everywhere and set explicitly.
+- The role group settings stay unset while the interim DataPlatEng group is used; add them once the dedicated groups exist (the `{env}` placeholder keeps one value valid for all environments).
+
+## Promoting the Identity and Access Changes
+
+Order: DEV → INT → TST → UAT → PRD. Move on only when the previous environment has passed the smoke test. Per environment:
+
+1. **Terraform:** the `sql` and `iam.current-user:read` user API scopes on the app; the grants above (service principal: `SELECT`, `MODIFY`, `READ VOLUME`, `WRITE VOLUME`; `account users`: `SELECT`); `CAN_USE` on the warehouse.
+2. **Liquibase:** run the pipeline so `ddl/ref_audit_columns.sql` adds `last_updated_by` / `last_updated_at` to the `ref_*` tables **before** the new app version is deployed (Admin changes write these columns).
+3. **Groups:** check that `BEC_BECOC001_LHX_<ENV>_DataPlatEng` exists (Required Changes, item 6). Once dedicated role groups exist, add the `ONE_PAGER_APP_GROUP_*` settings to `app/app.yml` (with `{env}`, one value for every environment).
+4. **Deploy** the app with the bundle target of the environment. `databricks.yml` has targets `dev`, `int`, `uat` and `prd`; a `tst` target (and its pipeline stage) must be added before deploying to TST.
+5. **Check the environment:** the sidebar badge shows the right environment (derived from the registry volume's catalog). A wrong badge means the role groups of the wrong environment are checked.
+6. **Smoke test:** run the identity and access smoke test ([Testing_Strategy.md](Testing_Strategy.md) §8) and record the result in the deployment ticket.
+7. **Users who used the app before:** if names do not appear, they sign in again so their token gets the new scope ([Dev_Notes.md](Dev_Notes.md), "User authorization scopes").
 
 ## Service Principal
 

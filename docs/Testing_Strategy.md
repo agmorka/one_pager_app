@@ -123,6 +123,32 @@ The UAT environment is for stakeholder validation. Key scenarios that require ma
 - Accessibility: screen reader testing, keyboard-only navigation through all pages
 - Environment badge correctness (UAT badge shows on UAT, not DEV/PRD)
 
+### Identity and access smoke test (DEV, then each environment)
+
+Run after deploying the identity and access changes (`..dev/User_Identity_And_Access_Plan.md` Phases 1–7), first in DEV. While the interim group is used, **member** means a member of `BEC_BECOC001_LHX_<ENV>_DataPlatEng` and **non-member** any other employee. Once the dedicated groups exist, repeat with a real Viewer, Owner/SME and Approver test user.
+
+Preparation: two members (A and B) and one non-member (C). A is the Owner of the One Pager created below; B is not Owner or SME of it.
+
+| # | Who | Step | Expected |
+|---|---|---|---|
+| 1 | A | Open the app | Sidebar: real name and initials, e.g. "Agnieszka Kępkowska (X0W)"; role badges Owner/SME, Approver, Admin; environment badge matches the environment; "Interim roles" notice outside DEV. |
+| 2 | C | Open the app | Name shown, role badge **Viewer**; no Review and no Admin page; Registry has no **New**. |
+| 3 | C | Browse Registry, Preview, Use Cases; export a PDF | Everything readable; no error (reads run as C, through the `account users` grants). |
+| 4 | A | Create a One Pager with A as Owner, edit it, **Save Draft** | Saved; change log shows A's name. |
+| 5 | A | Submit for Review | Status In Review. |
+| 6 | B | Review page: reject with a comment | Status Draft; review comment by B. |
+| 7 | A | Resolve the comment, submit again | In Review. |
+| 8 | A | Try to approve | Not possible: A is the Owner (segregation of duties). |
+| 9 | B | Approve | Approved, version 1.0.0. |
+| 10 | A | Admin page: deactivate and reactivate a business domain | Saved. |
+| 11 | — | In the SQL editor: `DESCRIBE HISTORY <catalog>.onepager_app.one_pager_status` | The writes show the app's **service principal**. |
+| 12 | — | `SELECT last_updated_by, reviewed_by FROM <catalog>.onepager_app.one_pager_status WHERE one_pager_id = '<id>'`, and `last_updated_by` of the domain changed in step 10 | The **initials** of A and B, not the service principal. |
+| 13 | C | In the SQL editor: `UPDATE <catalog>.onepager_app.one_pager_status SET product_name = 'x' WHERE one_pager_id = '<id>'` | Refused: users have no `MODIFY`. |
+| 14 | A | Keep a browser tab open for more than one hour, then open another One Pager | Either it loads, or "Your session has expired. Please reload the page."; after a reload everything works. No stack trace. |
+| 15 | — | Open the app with an account outside the configured domain (if one is available) | "Access denied" page; a `permission_denied` event with `action=access_app` in the log. |
+
+Record the result per environment (date, tester, any deviation) in the deployment ticket.
+
 ## 9. Negative / Failure-Mode Tests
 
 Covered in unit tests via mocked failures:
