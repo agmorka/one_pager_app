@@ -49,6 +49,7 @@ from onepagerapp.permissions import (
     can_create_one_pager,
     check_can_edit,
     is_owner_or_sme,
+    require_identity,
 )
 from onepagerapp.review import MAX_COMMENT_LENGTH
 from onepagerapp.state_machine import (
@@ -277,6 +278,7 @@ def create_one_pager(
         CreateError: Storing failed; partial writes were compensated.
 
     """
+    require_identity(user, "create_one_pager")
     if not can_create_one_pager(user):
         log_permission_denied("create_one_pager", user=user.initials if user else None)
         msg = "You are not allowed to create One Pagers."
@@ -634,6 +636,7 @@ def submit_for_review(
         TransitionError: Storing failed; nothing changed.
 
     """
+    require_identity(user, "submit_for_review", one_pager_id)
     now = now or datetime.now(UTC)
     row = data_access.get_one_pager_status_row(one_pager_id)
     if row is None:
@@ -719,6 +722,7 @@ def cancel_one_pager(  # noqa: PLR0913 - every argument is part of the action
         TransitionError: Storing failed; nothing changed.
 
     """
+    require_identity(user, "cancel_one_pager", one_pager_id)
     row = data_access.get_one_pager_status_row(one_pager_id)
     if row is None:
         msg = f"One Pager {one_pager_id} not found."
@@ -827,6 +831,7 @@ def change_data_product_status(  # noqa: PLR0913 - every argument is part of the
         TransitionError: Storing failed; nothing changed.
 
     """
+    require_identity(user, "change_data_product_status", one_pager_id)
     row = data_access.get_one_pager_status_row(one_pager_id)
     if row is None:
         msg = f"One Pager {one_pager_id} not found."
@@ -942,6 +947,7 @@ def reject_one_pager(  # noqa: PLR0913 - every argument is part of the action
         TransitionError: Storing failed; nothing changed.
 
     """
+    require_identity(user, "reject_one_pager", one_pager_id)
     now = now or datetime.now(UTC)
     current = data_access.get_one_pager_status_row(one_pager_id)
     target = reject_target(current.data_product_status) if current else DRAFT
@@ -1128,6 +1134,7 @@ def approve_one_pager(  # noqa: PLR0913 - every argument is part of the action
         TransitionError: Storing failed; nothing changed.
 
     """
+    require_identity(user, "approve_one_pager", one_pager_id)
     now = now or datetime.now(UTC)
     row, _ = _check_review_decision(
         data_access, one_pager_id, APPROVED, user, roles, "approve"
@@ -1213,6 +1220,7 @@ def start_update(
             failed; nothing changed.
 
     """
+    require_identity(user, "start_update", one_pager_id)
     row = data_access.get_one_pager_status_row(one_pager_id)
     if row is None:
         msg = f"One Pager {one_pager_id} not found."

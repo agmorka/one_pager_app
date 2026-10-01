@@ -23,7 +23,11 @@ from onepagerapp.audit import (
 )
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.models import CurrentUser, LockInfo
-from onepagerapp.permissions import PermissionDeniedError, can_release_lock
+from onepagerapp.permissions import (
+    PermissionDeniedError,
+    can_release_lock,
+    require_identity,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -195,6 +199,7 @@ def acquire_lock(  # noqa: PLR0913 - every argument is part of the lock identity
             shows an error instead of opening (Testing_Strategy.md §9).
 
     """
+    require_identity(user, "acquire_lock", one_pager_id)
     now = _as_utc(now or utc_now())
     existing = data_access.get_lock(one_pager_id)
 
@@ -255,6 +260,7 @@ def heartbeat(  # noqa: PLR0913 - every argument is part of the lock identity
         True if the caller still holds the lock, False if it was lost.
 
     """
+    require_identity(user, "heartbeat", one_pager_id)
     now = _as_utc(now or utc_now())
     return data_access.refresh_lock(
         one_pager_id,
@@ -283,6 +289,7 @@ def release_lock(
         PermissionDeniedError: If another user holds the lock (logged).
 
     """
+    require_identity(user, "release_lock", one_pager_id)
     lock = data_access.get_lock(one_pager_id)
     if lock is None:
         return False

@@ -22,6 +22,7 @@ from onepagerapp.permissions import (
     PermissionDeniedError,
     can_review,
     is_owner_or_sme,
+    require_identity,
 )
 from onepagerapp.state_machine import IN_REVIEW, Actor, InvalidTransitionError
 from onepagerapp.validation import sanitize_text
@@ -62,6 +63,7 @@ def section_label(section: str | None) -> str:
 
 def check_can_review(user: CurrentUser | None, roles: Collection[Actor]) -> None:
     """Raise ``PermissionDeniedError`` (logged) unless the user is an Approver."""
+    require_identity(user, "review")
     if can_review(roles):
         return
     log_permission_denied("review", user=user.initials if user else None)
@@ -115,6 +117,7 @@ def add_review_comment(  # noqa: PLR0913 - every argument is part of the comment
         CommentError: Storing failed.
 
     """
+    require_identity(user, "add_review_comment", one_pager_id)
     row = _status_row(data_access, one_pager_id)
     check_can_review(user, roles)
     if is_owner_or_sme(user, data_access.get_authorized_users(one_pager_id)):
@@ -195,6 +198,7 @@ def resolve_review_comment(
             failed.
 
     """
+    require_identity(user, "resolve_review_comment", one_pager_id)
     row = _status_row(data_access, one_pager_id)
     owner_or_sme = is_owner_or_sme(user, data_access.get_authorized_users(one_pager_id))
     reason = resolve_denied_reason(user, row.one_pager_status, owner_or_sme)
