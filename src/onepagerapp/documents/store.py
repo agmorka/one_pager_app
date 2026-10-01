@@ -8,6 +8,10 @@ version is given.
 An optional ``write_path`` redirects writes to a separate folder that is read
 before ``base_path``. ``local-mock`` mode uses it with a temporary directory so
 the version-controlled fixtures are never modified.
+
+Deployed, the base path is the volume mount of the Databricks App, so every
+read and write runs as the app's service principal (Architecture.md §8): users
+need no volume grant, and the app checks who may open or change a One Pager.
 """
 
 import logging
