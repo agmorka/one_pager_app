@@ -204,6 +204,16 @@ class AppConfig(BaseModel):
         }
 
     @property
+    def interim_roles(self) -> list[str]:
+        """Roles (``owner_sme``, ``approver``, ``admin``) still on the interim group.
+
+        True while a role group setting resolves to the interim DataPlatEng
+        group; empty once all three dedicated groups are configured.
+        """
+        interim = INTERIM_ROLE_GROUP.replace("{env}", self.environment.value)
+        return [role for role, group in self.role_groups.items() if group == interim]
+
+    @property
     def mock_groups(self) -> frozenset[str]:
         """Groups of the local-mock user, with ``{env}`` replaced."""
         env = self.environment.value

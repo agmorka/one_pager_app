@@ -15,7 +15,7 @@ from adapters.edit_mode import navigation_guard
 from adapters.theme import apply_theme, environment_badge, role_badges
 from onepagerapp.audit import log_unrecognised_user
 from onepagerapp.auth import resolve_current_user, resolve_roles
-from onepagerapp.config import AppConfig, AppMode
+from onepagerapp.config import AppConfig, AppMode, Environment
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.data_access import create_data_access
 from onepagerapp.data_access.factory import create_document_store
@@ -66,8 +66,44 @@ def init_config() -> AppConfig:
     if "config" not in st.session_state:
         config = AppConfig.from_env()
         set_initials_pattern(config.initials_pattern)
+        warn_if_interim_roles(config)
         st.session_state.config = config
     return st.session_state.config
+
+
+def interim_roles_notice(config: AppConfig) -> str | None:
+    """Sidebar notice while roles use the interim group; None in DEV or after.
+
+    The dedicated role groups do not exist yet, so DataPlatEng members hold
+    those roles (User_Identity_And_Access_Plan.md §4.1).
+    """
+    roles = [INTERIM_ROLE_LABELS[r] for r in config.interim_roles]
+    if not roles or config.environment is Environment.DEV:
+        return None
+    return f"Interim roles: DataPlatEng members act as {_join(roles)}."
+
+
+def warn_if_interim_roles(config: AppConfig) -> None:
+    """Log once per session that roles still use the interim group."""
+    if config.interim_roles:
+        logger.warning(
+            "Interim role groups in use for %s: %s members hold these roles. "
+            "Configure ONE_PAGER_APP_GROUP_* once the dedicated groups exist.",
+            ", ".join(config.interim_roles),
+            config.role_groups[config.interim_roles[0]],
+        )
+
+
+INTERIM_ROLE_LABELS = {
+    "owner_sme": "Owner/SME",
+    "approver": "Approver",
+    "admin": "Admin",
+}
+
+
+def _join(names: list[str]) -> str:
+    """Join names as "A", "A and B" or "A, B and C"."""
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
 
 
 def init_services() -> None:
@@ -278,6 +314,9 @@ def main() -> None:
         user_label = sidebar_user_label(st.session_state.current_user_info)
         st.caption(f"Logged user: {user_label}")
         st.markdown(role_badges(role_names(roles)), unsafe_allow_html=True)
+        notice = interim_roles_notice(config)
+        if notice:
+            st.caption(f"⚠️ {notice}")
 
     navigation_guard(
         pg.title, st.session_state.data_access, st.session_state.current_user_info

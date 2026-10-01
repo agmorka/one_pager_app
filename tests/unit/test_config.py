@@ -177,3 +177,28 @@ def test__mock_data_access__memberships_from_mock_groups() -> None:
     assert data_access.get_group_memberships(
         {"approver": "OPA-Approver", "admin": "OPA-Admin"}
     ) == {"approver": True, "admin": False}
+
+
+@pytest.mark.unit
+def test__interim_roles__all_while_on_the_default_group() -> None:
+    assert _config().interim_roles == ["owner_sme", "approver", "admin"]
+
+
+@pytest.mark.unit
+def test__interim_roles__only_the_roles_still_on_it() -> None:
+    config = _config(
+        ONE_PAGER_APP_ENVIRONMENT="UAT",
+        ONE_PAGER_APP_GROUP_APPROVER="OPA-Approver-{env}",
+        ONE_PAGER_APP_GROUP_ADMIN="OPA-Admin-{env}",
+    )
+    assert config.interim_roles == ["owner_sme"]
+
+
+@pytest.mark.unit
+def test__interim_roles__none_with_dedicated_groups() -> None:
+    config = _config(
+        ONE_PAGER_APP_GROUP_OWNER_SME="OPA-OwnerSME-{env}",
+        ONE_PAGER_APP_GROUP_APPROVER="OPA-Approver-{env}",
+        ONE_PAGER_APP_GROUP_ADMIN="OPA-Admin-{env}",
+    )
+    assert config.interim_roles == []

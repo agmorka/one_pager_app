@@ -338,3 +338,61 @@ def test__app__sidebar_shows_role_badges(monkeypatch: pytest.MonkeyPatch) -> Non
     sidebar_html = " ".join(m.value for m in at.sidebar.markdown)
     for role in ("Owner/SME", "Approver", "Admin"):
         assert f">{role}</span>" in sidebar_html
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("environment", "overrides", "expected"),
+    [
+        ("DEV", {}, None),
+        (
+            "UAT",
+            {},
+            "Interim roles: DataPlatEng members act as Owner/SME, Approver and Admin.",
+        ),
+        (
+            "PRD",
+            {"ONE_PAGER_APP_GROUP_OWNER_SME": "OPA-OwnerSME-{env}"},
+            "Interim roles: DataPlatEng members act as Approver and Admin.",
+        ),
+        (
+            "INT",
+            {
+                "ONE_PAGER_APP_GROUP_OWNER_SME": "A",
+                "ONE_PAGER_APP_GROUP_APPROVER": "B",
+                "ONE_PAGER_APP_GROUP_ADMIN": "C",
+            },
+            None,
+        ),
+    ],
+)
+def test__interim_roles_notice__outside_dev_while_interim(
+    app_module: ModuleType,
+    environment: str,
+    overrides: dict[str, str],
+    expected: str | None,
+) -> None:
+    config = _config("local-mock", ONE_PAGER_APP_ENVIRONMENT=environment, **overrides)
+
+    assert app_module.interim_roles_notice(config) == expected
+
+
+@pytest.mark.unit
+def test__app__interim_roles_warning_and_notice(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    at = _run_app(monkeypatch, APP_MODE="local-mock", ONE_PAGER_APP_ENVIRONMENT="UAT")
+
+    assert not at.exception
+    assert any("Interim roles: DataPlatEng" in c.value for c in at.sidebar.caption)
+    assert any(
+        "Interim role groups in use" in m and "BEC_BECOC001_LHX_UAT_DataPlatEng" in m
+        for m in caplog.messages
+    )
+
+
+@pytest.mark.unit
+def test__app__no_interim_notice_in_dev(monkeypatch: pytest.MonkeyPatch) -> None:
+    at = _run_app(monkeypatch, APP_MODE="local-mock", ONE_PAGER_APP_ENVIRONMENT="DEV")
+
+    assert not any("Interim roles" in c.value for c in at.sidebar.caption)
