@@ -310,6 +310,14 @@ Record every answer in [Decision_Log.md](../docs/Decision_Log.md).
 6. [Requirements_and_Scope.md](../docs/Requirements_and_Scope.md) §2 and [Architecture.md](../docs/Architecture.md) §4: Viewer = all employees, no Viewer group; group names are settings; interim `BEC_BECOC001_LHX_<ENV>_DataPlatEng` group.
 7. [README.md](../README.md) and [.env.example](../.env.example): all new settings.
 
+**Status (2026-10-01): done.** Notes:
+
+- Most documents were updated while each phase was implemented; this phase checked them against the code and filled the gaps.
+- Backend_Design §5 and Architecture §4 said editing also needs the Owner/SME group; the code (as Phase 6 planned) checks only the per-record Owner/SME listing for editing, submitting and DP status changes. The documents now say so.
+- Decision_Log: §19 (option B) and §20 (initials format) were completed; new §23 (fail closed), §24 (name from the directory) and §25 (environment from the registry volume).
+- `.env.example` was removed earlier; the README has a table of all settings instead.
+- Open follow-up: `ONE_PAGER_APP_DATABRICKS_CATALOG` defaults to `dev_bia_meta` and is not set in `app.yml`; it must be derived or set before the app uses the tables of a non-DEV environment (Decision_Log §25).
+
 ## 13. Summary of Order
 
 | Order | Phase | Depends on | Platform needed |
