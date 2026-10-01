@@ -396,3 +396,35 @@ def test__app__no_interim_notice_in_dev(monkeypatch: pytest.MonkeyPatch) -> None
     at = _run_app(monkeypatch, APP_MODE="local-mock", ONE_PAGER_APP_ENVIRONMENT="DEV")
 
     assert not any("Interim roles" in c.value for c in at.sidebar.caption)
+
+
+def _page_titles(app_module: ModuleType, roles: frozenset[Actor]) -> list[str]:
+    return [title for _, title in app_module.navigation_entries(roles)]
+
+
+@pytest.mark.unit
+def test__done_when__dataplateng_member_sees_review_and_admin(
+    monkeypatch: pytest.MonkeyPatch, app_module: ModuleType
+) -> None:
+    """Identity plan Phase 6, done when: roles follow the groups per session."""
+    member = _run_app(monkeypatch, APP_MODE="local-mock")
+    member_pages = _page_titles(app_module, member.session_state["current_user_roles"])
+    assert {"Review", "Admin"} <= set(member_pages)
+
+    non_member = _run_app(
+        monkeypatch, APP_MODE="local-mock", ONE_PAGER_APP_MOCK_GROUPS="Other"
+    )
+    viewer_pages = _page_titles(
+        app_module, non_member.session_state["current_user_roles"]
+    )
+    assert viewer_pages == ["Registry", "Preview", "Editor", "Use Cases", "Help"]
+
+    # Another Approver group: the member loses Review from the next session.
+    moved = _run_app(
+        monkeypatch,
+        APP_MODE="local-mock",
+        ONE_PAGER_APP_GROUP_APPROVER="OPA-Approver-{env}",
+    )
+    moved_pages = _page_titles(app_module, moved.session_state["current_user_roles"])
+    assert "Review" not in moved_pages
+    assert "Admin" in moved_pages
