@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import logging
 from typing import TYPE_CHECKING
 
@@ -116,6 +117,15 @@ def apply_theme() -> None:
             font-size: 0.85em;
             font-weight: 500;
         }
+        .role-badge {
+            display: inline-block;
+            padding: 1px 8px;
+            margin: 0 4px 4px 0;
+            border: 1px solid currentColor;
+            border-radius: 10px;
+            font-size: 0.75em;
+            font-weight: 600;
+        }
         .environment-badge {
             display: inline-block;
             padding: 2px 10px;
@@ -177,4 +187,16 @@ def environment_badge(environment: str) -> str:
         f'style="background-color: {background}; color: {text};">'
         f"{environment}"
         f"</span>"
+    )
+
+
+def role_badges(roles: list[str]) -> str:
+    """HTML for the user's role badges in the sidebar (UI_Design.md §2).
+
+    Plain text in an outlined pill, so the role never depends on color.
+    """
+    return "".join(
+        f'<span class="role-badge" aria-label="Role: {html.escape(role)}">'
+        f"{html.escape(role)}</span>"
+        for role in roles
     )

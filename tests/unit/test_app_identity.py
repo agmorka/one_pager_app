@@ -311,3 +311,30 @@ def test__app__no_group_is_viewer(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert not at.exception
     assert at.session_state["current_user_roles"] == frozenset()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("roles", "expected"),
+    [
+        (frozenset(), ["Viewer"]),
+        (frozenset({Actor.APPROVER}), ["Approver"]),
+        (
+            frozenset({Actor.ADMIN, Actor.OWNER_SME_GROUP, Actor.APPROVER}),
+            ["Owner/SME", "Approver", "Admin"],
+        ),
+    ],
+)
+def test__role_names__viewer_only_without_other_roles(
+    app_module: ModuleType, roles: frozenset[Actor], expected: list[str]
+) -> None:
+    assert app_module.role_names(roles) == expected
+
+
+@pytest.mark.unit
+def test__app__sidebar_shows_role_badges(monkeypatch: pytest.MonkeyPatch) -> None:
+    at = _run_app(monkeypatch, APP_MODE="local-mock")
+
+    sidebar_html = " ".join(m.value for m in at.sidebar.markdown)
+    for role in ("Owner/SME", "Approver", "Admin"):
+        assert f">{role}</span>" in sidebar_html

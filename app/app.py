@@ -12,7 +12,7 @@ from typing import NoReturn
 import streamlit as st
 
 from adapters.edit_mode import navigation_guard
-from adapters.theme import apply_theme, environment_badge
+from adapters.theme import apply_theme, environment_badge, role_badges
 from onepagerapp.audit import log_unrecognised_user
 from onepagerapp.auth import resolve_current_user, resolve_roles
 from onepagerapp.config import AppConfig, AppMode
@@ -178,7 +178,21 @@ def sidebar_user_label(user: CurrentUser) -> str:
     return user.initials
 
 
-ROLE_LABELS = {Actor.APPROVER: "Approver", Actor.ADMIN: "Admin"}
+# Sidebar role badges, in this order (UI_Design.md §2).
+ROLE_LABELS = {
+    Actor.OWNER_SME_GROUP: "Owner/SME",
+    Actor.APPROVER: "Approver",
+    Actor.ADMIN: "Admin",
+}
+
+
+def role_names(roles: frozenset[Actor]) -> list[str]:
+    """Badge labels: the group roles, or "Viewer" when the user has none.
+
+    Every signed-in user can view; "Viewer" is shown only when it is the
+    user's only role, so the badges say what the user can do beyond viewing.
+    """
+    return [ROLE_LABELS[r] for r in ROLE_LABELS if r in roles] or ["Viewer"]
 
 
 def navigation_entries(roles: frozenset[Actor]) -> list[tuple[str, str]]:
@@ -263,9 +277,7 @@ def main() -> None:
         st.divider()
         user_label = sidebar_user_label(st.session_state.current_user_info)
         st.caption(f"Logged user: {user_label}")
-        role_names = [ROLE_LABELS[r] for r in ROLE_LABELS if r in roles]
-        if role_names:
-            st.caption(f"Role: {', '.join(role_names)}")
+        st.markdown(role_badges(role_names(roles)), unsafe_allow_html=True)
 
     navigation_guard(
         pg.title, st.session_state.data_access, st.session_state.current_user_info

@@ -40,3 +40,16 @@ def test__streamlit_config__uses_bec_theme() -> None:
     config = (APP_DIR / ".streamlit" / "config.toml").read_text()
     assert 'primaryColor = "#0c1c49"' in config
     assert 'textColor = "#343333"' in config
+
+
+@pytest.mark.unit
+def test__role_badges__text_in_an_outlined_pill(theme: ModuleType) -> None:
+    badges = theme.role_badges(["Owner/SME", "Approver"])
+
+    assert badges.count('class="role-badge"') == 2
+    assert ">Owner/SME</span>" in badges
+    assert 'aria-label="Role: Approver"' in badges
+    assert theme.role_badges(["<b>x</b>"]) == (
+        '<span class="role-badge" aria-label="Role: &lt;b&gt;x&lt;/b&gt;">'
+        "&lt;b&gt;x&lt;/b&gt;</span>"
+    )
