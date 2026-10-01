@@ -60,11 +60,11 @@ The Editor has create mode and, from Phase 4, edit mode. Missing:
 
 | # | Feature |
 |---|---|
-| 4.1 | Coarse role resolution from **Unity Catalog group membership** (Owner/SME, Approver, Admin, Viewer). Today every authenticated user may create One Pagers and manage Use Cases. **Interim (Phase 6):** `auth.resolve_roles` gives Approver/Admin from the initials in `ONE_PAGER_APP_APPROVERS` / `ONE_PAGER_APP_ADMINS`; switching to UC groups only changes that function |
-| 4.2 | ~~Per-record check: `check_can_edit` against `one_pager_authorized_users`~~ **Done (Phase 4, step 17):** `permissions.check_can_edit` / `edit_denied_reason` (Owner/SME and status `Draft` / `Draft Update`); the Owner/SME UC group check still waits for 4.1 |
-| 4.3 | ~~Real `get_action_states`. Today every action is hard-coded as disabled.~~ **Done (Phase 5):** derived from `TRANSITIONS` guards; actions whose service is not built yet stay disabled ("coming soon"). Approver/Admin roles wait for 4.1 |
+| 4.1 | ~~Coarse role resolution from **Unity Catalog group membership** (Owner/SME, Approver, Admin, Viewer). Today every authenticated user may create One Pagers and manage Use Cases.~~ **Done (identity plan Phase 6):** `auth.resolve_roles` checks the Entra ID role groups (`ONE_PAGER_APP_GROUP_*`, interim `BEC_BECOC001_LHX_{env}_DataPlatEng`) once per session as the user; creating One Pagers and managing Use Cases need the Owner/SME group; everyone else is a Viewer. `ONE_PAGER_APP_APPROVERS` / `ONE_PAGER_APP_ADMINS` are removed |
+| 4.2 | ~~Per-record check: `check_can_edit` against `one_pager_authorized_users`~~ **Done (Phase 4, step 17):** `permissions.check_can_edit` / `edit_denied_reason` (Owner/SME and status `Draft` / `Draft Update`); editing stays a per-record check; the Owner/SME group (4.1) is needed to create One Pagers and manage Use Cases |
+| 4.3 | ~~Real `get_action_states`. Today every action is hard-coded as disabled.~~ **Done (Phase 5):** derived from `TRANSITIONS` guards; actions whose service is not built yet stay disabled ("coming soon"). Approver/Admin roles come from 4.1 |
 | 4.4 | Pages hidden or shown by role (Review for Approvers only, Admin for Admins only, Editor for Owner/SME only). **Partly done:** Review (Phase 6) and Admin (Phase 10) are shown by role; the Editor stays registered for everyone (UI_Design §2) |
-| 4.5 | Role badge next to the user in the sidebar |
+| 4.5 | ~~Role badge next to the user in the sidebar~~ **Done (identity plan Phase 6):** badges Owner/SME, Approver, Admin, or Viewer when there is no other role, under the user's name from the directory |
 
 ## 5. Concurrency control / locking (Req §10, Backend §6)
 
