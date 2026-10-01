@@ -18,6 +18,7 @@ from onepagerapp.models import (
 from onepagerapp.validation import CURRENT_STRUCTURE_DEFINITION
 from onepagerapp.workflow import create_one_pager
 from tests.unit.test_editing_links import fill_all_sections
+from tests.users import CREATOR_ROLES
 
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
 
@@ -114,7 +115,9 @@ def test__submission_issues__lists_missing_sections(
     creator: CurrentUser,
     document_store: OnePagerDocumentStore,
 ) -> None:
-    create_one_pager(valid_input, creator, mock_data_access, document_store)
+    create_one_pager(
+        valid_input, creator, mock_data_access, document_store, roles=CREATOR_ROLES
+    )
     doc = mock_data_access.read_document("OP-0003", "0.1.0")
     doc.version = "garbage"  # operational fields come from the row
 
@@ -132,7 +135,9 @@ def test__submission_issues__complete_document_has_none(
     creator: CurrentUser,
     document_store: OnePagerDocumentStore,
 ) -> None:
-    create_one_pager(valid_input, creator, mock_data_access, document_store)
+    create_one_pager(
+        valid_input, creator, mock_data_access, document_store, roles=CREATOR_ROLES
+    )
     doc = mock_data_access.read_document("OP-0003", "0.1.0")
     fill_all_sections(doc)
     assert submission_issues(doc, _row()) == []

@@ -12,7 +12,7 @@ from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import CurrentUser, NewOnePagerInput, PersonRef
 from onepagerapp.workflow import create_one_pager
 from tests.conftest import FIXTURES_DIR
-from tests.users import make_user
+from tests.users import CREATOR_ROLES, make_user
 
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
 
@@ -47,7 +47,7 @@ def data_access(tmp_path: Path, alice: CurrentUser) -> MockDataAccess:
         alice,
         data_access,
         store,
-        now=datetime(2026, 9, 29, tzinfo=UTC),
+        now=datetime(2026, 9, 29, tzinfo=UTC),roles=CREATOR_ROLES
     )
     return data_access
 

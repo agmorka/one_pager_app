@@ -21,7 +21,7 @@ from onepagerapp.models import (
 )
 from onepagerapp.permissions import PermissionDeniedError
 from onepagerapp.workflow import create_one_pager
-from tests.users import make_user
+from tests.users import CREATOR_ROLES, make_user
 
 NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
 
@@ -89,7 +89,14 @@ def opened(
     mock_data_access: MockDataAccess,
     document_store: OnePagerDocumentStore,
 ) -> OnePagerDocument:
-    create_one_pager(valid_input, creator, mock_data_access, document_store, now=NOW)
+    create_one_pager(
+        valid_input,
+        creator,
+        mock_data_access,
+        document_store,
+        now=NOW,
+        roles=CREATOR_ROLES,
+    )
     doc = open_for_edit(mock_data_access, "OP-0003", creator, "s1", now=NOW).document
     return working_copy(doc)
 
@@ -149,7 +156,9 @@ def test__save__failure_restores_authorized_users(
     document_store: OnePagerDocumentStore,
 ) -> None:
     data_access = _ChangeLogFails(document_store)
-    create_one_pager(valid_input, creator, data_access, document_store, now=NOW)
+    create_one_pager(
+        valid_input, creator, data_access, document_store, now=NOW, roles=CREATOR_ROLES
+    )
     doc = working_copy(
         open_for_edit(data_access, "OP-0003", creator, "s1", now=NOW).document
     )

@@ -19,6 +19,7 @@ from onepagerapp.editing import open_for_edit, save_draft, working_copy
 from onepagerapp.models import NewOnePagerInput, PersonRef
 from onepagerapp.workflow import create_one_pager
 from tests.conftest import FIXTURES_DIR
+from tests.users import CREATOR_ROLES
 
 NOW = datetime(2026, 9, 30, 10, 0, tzinfo=UTC)
 DOMAINS = ["Customer", "Sales"]
@@ -41,7 +42,12 @@ def test__corporate_user_creates_and_edits_own_one_pager(
 
     owner = PersonRef(name="Xenia Wolf", initials="x0w", email="x0w@bec.dk")
     created = create_one_pager(
-        replace(valid_input, owner=owner), user, data_access, store, now=NOW
+        replace(valid_input, owner=owner),
+        user,
+        data_access,
+        store,
+        now=NOW,
+        roles=CREATOR_ROLES,
     )
     assert created.errors == []
     one_pager_id = created.one_pager_id
@@ -90,7 +96,12 @@ def test__directory_name_reaches_the_change_log_and_document(
     owner = PersonRef(name="Agnieszka Kępkowska", initials="X0W", email="a@bec.dk")
 
     created = create_one_pager(
-        replace(valid_input, owner=owner), user, data_access, store, now=NOW
+        replace(valid_input, owner=owner),
+        user,
+        data_access,
+        store,
+        now=NOW,
+        roles=CREATOR_ROLES,
     )
 
     assert created.errors == []

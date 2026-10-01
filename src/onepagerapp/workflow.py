@@ -254,12 +254,14 @@ def _compensate(data_access: DataAccess, one_pager_id: str, user: CurrentUser) -
         )
 
 
-def create_one_pager(
+def create_one_pager(  # noqa: PLR0913 - every argument is part of the action
     data: NewOnePagerInput,
     user: CurrentUser,
     data_access: DataAccess,
     document_store: OnePagerDocumentStore,
     now: datetime | None = None,
+    *,
+    roles: Collection[Actor],
 ) -> CreateResult:
     """Create a new Draft One Pager.
 
@@ -269,6 +271,7 @@ def create_one_pager(
         data_access: Tabular data access (Delta or mock).
         document_store: YAML document store (volume or local folder).
         now: Creation instant (defaults to the current UTC time).
+        roles: The creator's group roles; the Owner/SME group role is needed.
 
     Returns:
         CreateResult with the new ID, or with validation errors (nothing written).
@@ -279,7 +282,7 @@ def create_one_pager(
 
     """
     require_identity(user, "create_one_pager")
-    if not can_create_one_pager(user):
+    if not can_create_one_pager(user, roles):
         log_permission_denied("create_one_pager", user=user.initials if user else None)
         msg = "You are not allowed to create One Pagers."
         raise PermissionDeniedError(msg)

@@ -29,7 +29,7 @@ from onepagerapp.models import (
     PersonRef,
 )
 from onepagerapp.workflow import create_one_pager
-from tests.users import make_user
+from tests.users import CREATOR_ROLES, make_user
 
 TEST_OP_ID = "OP-9990"
 TEST_SEQUENCE = "T9"
@@ -177,7 +177,9 @@ def test__create_one_pager__end_to_end(
         owner=PersonRef("Integration Test", "ITT", "it@bec.dk"),
     )
 
-    result = create_one_pager(data, user, data_access_with_store, store)
+    result = create_one_pager(
+        data, user, data_access_with_store, store, roles=CREATOR_ROLES
+    )
     try:
         assert result.ok, result.errors
         header = data_access_with_store.get_one_pager_status(result.one_pager_id)

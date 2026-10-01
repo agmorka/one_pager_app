@@ -20,7 +20,7 @@ from onepagerapp.models import CurrentUser, NewOnePagerInput, OnePagerDocument
 from onepagerapp.permissions import PermissionDeniedError
 from onepagerapp.validation import validate_strict
 from onepagerapp.workflow import create_one_pager
-from tests.users import make_user
+from tests.users import CREATOR_ROLES, make_user
 
 NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
 
@@ -32,7 +32,14 @@ def doc(
     mock_data_access: MockDataAccess,
     document_store: OnePagerDocumentStore,
 ) -> OnePagerDocument:
-    create_one_pager(valid_input, creator, mock_data_access, document_store, now=NOW)
+    create_one_pager(
+        valid_input,
+        creator,
+        mock_data_access,
+        document_store,
+        now=NOW,
+        roles=CREATOR_ROLES,
+    )
     opened = open_for_edit(mock_data_access, "OP-0003", creator, "s1", now=NOW)
     return working_copy(opened.document)
 

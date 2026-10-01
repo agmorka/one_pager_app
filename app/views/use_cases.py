@@ -31,6 +31,7 @@ from onepagerapp.models import (
     UseCasePage,
 )
 from onepagerapp.permissions import can_manage_use_cases
+from onepagerapp.state_machine import Actor
 from onepagerapp.use_cases import (
     USE_CASE_FIELDS,
     clean_use_case_input,
@@ -89,6 +90,10 @@ def _current_initials() -> str | None:
 
 def _current_user_info() -> CurrentUser | None:
     return st.session_state.get("current_user_info")
+
+
+def _current_roles() -> frozenset[Actor]:
+    return st.session_state.get("current_user_roles", frozenset())
 
 
 def _used_by_label(count: int) -> str:
@@ -172,10 +177,16 @@ def _render_use_case_form(data_access: DataAccess, existing: UseCase | None) -> 
     try:
         with writes_data():
             if existing is None:
-                new_id = create_use_case(data_access, data, _current_user_info())
+                new_id = create_use_case(
+                    data_access, data, _current_user_info(), roles=_current_roles()
+                )
             else:
                 update_use_case(
-                    data_access, existing.use_case_id, data, _current_user_info()
+                    data_access,
+                    existing.use_case_id,
+                    data,
+                    _current_user_info(),
+                    roles=_current_roles(),
                 )
         if existing is None:
             _select_use_case(new_id)
@@ -229,6 +240,7 @@ def _deprecate_dialog(
                     use_case.use_case_id,
                     deprecated=True,
                     user=_current_user_info(),
+                    roles=_current_roles(),
                 )
         except Exception:
             logger.exception("Failed to deprecate use case")
@@ -248,6 +260,7 @@ def _restore(data_access: DataAccess, use_case: UseCase) -> None:
                 use_case.use_case_id,
                 deprecated=False,
                 user=_current_user_info(),
+                roles=_current_roles(),
             )
     except Exception:
         logger.exception("Failed to restore use case")
@@ -403,7 +416,7 @@ except (AttributeError, KeyError):
     st.error("Services are not initialized. Please refresh the page.")
     st.stop()
 
-can_manage = can_manage_use_cases(_current_initials())
+can_manage = can_manage_use_cases(_current_initials(), _current_roles())
 
 title_col, new_col = st.columns([5, 1])
 title_col.title("Use Case Registry")

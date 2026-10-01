@@ -12,7 +12,7 @@ from onepagerapp.models import CurrentUser, NewOnePagerInput
 from onepagerapp.permissions import PermissionDeniedError
 from onepagerapp.state_machine import Actor, InvalidTransitionError
 from onepagerapp.workflow import cancel_one_pager, create_one_pager
-from tests.users import make_user
+from tests.users import CREATOR_ROLES, make_user
 
 NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
 
@@ -24,7 +24,14 @@ def draft(
     mock_data_access: MockDataAccess,
     document_store: OnePagerDocumentStore,
 ) -> str:
-    create_one_pager(valid_input, creator, mock_data_access, document_store, now=NOW)
+    create_one_pager(
+        valid_input,
+        creator,
+        mock_data_access,
+        document_store,
+        now=NOW,
+        roles=CREATOR_ROLES,
+    )
     return "OP-0003"
 
 

@@ -21,6 +21,7 @@ from adapters.edit_mode import render_edit_mode
 from onepagerapp.data_access.connection import user_error_message
 from onepagerapp.models import CurrentUser, NewOnePagerInput, PersonRef, ValidationError
 from onepagerapp.permissions import PermissionDeniedError, can_create_one_pager
+from onepagerapp.state_machine import Actor
 from onepagerapp.validation import (
     DATA_PRODUCT_RULE,
     EMAIL_PATTERN,
@@ -54,6 +55,10 @@ def _get_type_options(_data_access) -> list[str]:  # noqa: ANN001
 # ============================================================================
 # Helpers
 # ============================================================================
+
+
+def _roles() -> frozenset[Actor]:
+    return st.session_state.get("current_user_roles", frozenset())
 
 
 def _prefill_email(user: CurrentUser | None) -> str:
@@ -210,7 +215,9 @@ def _submit(data_access, document_store, user: CurrentUser, smes_df) -> None:  #
     st.session_state[_BANNER_KEY] = None
     try:
         with st.spinner("Creating One Pager..."), writes_data():
-            result = create_one_pager(data, user, data_access, document_store)
+            result = create_one_pager(
+                data, user, data_access, document_store, roles=_roles()
+            )
     except PermissionDeniedError as e:
         st.session_state[_BANNER_KEY] = str(e)
         st.session_state[_ERRORS_KEY] = []
@@ -266,7 +273,7 @@ if st.session_state.get("editor_mode") != "create":
         st.switch_page("views/registry.py")
     st.stop()
 
-if not can_create_one_pager(user):
+if not can_create_one_pager(user, _roles()):
     st.title("New One Pager")
     st.error("You don't have permission to create One Pagers.")
     st.stop()

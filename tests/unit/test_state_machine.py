@@ -28,6 +28,7 @@ from onepagerapp.workflow import (
     create_one_pager,
     plan_transitions,
 )
+from tests.users import CREATOR_ROLES
 
 NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
 OP, DP = "one_pager_status", "data_product_status"
@@ -176,7 +177,14 @@ def draft_row(
     mock_data_access: MockDataAccess,
     document_store: OnePagerDocumentStore,
 ) -> OnePagerStatusRow:
-    create_one_pager(valid_input, creator, mock_data_access, document_store, now=NOW)
+    create_one_pager(
+        valid_input,
+        creator,
+        mock_data_access,
+        document_store,
+        now=NOW,
+        roles=CREATOR_ROLES,
+    )
     return mock_data_access.get_one_pager_status_row("OP-0003")
 
 
@@ -263,7 +271,9 @@ def test__apply_transitions__change_log_failure_rolls_back(
     document_store: OnePagerDocumentStore,
 ) -> None:
     data_access = _ChangeLogFails(document_store)
-    create_one_pager(valid_input, creator, data_access, document_store, now=NOW)
+    create_one_pager(
+        valid_input, creator, data_access, document_store, now=NOW, roles=CREATOR_ROLES
+    )
     row = data_access.get_one_pager_status_row("OP-0003")
 
     with pytest.raises(TransitionError, match="Please retry"):

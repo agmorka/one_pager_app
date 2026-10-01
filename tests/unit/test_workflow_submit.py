@@ -16,7 +16,7 @@ from onepagerapp.models import CurrentUser, NewOnePagerInput
 from onepagerapp.permissions import PermissionDeniedError
 from onepagerapp.workflow import TransitionError, create_one_pager, submit_for_review
 from tests.unit.test_editing_links import fill_all_sections
-from tests.users import make_user
+from tests.users import CREATOR_ROLES, make_user
 
 NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
 LATER = NOW + timedelta(minutes=5)
@@ -31,7 +31,9 @@ def _prepare(
     complete: bool = True,
 ) -> None:
     """Create OP-0003, open it (lock "s1") and save a (complete) version 0.2.0."""
-    create_one_pager(valid_input, user, data_access, store, now=NOW)
+    create_one_pager(
+        valid_input, user, data_access, store, now=NOW, roles=CREATOR_ROLES
+    )
     doc = working_copy(
         open_for_edit(data_access, "OP-0003", user, "s1", now=NOW).document
     )

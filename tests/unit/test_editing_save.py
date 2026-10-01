@@ -19,7 +19,7 @@ from onepagerapp.locking import release_lock
 from onepagerapp.models import CurrentUser, NewOnePagerInput, OnePagerDocument
 from onepagerapp.permissions import PermissionDeniedError
 from onepagerapp.workflow import create_one_pager
-from tests.users import make_user
+from tests.users import CREATOR_ROLES, make_user
 
 NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
 LATER = NOW + timedelta(minutes=5)
@@ -36,7 +36,14 @@ def draft(
     document_store: OnePagerDocumentStore,
 ) -> OnePagerDocument:
     """OP-0003 created by MJO and opened in the editor (lock held by SESSION)."""
-    create_one_pager(valid_input, creator, mock_data_access, document_store, now=NOW)
+    create_one_pager(
+        valid_input,
+        creator,
+        mock_data_access,
+        document_store,
+        now=NOW,
+        roles=CREATOR_ROLES,
+    )
     session = open_for_edit(mock_data_access, "OP-0003", creator, SESSION, now=NOW)
     return working_copy(session.document)
 
@@ -271,7 +278,9 @@ def test__save_draft__change_log_failure_rolls_back_and_retry_works(
     document_store: OnePagerDocumentStore,
 ) -> None:
     data_access = _ChangeLogFails(document_store)
-    create_one_pager(valid_input, creator, data_access, document_store, now=NOW)
+    create_one_pager(
+        valid_input, creator, data_access, document_store, now=NOW, roles=CREATOR_ROLES
+    )
     doc = open_for_edit(data_access, "OP-0003", creator, SESSION, now=NOW).document
 
     with pytest.raises(SaveError, match="changes are preserved"):
@@ -297,7 +306,9 @@ def test__save_draft__status_update_failure_discards_file(
     document_store: OnePagerDocumentStore,
 ) -> None:
     data_access = _StatusUpdateFails(document_store)
-    create_one_pager(valid_input, creator, data_access, document_store, now=NOW)
+    create_one_pager(
+        valid_input, creator, data_access, document_store, now=NOW, roles=CREATOR_ROLES
+    )
     doc = open_for_edit(data_access, "OP-0003", creator, SESSION, now=NOW).document
 
     with pytest.raises(SaveError):

@@ -94,16 +94,16 @@ def can_view_one_pager(current_user: str | None) -> bool:
     return bool(current_user)
 
 
-def can_create_one_pager(user: CurrentUser | None) -> bool:
+def can_create_one_pager(
+    user: CurrentUser | None, roles: Collection[Actor]
+) -> bool:
     """Check if the user may create a new One Pager.
 
-    Backend_Design.md §5: creating requires membership of the Owner/SME UC
-    group. Group names are not decided yet (Architecture.md §4), so v1 allows
-    any authenticated user (New_One_Pager_Plan D7). The Registry uses this to
-    show [+ New] and the service layer calls it again to enforce, so adding the
-    group check later only changes this function.
+    Backend_Design.md §5: creating requires membership of the Owner/SME group
+    (``Actor.OWNER_SME_GROUP``, from ``auth.resolve_roles``). The Registry uses
+    this to show [+ New] and the service layer calls it again to enforce.
     """
-    return bool(user and user.username and user.initials)
+    return bool(user and user.initials) and Actor.OWNER_SME_GROUP in roles
 
 
 def is_owner_or_sme(
@@ -181,25 +181,25 @@ def can_release_lock(user: CurrentUser | None, lock: LockInfo | None) -> bool:
     return bool(user and lock and lock.locked_by_initials == user.initials)
 
 
-def can_manage_use_cases(user_initials: str | None) -> bool:
+def can_manage_use_cases(user_initials: str | None, roles: Collection[Actor]) -> bool:
     """Check if the current user can create, edit, deprecate or restore Use Cases.
 
     Per Backend_Design.md §5/§9 only Owner/SME group members may manage the
     shared Use Case registry; everyone else has read-only access.
 
-    v1 stub: group resolution (auth.py) does not exist yet, so every
-    authenticated user is allowed (see Decision_Log.md). All write actions on
-    the Use Cases page go through this function, so switching to the real
-    group check is a change here only.
+    The page uses this to show the write actions, and the Use Case write
+    services (``use_cases.py``) call it again to enforce.
 
     Args:
         user_initials: Initials of the signed-in user, or None when nobody is
             signed in or the username is not recognised (``auth.py``).
+        roles: The user's group roles (``auth.resolve_roles``); the Owner/SME
+            group role is required.
 
     Returns:
         True if the user may manage Use Cases.
     """
-    return bool(user_initials)
+    return bool(user_initials) and Actor.OWNER_SME_GROUP in roles
 
 
 # ============================================================================
