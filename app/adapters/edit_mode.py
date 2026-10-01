@@ -32,6 +32,7 @@ from adapters.edit_tabs import (
 from adapters.session import current_session_id
 from adapters.workflow_actions import resolve_comment_and_report
 from onepagerapp.data_access.base import DataAccess, NotFoundError
+from onepagerapp.data_access.connection import user_error_message
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.editing import (
     MAX_SUMMARY_LENGTH,
@@ -541,9 +542,9 @@ def _open(data_access: DataAccess, one_pager_id: str, user: CurrentUser) -> None
     except PermissionDeniedError as e:
         st.error(str(e))
         _stop_with_preview_link(one_pager_id)
-    except Exception:  # DocumentMissingError or storage failure
+    except Exception as e:  # DocumentMissingError or storage failure
         logger.exception(f"Failed to open {one_pager_id} for editing")
-        st.error(LOAD_ERROR_MESSAGE, icon="⚠️")
+        st.error(user_error_message(e, LOAD_ERROR_MESSAGE), icon="⚠️")
         if st.button("Retry", key="edit_retry_open"):
             st.rerun()
         st.stop()

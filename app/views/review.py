@@ -15,6 +15,7 @@ import streamlit as st
 
 from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.base import DataAccess
+from onepagerapp.data_access.connection import user_error_message
 from onepagerapp.models import CurrentUser, OnePagerStatusRow
 from onepagerapp.permissions import PermissionDeniedError
 from onepagerapp.review import get_review_queue
@@ -98,10 +99,10 @@ except PermissionDeniedError as e:
     st.title("Review Queue")
     st.info(str(e))
     st.stop()
-except Exception:
+except Exception as e:
     logger.exception("Failed to load the review queue")
     st.title("Review Queue")
-    st.error(LOAD_ERROR_MESSAGE, icon="⚠️")
+    st.error(user_error_message(e, LOAD_ERROR_MESSAGE), icon="⚠️")
     if st.button("Retry", key="review_retry"):
         st.rerun()
     st.stop()

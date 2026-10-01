@@ -26,6 +26,7 @@ import streamlit as st
 
 from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.base import DataAccess
+from onepagerapp.data_access.connection import user_error_message
 from onepagerapp.export import (
     BUSINESS_CONCEPT_COLUMNS,
     CDE_LINEAGE_COLUMNS,
@@ -887,9 +888,11 @@ st.query_params["one_pager_id"] = one_pager_id
 try:
     with st.spinner("Loading One Pager..."):
         preview_data = data_access.get_one_pager(one_pager_id)
-except Exception:
+except Exception as e:
     logger.exception(f"Failed to load One Pager {one_pager_id}")
-    render_error_state(LOAD_ERROR_MESSAGE, key="preview_retry_load")
+    render_error_state(
+        user_error_message(e, LOAD_ERROR_MESSAGE), key="preview_retry_load"
+    )
 
 # Not found state
 if not preview_data:
@@ -901,9 +904,11 @@ if not preview_data:
 try:
     op_colors = get_op_status_colors(data_access)
     dp_colors = get_dp_status_colors(data_access)
-except Exception:
+except Exception as e:
     logger.exception("Failed to load status colors")
-    render_error_state(LOAD_ERROR_MESSAGE, key="preview_retry_colors")
+    render_error_state(
+        user_error_message(e, LOAD_ERROR_MESSAGE), key="preview_retry_colors"
+    )
 
 # One-time confirmation after a redirect (e.g. "One Pager OP-0003 created").
 flash = st.session_state.pop("preview_flash", None)

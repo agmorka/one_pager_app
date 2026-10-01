@@ -188,6 +188,13 @@ Record every answer in [Decision_Log.md](../docs/Decision_Log.md).
 
 **Done when:** in DEV, a user who belongs only to the Viewer group can browse everything; an Owner can save; and `DESCRIBE HISTORY` on `one_pager_status` shows the service principal while `last_updated_by` shows the user's initials.
 
+**Status (2026-10-01): implemented in code; the DEV check above is still to be done.** Notes on the implementation:
+
+- Step 1 first ran every statement as `USER` (behaviour unchanged except the missing-token fallback); step 2 then routed the writes to `APP` through `_read` / `_write`.
+- The existing-lock check and the conditional-update checks are part of the guarded write statements themselves (`MERGE ... WHEN MATCHED AND`, `UPDATE ... WHERE version = :expected_version`), so they run as `APP` with the write. The only separate read that is part of a write is `get_sequence_value`.
+- Permission errors are recognised from the Unity Catalog message (`INSUFFICIENT_PERMISSIONS`, `PERMISSION_DENIED`, "does not have … on …") or the SDK's `PermissionDenied` (not retried). Reads raise `ReadAccessDeniedError` (message for the user, naming the object when reported); writes raise `WriteAccessDeniedError` (generic message, details logged). The pages show the read message in their load-error banners.
+- Service-layer reads before a write (e.g. reading the status row before a save, or the lock before acquiring it) run as the user, like any read; a user without `SELECT` therefore cannot start the write, which is the intended order of checks.
+
 ## 9. Phase 5 — First Name and Surname from the Directory
 
 **Goal:** show "Agnieszka Kępkowska" instead of "X0wadm". Needs Q5 and Q6.

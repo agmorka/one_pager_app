@@ -21,6 +21,7 @@ import streamlit as st
 from adapters.cache import get_use_cases, writes_data
 
 from onepagerapp.data_access.base import DataAccess, NotFoundError
+from onepagerapp.data_access.connection import user_error_message
 from onepagerapp.models import (
     PRIORITY_OPTIONS,
     CurrentUser,
@@ -349,9 +350,11 @@ def _render_details(
         references = (
             data_access.get_use_case_references(use_case_id) if use_case else []
         )
-    except Exception:
+    except Exception as e:
         logger.exception("Failed to load use case details")
-        st.error("Unable to load the details of this Use Case.")
+        st.error(
+            user_error_message(e, "Unable to load the details of this Use Case.")
+        )
         return
     if use_case is None:
         _select_use_case(None)
@@ -443,11 +446,15 @@ try:
                 data_access,
                 current_filter, st.session_state[_PAGE_KEY], ROWS_PER_PAGE
             )
-except Exception:
+except Exception as e:
     logger.exception("Failed to fetch use cases")
     st.error(
-        "**Unable to load Use Cases.** Please try again. If the problem persists, "
-        "check that the `use_cases` and `use_case_references` tables are deployed."
+        user_error_message(
+            e,
+            "**Unable to load Use Cases.** Please try again. If the problem "
+            "persists, check that the `use_cases` and `use_case_references` "
+            "tables are deployed.",
+        )
     )
     if st.button("Retry", key="uc_retry"):
         st.rerun()

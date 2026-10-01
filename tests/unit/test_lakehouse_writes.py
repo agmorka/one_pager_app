@@ -9,7 +9,7 @@ import pytest
 
 from onepagerapp.config import AppConfig, AppMode
 from onepagerapp.data_access.base import DataAccess
-from onepagerapp.data_access.connection import StatementFailedError
+from onepagerapp.data_access.connection import Identity, StatementFailedError
 from onepagerapp.data_access.lakehouse import LakehouseAccess
 from onepagerapp.models import (
     AuthorizedUser,
@@ -40,13 +40,19 @@ class _FakeConnection:
         error: Exception | None = None,
     ) -> None:
         self.calls: list[tuple[str, dict]] = []
+        self.identities: list[Identity] = []
         self.responses = list(responses or [])
         self.error = error
 
     def execute_statement(
-        self, statement: str, parameters: dict[str, Any] | None = None
+        self,
+        statement: str,
+        parameters: dict[str, Any] | None = None,
+        *,
+        identity: Identity,
     ) -> SimpleNamespace:
         self.calls.append((statement, dict(parameters or {})))
+        self.identities.append(identity)
         if self.error:
             raise self.error
         return self.responses.pop(0) if self.responses else _response([], [])
@@ -614,9 +620,14 @@ class _ActorConnection(_FakeConnection):
     """Answers every statement: sequence reads with 4, writes with 1 row."""
 
     def execute_statement(
-        self, statement: str, parameters: dict[str, Any] | None = None
+        self,
+        statement: str,
+        parameters: dict[str, Any] | None = None,
+        *,
+        identity: Identity,
     ) -> SimpleNamespace:
         self.calls.append((statement, dict(parameters or {})))
+        self.identities.append(identity)
         if statement.startswith("SELECT last_value"):
             return _response(["last_value"], [["4"]])
         return _response(["num_affected_rows"], [["1"]])
@@ -757,6 +768,9 @@ def test__write__binds_the_actor(method: str) -> None:
 
     writes = _write_statements(conn)
     assert writes, f"{method} sent no write statement"
+    # Writes, and the ID-sequence read that is part of a write, run as the
+    # service principal (identity plan Phase 4).
+    assert set(conn.identities) == {Identity.APP}, f"{method} ran as the user"
     for statement, params in writes:
         assert ACTOR in params.values(), f"{method}: actor not bound in {statement}"
         assert ACTOR not in statement, f"{method}: actor interpolated into SQL"

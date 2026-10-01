@@ -18,6 +18,7 @@ import streamlit as st
 from adapters.cache import writes_data
 from adapters.edit_mode import render_edit_mode
 
+from onepagerapp.data_access.connection import user_error_message
 from onepagerapp.models import CurrentUser, NewOnePagerInput, PersonRef, ValidationError
 from onepagerapp.permissions import PermissionDeniedError, can_create_one_pager
 from onepagerapp.validation import (
@@ -267,9 +268,9 @@ _init_form_state(user)
 try:
     domain_options = _get_domain_options(data_access)
     type_options = _get_type_options(data_access)
-except Exception:
+except Exception as e:
     logger.exception("Failed to load reference data for the editor")
-    st.error("Couldn't load the reference data. Please retry.")
+    st.error(user_error_message(e, "Couldn't load the reference data. Please retry."))
     if st.button("Retry"):
         st.cache_data.clear()
         st.rerun()

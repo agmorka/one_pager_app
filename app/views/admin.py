@@ -44,6 +44,7 @@ from onepagerapp.admin import (
 )
 from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.base import DataAccess
+from onepagerapp.data_access.connection import user_error_message
 from onepagerapp.models import CurrentUser
 from onepagerapp.permissions import PermissionDeniedError
 from onepagerapp.state_machine import Actor
@@ -83,8 +84,8 @@ def apply_change(change: Callable[[], None], success: str) -> str | None:
     return None
 
 
-def render_load_error(key: str) -> None:
-    st.error(LOAD_ERROR_MESSAGE, icon="⚠️")
+def render_load_error(key: str, error: Exception) -> None:
+    st.error(user_error_message(error, LOAD_ERROR_MESSAGE), icon="⚠️")
     if st.button("Retry", key=key):
         st.rerun()
 
@@ -99,9 +100,9 @@ def render_reference_section(
     st.subheader(kind.title)
     try:
         values = get_reference_values(data_access, kind.table, user, roles)
-    except Exception:
+    except Exception as e:
         logger.exception(f"Failed to load {kind.table}")
-        render_load_error(f"admin_retry_{kind.table}")
+        render_load_error(f"admin_retry_{kind.table}", e)
         return
 
     if values:
@@ -252,9 +253,9 @@ def render_status_section(
     )
     try:
         rows = get_status_definitions(data_access, table, user, roles)
-    except Exception:
+    except Exception as e:
         logger.exception(f"Failed to load {table}")
-        render_load_error(f"admin_retry_{table}")
+        render_load_error(f"admin_retry_{table}", e)
         return
 
     for row in rows:
@@ -330,9 +331,9 @@ def render_pending_prs_section(
     )
     try:
         rows = get_pending_prs(data_access, user, roles)
-    except Exception:
+    except Exception as e:
         logger.exception("Failed to load the pending PRs")
-        render_load_error("admin_retry_pending_prs")
+        render_load_error("admin_retry_pending_prs", e)
         return
     st.info(RETRY_PR_UNAVAILABLE, icon="ℹ️")
     if not rows:

@@ -9,6 +9,7 @@ import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
+from onepagerapp.data_access.connection import ReadAccessDeniedError
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import CurrentUser, LockInfo
@@ -31,6 +32,12 @@ def switched(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     monkeypatch.setattr(st, "switch_page", targets.append)
     monkeypatch.syspath_prepend(str(APP_DIR))
     return targets
+
+
+class _DeniedDataAccess(MockDataAccess):
+    def get_one_pager(self, one_pager_id: str) -> NoReturn:  # noqa: ARG002
+        msg = "Your role does not have access to table cat.sch.one_pager_status."
+        raise ReadAccessDeniedError(msg)
 
 
 def _services(tmp_path: Path, data_access_cls: type = MockDataAccess) -> dict:
@@ -386,3 +393,18 @@ def test__preview__viewers_cannot_resolve(
     assert not at.exception
     assert not [b for b in at.button if str(b.key).startswith("preview_resolve_")]
     assert any("Unresolved" in i.value for i in at.info)
+
+
+@pytest.mark.unit
+def test__preview__read_refused_by_unity_catalog_says_so(
+    tmp_path: Path, switched: list[str]
+) -> None:
+    state = _services(tmp_path, _DeniedDataAccess)
+    state["preview_one_pager_id"] = "OP-0001"
+
+    at = _app(state).run()
+
+    assert not at.exception
+    assert at.error[0].value == (
+        "Your role does not have access to table cat.sch.one_pager_status."
+    )

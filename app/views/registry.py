@@ -28,6 +28,7 @@ from adapters.theme import (
     get_op_status_colors,
 )
 from onepagerapp.data_access.base import DataAccess
+from onepagerapp.data_access.connection import ReadAccessDeniedError
 from onepagerapp.locking import get_active_locks
 from onepagerapp.models import (
     LockInfo,
@@ -550,6 +551,9 @@ try:
     data_access = st.session_state.data_access
     op_status_colors = _get_cached_op_status_colors(data_access)
     dp_status_colors = _get_cached_dp_status_colors(data_access)
+except ReadAccessDeniedError as e:
+    st.error(str(e))
+    st.stop()
 except RuntimeError as e:
     logger.exception("Failed to load reference data")
     st.error(
@@ -676,6 +680,9 @@ try:
         _render_page_state_empty_no_filters()
     elif has_active_filter and registry_page.total_rows == 0:
         _render_page_state_empty_with_filters()
+
+except ReadAccessDeniedError as e:
+    st.error(str(e))
 
 except RuntimeError as e:
     logger.exception("Failed to fetch registry data")
