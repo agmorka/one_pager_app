@@ -50,7 +50,9 @@ Usernames look like `x0wadm@becoc001.onmicrosoft.com`. The app derives the user'
 | `ONE_PAGER_APP_MOCK_USER` | `lduadm@becoc001.onmicrosoft.com` | Signed-in user in `local-mock` mode. |
 | `ONE_PAGER_APP_MOCK_USER_NAME` | `Local Dev User` | Name shown for the `local-mock` user (the other modes read the name from the workspace directory). |
 
-A username that does not match these settings gets no initials and cannot edit or manage anything.
+A username that does not match these settings gets no initials: the app shows an "Access denied" page instead of the app, and logs the refusal. Deployed, the username comes only from the Databricks Apps proxy headers.
+
+The name shown in the app (sidebar, change log, YAML, comments, PDF) is read once per session from the workspace directory (SCIM `Me`); when it is not available, the initials are shown.
 
 Roles come from group membership, checked once per session (see [docs/Architecture.md](docs/Architecture.md) §4). Every signed-in user is a Viewer. `{env}` in a group name is replaced with the environment (`DEV`, `INT`, `TST`, `UAT`, `PRD`):
 
@@ -63,6 +65,26 @@ Roles come from group membership, checked once per session (see [docs/Architectu
 The defaults are the interim Data Platform Engineering group until the dedicated role groups exist; switching is a configuration change only.
 
 In `local-mock` mode the memberships come from `ONE_PAGER_APP_MOCK_GROUPS` (comma-separated group names, `{env}` allowed). The default is the interim group, so the mock user has every role; set it to an empty value to try the app as a Viewer, or to one group to try one role.
+
+**Data access.** Deployed, Delta reads run as the signed-in user (their groups' Unity Catalog grants apply) and all writes run as the app's service principal; the app records the user's initials on every write (see [docs/Architecture.md](docs/Architecture.md) §8). The app needs the user API scopes `sql` and `iam.current-user:read`. In `local-integration` both use your Databricks CLI profile.
+
+### All Settings
+
+Every setting is an environment variable read by `AppConfig` ([src/onepagerapp/config.py](src/onepagerapp/config.py)). Deployed, they come from [app/app.yml](app/app.yml).
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `APP_MODE` | `databricks` | `local-mock`, `local-integration` or `databricks` (see App Modes). |
+| `ONE_PAGER_APP_VOLUME_PATH` | — (required) | Folder of the One Pager YAML files: the registry volume (`/Volumes/<catalog>/onepager_app/one_pager_registry`) or, in `local-mock`, a local folder such as `tests/fixtures/sample_one_pagers`. |
+| `ONE_PAGER_APP_DATABRICKS_CATALOG` | `dev_bia_meta` | Catalog of the app tables. |
+| `ONE_PAGER_APP_DATABRICKS_SCHEMA` | `onepager_app` | Schema of the app tables. |
+| `DATABRICKS_WAREHOUSE_ID` | — | SQL warehouse for the Delta tables (any value in `local-mock`). |
+| `ONE_PAGER_APP_ENVIRONMENT` | derived | `DEV`, `INT`, `TST`, `UAT` or `PRD`, for the sidebar badge and `{env}` in group names. When empty: the catalog prefix of the registry volume, else of the catalog setting, else `DEV`. |
+| `ONE_PAGER_APP_LOCK_TTL_SECONDS` | `1800` | How long an edit lock lives after the editor's last activity. |
+| `ONE_PAGER_APP_USER_DOMAINS`, `ONE_PAGER_APP_USERNAME_SUFFIXES`, `ONE_PAGER_APP_INITIALS_PATTERN` | see User Identity | Username format. |
+| `ONE_PAGER_APP_MOCK_USER`, `ONE_PAGER_APP_MOCK_USER_NAME`, `ONE_PAGER_APP_MOCK_GROUPS` | see User Identity | The `local-mock` user, its name and groups. |
+| `ONE_PAGER_APP_GROUP_OWNER_SME`, `ONE_PAGER_APP_GROUP_APPROVER`, `ONE_PAGER_APP_GROUP_ADMIN` | see User Identity | Role groups. |
+| `CLOUD_ROLE_NAME` | `OnePagerApp` | Service name in logs and telemetry. |
 
 ### Option 1: Run with Databricks Apps (recommended)
 

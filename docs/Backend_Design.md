@@ -132,15 +132,15 @@ Errors are returned as a structured list of `ValidationError(field_path, message
 
 ## 5. Permission Enforcement
 
-Implemented in `onepager_core/permissions.py`. Every service-layer method that modifies data checks permissions before proceeding.
+Implemented in `onepagerapp/permissions.py` (with `auth.py` for identity and roles). Every service-layer method that modifies data checks permissions before proceeding.
 
 ### Permission model
 
 | Check | How it works |
 |---|---|
 | **Is the user authenticated and recognised?** | The username comes from the Databricks Apps proxy headers. `auth.py` derives the corporate initials using the configured domains, suffixes and initials pattern (Architecture §4). No username, or a username that does not match → no initials → access refused before any page runs. Every service method also refuses a user without initials. |
-| **Coarse role** (Owner/SME, Approver, Admin, Viewer) | Once per session, one SQL statement run **as the user** checks the configured role groups: `is_account_group_member(:g) OR is_member(:g)` for `ONE_PAGER_APP_GROUP_OWNER_SME`, `…_APPROVER`, `…_ADMIN` (interim default for all three: `BEC_BECOC001_LHX_{env}_DataPlatEng`). Stored in the session; no group → Viewer; a failed check → Viewer (fail closed). |
-| **Per-Data-Product ownership** | Extract user's initials from their Databricks identity (via `auth.py`). Query `one_pager_authorized_users` for the target One Pager to check if the user has an `owner` or `sme` role. This table is kept in sync with the One Pager YAML content and provides O(1) permission verification. |
+| **Coarse role** (Owner/SME group, Approver, Admin, Viewer) | Once per session, one SQL statement run **as the user** checks the configured role groups: `is_account_group_member(:g) OR is_member(:g)` for `ONE_PAGER_APP_GROUP_OWNER_SME`, `…_APPROVER`, `…_ADMIN` (interim default for all three: `BEC_BECOC001_LHX_{env}_DataPlatEng`). `auth.resolve_roles` maps them to `Actor.OWNER_SME_GROUP`, `Actor.APPROVER` and `Actor.ADMIN`; stored in the session; no group → Viewer; a failed check → Viewer (fail closed). Services that need a role take the session's `roles`. |
+| **Per-Data-Product ownership** | The user's corporate initials (`CurrentUser.initials`, resolved once per session) are looked up in `one_pager_authorized_users` for the target One Pager: `owner` or `sme` (`Actor.OWNER_SME`). This table is kept in sync with the One Pager YAML content and provides O(1) permission verification. |
 
 ### Data access identity
 
@@ -154,38 +154,38 @@ A permission error on a **read** means the user's groups lack a grant: the user 
 |---|---|---|
 | View any One Pager | Any authenticated user | None |
 | Create new One Pager | Owner/SME group member | None (document doesn't exist yet) |
-| Edit One Pager (save content) | Owner/SME group member | User initials ∈ {owner, smes} of this DP |
-| Submit for review | Owner/SME group member | User initials ∈ {owner, smes} of this DP |
+| Edit One Pager (save content) | — | User initials ∈ {owner, smes} of this DP, and status Draft / Draft Update |
+| Submit for review | — | User initials ∈ {owner, smes} of this DP |
 | Approve / Reject | Approver group member | User initials ∉ {owner, smes} of this DP (segregation of duties — cannot approve/reject own OP) |
 | Cancel (OP in Draft/Ready for Review/In Review) | Owner/SME of this DP **or** Admin | Owner: initials check; Admin: group check |
-| Change DP status (owner-initiated transitions) | Owner/SME group member | User initials ∈ {owner, smes} of this DP |
-| Manage Use Cases (create/edit) | Owner/SME group member | None (Use Cases are shared, any Owner/SME can manage) |
+| Change DP status (owner-initiated transitions) | — | User initials ∈ {owner, smes} of this DP |
+| Manage Use Cases (create/edit/deprecate/restore) | Owner/SME group member | None (Use Cases are shared, any Owner/SME group member can manage) |
 | Admin actions (manage reference data, cancel any) | Admin group member | None |
 
-"Group" means the Entra ID role group configured for the role (Architecture §4). Role membership is managed in Entra ID, not in the app.
+"Group" means the Entra ID role group configured for the role (Architecture §4). Role membership is managed in Entra ID, not in the app. The Owner/SME **group** is only needed to create One Pagers and manage Use Cases; working on an existing One Pager depends only on being listed as its Owner or SME, so a business Owner or SME listed on a One Pager can edit it without being in the group. Every service entry point first refuses a user without initials (`permissions.require_identity`).
 
 ### Enforcement pattern
 
 ```python
-# onepager_core/permissions.py (conceptual)
+# onepagerapp/workflow.py (simplified)
 
-class PermissionService:
-    def check_can_edit(self, user: AuthenticatedUser, one_pager_id: str) -> None:
-        """Raises PermissionDeniedError if the user cannot edit this One Pager."""
-        if not self.is_owner_sme_group_member(user):
-            raise PermissionDeniedError("User is not in the Owner/SME group.")
-        
-        # Fast lookup in one_pager_authorized_users table
-        user_initials = user.initials  # resolved once per session (auth.py)
-        authorized_user = self.authorized_users_repo.get(
-            one_pager_id=one_pager_id, 
-            user_initials=user_initials
-        )
-        if not authorized_user or authorized_user.role not in ["owner", "sme"]:
-            raise PermissionDeniedError("User is not listed as Owner or SME for this Data Product.")
+def create_one_pager(data, user, data_access, document_store, now=None, *, roles):
+    require_identity(user, "create_one_pager")          # recognised user
+    if not can_create_one_pager(user, roles):           # Owner/SME group role
+        log_permission_denied("create_one_pager", user=user.initials)
+        raise PermissionDeniedError("You are not allowed to create One Pagers.")
+    ...
+
+# onepagerapp/editing.py (simplified)
+
+def save_draft(data_access, ..., one_pager_id, ..., user, ...):
+    require_identity(user, "save_draft", one_pager_id)
+    authorized = data_access.get_authorized_users(one_pager_id)
+    check_can_edit(user, one_pager_id, row.one_pager_status, authorized)  # per record
+    ...
 ```
 
-Every workflow transition's `check_permission` call delegates to `PermissionService`. The UI may also call `PermissionService` to hide/disable buttons proactively, but **hiding a button is never the sole enforcement** — the service layer always re-checks.
+The pages call the same functions (`can_create_one_pager`, `get_action_states`, …) to hide or disable buttons, but **hiding a button is never the sole enforcement** — the service layer always re-checks.
 
 ## 6. Locking
 
