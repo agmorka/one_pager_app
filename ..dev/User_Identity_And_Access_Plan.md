@@ -210,6 +210,14 @@ Record every answer in [Decision_Log.md](../docs/Decision_Log.md).
 
 **Done when:** in DEV the sidebar and a new change log entry show your real name.
 
+**Status (2026-10-01): implemented in code; the DEV check above is still to be done.** Notes on the implementation:
+
+- `directory.get_me` uses the SDK's `current_user.me()`, which calls `GET /api/2.0/preview/scim/v2/Me`. `lookup_directory_user` picks the token by mode: the forwarded user token when deployed (no lookup without it; never the service principal, which would return the app's own entry), the CLI profile in `local-integration`, and `ONE_PAGER_APP_MOCK_USER_NAME` (no call) in `local-mock`.
+- The directory entry is kept in `st.session_state.current_user_directory`; its `groups` are for Phase 6.
+- The sidebar showed the raw username; it now shows "Name (INITIALS)".
+- `CurrentUser` has a new optional `email` (primary directory email), used to pre-fill the Owner email on create.
+- Step 8 (`ref_users` table) is not needed unless the DEV check shows that the names are empty (Q6 was "probably yes"). If they are, the app keeps working and shows the initials.
+
 ## 10. Phase 6 — Roles from Groups
 
 **Goal:** replace the interim initials lists with group membership (Not_Implemented_Features.md 4.1). Decided in §4.1: Entra ID groups through automatic identity management, `BEC_BECOC001_LHX_<ENV>_DataPlatEng` as the interim group for every role, all employees are Viewers.
