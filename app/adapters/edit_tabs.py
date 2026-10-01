@@ -23,6 +23,7 @@ from adapters.repeating import (
     render_string_items,
 )
 from onepagerapp.data_access.base import DataAccess
+from onepagerapp.data_access.connection import user_error_message
 from onepagerapp.editing import assign_requirement_id, link_denied_reason
 from onepagerapp.models import (
     PRIORITY_OPTIONS,
@@ -128,9 +129,12 @@ def _render_linked_use_cases(doc: OnePagerDocument, data_access: DataAccess) -> 
 def _render_link_existing(doc: OnePagerDocument, data_access: DataAccess) -> None:
     try:
         options = _linkable_use_cases(data_access, doc.use_case_ids)
-    except Exception:
+    except Exception as e:
         logger.exception("Failed to load Use Cases")
-        st.error("Couldn't load the Use Cases. Please retry.", icon="⚠️")
+        st.error(
+            user_error_message(e, "Couldn't load the Use Cases. Please retry."),
+            icon="⚠️",
+        )
         return
     if not options:
         st.caption("Every active Use Case is already linked.")

@@ -18,6 +18,7 @@ import streamlit as st
 
 from adapters.theme import status_badge
 from onepagerapp.data_access.base import DataAccess
+from onepagerapp.data_access.connection import user_error_message
 from onepagerapp.help_content import (
     LIFECYCLE_INTRO,
     QUICK_REFERENCE,
@@ -46,9 +47,9 @@ def load_legends(data_access: DataAccess) -> tuple[list[BadgeInfo], list[BadgeIn
             op_legend(data_access.get_ref_op_status()),
             dp_legend(data_access.get_ref_dp_status()),
         )
-    except Exception:
+    except Exception as e:
         logger.exception("Failed to load the status reference tables")
-        st.warning(COLORS_ERROR_MESSAGE, icon="⚠️")
+        st.warning(user_error_message(e, COLORS_ERROR_MESSAGE), icon="⚠️")
         if st.button("Retry", key="help_retry"):
             st.rerun()
         return op_legend(pd.DataFrame()), dp_legend(pd.DataFrame())

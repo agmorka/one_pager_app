@@ -1,12 +1,14 @@
 """Databricks connection and SQL execution layer."""
 
 import logging
+import re
 import time
 from collections.abc import Mapping
 from datetime import date, datetime
 from enum import Enum
 
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.errors import PermissionDenied
 from databricks.sdk.service.sql import (
     StatementParameterListItem,
     StatementResponse,
@@ -46,6 +48,88 @@ class Identity(str, Enum):
 
 class StatementFailedError(RuntimeError):
     """The SQL warehouse accepted a statement but reported it as failed."""
+
+
+class AccessDeniedError(StatementFailedError):
+    """Unity Catalog or the warehouse refused a statement (missing grant)."""
+
+
+READ_ACCESS_DENIED_MESSAGE = (
+    "Your role does not have access to {target}. Contact the platform team."
+)
+WRITE_ACCESS_DENIED_MESSAGE = (
+    "The One Pager App could not save the change because of a configuration "
+    "problem. Contact the platform team."
+)
+
+
+class ReadAccessDeniedError(AccessDeniedError):
+    """A read as the user was refused: their groups lack a grant.
+
+    The message is meant for the user (``READ_ACCESS_DENIED_MESSAGE``).
+    """
+
+
+class WriteAccessDeniedError(AccessDeniedError):
+    """A write as the service principal was refused: a deployment error.
+
+    The details are logged; the message is generic
+    (``WRITE_ACCESS_DENIED_MESSAGE``).
+    """
+
+
+# Unity Catalog / SQL warehouse wording for a missing privilege, e.g.
+# "[INSUFFICIENT_PERMISSIONS] Insufficient privileges: User does not have
+# SELECT on Table 'cat.sch.t'." or "PERMISSION_DENIED: ...".
+_PERMISSION_ERROR = re.compile(
+    r"INSUFFICIENT_PERMISSIONS|PERMISSION_DENIED|insufficient privileges"
+    r"|does not have \w+(?: \w+)? (?:privilege )?on",
+    re.IGNORECASE,
+)
+_DENIED_OBJECT = re.compile(
+    r"\bon (table|view|schema|catalog|volume|function)\s+[`'\"]?([\w.`-]+)",
+    re.IGNORECASE,
+)
+
+
+def is_permission_error(message: str) -> bool:
+    """Whether a statement error message means a missing privilege."""
+    return bool(_PERMISSION_ERROR.search(message))
+
+
+def access_denied_error(identity: "Identity", detail: str) -> AccessDeniedError:
+    """Return the error to raise for a permission failure of a statement.
+
+    A read as the user gets a message for the user, naming the object when
+    the warehouse reports it. A write (or any statement as the service
+    principal) is a deployment error: logged with the details, generic for
+    the user.
+    """
+    if identity is Identity.APP:
+        logger.error(
+            "The app's service principal is missing a privilege (deployment error): %s",
+            detail,
+        )
+        return WriteAccessDeniedError(WRITE_ACCESS_DENIED_MESSAGE)
+    match = _DENIED_OBJECT.search(detail)
+    target = (
+        f"{match.group(1).lower()} {match.group(2).replace('`', '')}"
+        if match
+        else "this data"
+    )
+    logger.warning("Read refused by Unity Catalog for the user: %s", detail)
+    return ReadAccessDeniedError(READ_ACCESS_DENIED_MESSAGE.format(target=target))
+
+
+def user_error_message(error: BaseException, default: str) -> str:
+    """Return the message for a failed read: the access message, else ``default``.
+
+    Pages never show exception text; a ``ReadAccessDeniedError`` is the one
+    exception, because its message is written for the user.
+    """
+    if isinstance(error, ReadAccessDeniedError):
+        return str(error)
+    return default
 
 
 class MissingUserTokenError(RuntimeError):
@@ -178,6 +262,10 @@ class DatabricksConnection:
         Raises:
             StatementFailedError: If the warehouse reports the statement as
                 failed, canceled, or closed.
+            ReadAccessDeniedError: A read as the user lacks a grant (the
+                message is meant for the user).
+            WriteAccessDeniedError: The service principal lacks a grant
+                (logged; generic message).
             MissingUserTokenError: ``USER`` in deployed mode without a token.
             RuntimeError: If all retry attempts fail.
         """
@@ -193,6 +281,9 @@ class DatabricksConnection:
                     wait_timeout=_STATEMENT_WAIT_TIMEOUT,
                     parameters=bound,
                 )
+            except PermissionDenied as exc:
+                # A missing grant (e.g. CAN_USE on the warehouse) is not retried.
+                raise access_denied_error(identity, str(exc)) from exc
             except Exception as exc:
                 last_err = exc
                 if attempt == _MAX_RETRIES:
@@ -205,7 +296,12 @@ class DatabricksConnection:
                 )
                 time.sleep(_RETRY_DELAY_SECONDS)
             else:
-                _raise_if_failed(response)
+                try:
+                    _raise_if_failed(response)
+                except StatementFailedError as exc:
+                    if is_permission_error(str(exc)):
+                        raise access_denied_error(identity, str(exc)) from exc
+                    raise
                 return response
         msg = "All connection attempts failed"
         raise RuntimeError(msg) from last_err
