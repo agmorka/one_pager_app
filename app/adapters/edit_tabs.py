@@ -36,6 +36,7 @@ from onepagerapp.permissions import can_manage_use_cases
 from onepagerapp.use_cases import (
     USE_CASE_FIELDS,
     clean_use_case_input,
+    create_use_case,
     validate_use_case_input,
 )
 from onepagerapp.validation import MAX_NAME_LENGTH, MAX_TEXT_LENGTH
@@ -159,7 +160,7 @@ def _render_link_existing(doc: OnePagerDocument, data_access: DataAccess) -> Non
 
 def _render_create_use_case(doc: OnePagerDocument, data_access: DataAccess) -> None:
     user = _current_user()
-    if user is None or not can_manage_use_cases(user.username):
+    if user is None or not can_manage_use_cases(user.initials):
         return
     with st.expander("➕ Create a new Use Case"):  # noqa: RUF001
         for name, (label, max_length) in USE_CASE_FIELDS.items():
@@ -196,7 +197,7 @@ def _create_use_case(
         st.rerun()
     try:
         with writes_data():
-            use_case_id = data_access.create_use_case(data, user.initials)
+            use_case_id = create_use_case(data_access, data, user)
     except Exception:
         logger.exception("Failed to create a Use Case from the editor")
         st.session_state["edit_uc_new_errors"] = [

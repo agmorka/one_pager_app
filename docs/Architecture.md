@@ -265,8 +265,10 @@ The application logs security-relevant events in a structured format for audit a
 - Rejected edit attempts (user not listed as Owner/SME on the target Data Product).
 - Lock override events (lock expired and taken over by another user).
 - Status transitions (who triggered which transition, when).
+- Every successful or failed write, with the acting user's initials and the record ID: create and save of a One Pager, review comments, edit locks (acquire, release), Use Case links, Use Cases (create, edit, deprecate, restore) and Admin changes to reference data. This is the second record of who did what, next to the app's audit columns (§ Audit-trail tradeoff below, Data_Model §5). Lock heartbeats are not logged: they only extend the user's own lock.
+- Refused accounts (no recognised username), with the username.
 
-These logs do not contain PII or field values — only user identifiers, record IDs, action names, and outcomes.
+These logs do not contain field values or PII — only user initials, record IDs, action names, and outcomes; the one exception is the username of a refused account.
 
 ### Data access identity — reads as the user, writes as the service principal
 Platform rule: users have no direct privileges on Databricks resources; privileges are granted to groups. The app therefore uses two identities (Decision_Log §19):
