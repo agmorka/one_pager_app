@@ -1,5 +1,6 @@
 """LakehouseAccess create-flow SQL, verified against a recording fake connection."""
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
@@ -7,6 +8,7 @@ from typing import Any
 import pytest
 
 from onepagerapp.config import AppConfig, AppMode
+from onepagerapp.data_access.base import DataAccess
 from onepagerapp.data_access.connection import StatementFailedError
 from onepagerapp.data_access.lakehouse import LakehouseAccess
 from onepagerapp.models import (
@@ -14,6 +16,8 @@ from onepagerapp.models import (
     ChangeLogEntry,
     LockInfo,
     OnePagerStatusRow,
+    ReviewComment,
+    UseCaseInput,
 )
 
 NASTY = "x'); DROP TABLE one_pager_status; --"
@@ -593,3 +597,179 @@ def test__resolve_review_comment__conditional_update() -> None:
         )
         is False
     )
+
+
+# ============================================================================
+# Actor on every write (identity plan Phase 3, Data_Model.md §5)
+# ============================================================================
+# Writes run as the service principal, so Delta history cannot show who made
+# a change. Every write statement must therefore bind the acting user's
+# initials, unless the table is documented as covered another way.
+
+ACTOR = "Q9Z"
+_WRITE_KEYWORDS = ("INSERT", "UPDATE", "DELETE", "MERGE")
+
+
+class _ActorConnection(_FakeConnection):
+    """Answers every statement: sequence reads with 4, writes with 1 row."""
+
+    def execute_statement(
+        self, statement: str, parameters: dict[str, Any] | None = None
+    ) -> SimpleNamespace:
+        self.calls.append((statement, dict(parameters or {})))
+        if statement.startswith("SELECT last_value"):
+            return _response(["last_value"], [["4"]])
+        return _response(["num_affected_rows"], [["1"]])
+
+
+def _actor_status_row() -> OnePagerStatusRow:
+    return OnePagerStatusRow(
+        one_pager_id="OP-0007",
+        data_product="p",
+        product_name="P",
+        business_domain="Customer",
+        data_product_type="Foundational",
+        one_pager_status="Draft",
+        data_product_status="In Definition",
+        version="0.2.0",
+        owner_name="A",
+        owner_initials="ABR",
+        owner_email="a@b.dk",
+        owner_team=None,
+        created_by="ABR",
+        created_at=NOW,
+        last_updated_at=NOW,
+        last_updated_by=ACTOR,
+        structure_definition="structure_one_pager_v_2.json",
+    )
+
+
+def _actor_entry() -> ChangeLogEntry:
+    return ChangeLogEntry(
+        id=0,
+        one_pager_id="OP-0007",
+        version="0.2.0",
+        event_type="edit",
+        author_initials=ACTOR,
+        author_name="Q",
+        summary="s",
+        created_at=NOW,
+    )
+
+
+def _actor_comment() -> ReviewComment:
+    return ReviewComment(
+        id=0,
+        one_pager_id="OP-0002",
+        version="0.3.0",
+        section=None,
+        reviewer_initials=ACTOR,
+        reviewer_name="Q",
+        comment="c",
+        resolved=False,
+        created_at=NOW,
+    )
+
+
+_USE_CASE = UseCaseInput("p", "g", "s", "d", "High")
+
+# Write method -> call that makes it write on behalf of ACTOR.
+ACTOR_WRITES: dict[str, Callable[[LakehouseAccess], object]] = {
+    "insert_reference_value": lambda a: a.insert_reference_value(
+        "ref_business_domains", "HR", sort_order=1, active=True, user_initials=ACTOR
+    ),
+    "update_reference_value": lambda a: a.update_reference_value(
+        "ref_business_domains", "HR", sort_order=1, active=True, user_initials=ACTOR
+    ),
+    "update_status_definition": lambda a: a.update_status_definition(
+        "ref_op_status",
+        "Draft",
+        display_label="Draft",
+        sort_order=1,
+        badge_color="#808080",
+        user_initials=ACTOR,
+    ),
+    "write_lock": lambda a: a.write_lock(_lock(ACTOR), now=NOW),
+    "refresh_lock": lambda a: a.refresh_lock(
+        "OP-0001",
+        locked_by_initials=ACTOR,
+        session_id="s1",
+        last_heartbeat=NOW,
+        expires_at=NOW,
+    ),
+    "delete_lock": lambda a: a.delete_lock("OP-0001", locked_by_initials=ACTOR),
+    "append_change_log": lambda a: a.append_change_log(_actor_entry()),
+    "append_change_log_entries": lambda a: a.append_change_log_entries(
+        [_actor_entry(), _actor_entry()]
+    ),
+    "insert_one_pager_status": lambda a: a.insert_one_pager_status(
+        _actor_status_row()
+    ),
+    "update_one_pager_status": lambda a: a.update_one_pager_status(
+        _actor_status_row(), expected_version="0.1.0", expected_status="Draft"
+    ),
+    "add_review_comment": lambda a: a.add_review_comment(_actor_comment()),
+    "resolve_review_comment": lambda a: a.resolve_review_comment(
+        "OP-0002", 1, resolved_by=ACTOR, resolved_at=NOW
+    ),
+    "create_use_case": lambda a: a.create_use_case(_USE_CASE, ACTOR),
+    "update_use_case": lambda a: a.update_use_case("UC-001", _USE_CASE, ACTOR),
+    "set_use_case_deprecated": lambda a: a.set_use_case_deprecated(
+        "UC-001", deprecated=True, user_initials=ACTOR
+    ),
+}
+
+# Writes without an actor column, and why (Data_Model.md §5).
+WRITES_WITHOUT_ACTOR = {
+    # Changed only by create and save; the change_log entry of that operation
+    # records the author.
+    "insert_authorized_users": "covered by change_log",
+    "update_authorized_users": "covered by change_log",
+    "delete_authorized_users": "covered by change_log",
+    "add_use_case_reference": "covered by change_log",
+    "remove_use_case_reference": "covered by change_log",
+    # No row is left; the Admin service logs a security event.
+    "delete_reference_value": "security event",
+    # Compensation removing the app's own partial writes (logged as failure).
+    "delete_one_pager_records": "compensation",
+    "delete_review_comment": "compensation",
+    # System counter.
+    "compare_and_set_sequence": "system",
+}
+
+
+def _write_statements(conn: _FakeConnection) -> list[tuple[str, dict]]:
+    """Write statements, without the id_sequences counter (a system table)."""
+    return [
+        (statement, params)
+        for statement, params in conn.calls
+        if statement.lstrip().upper().startswith(_WRITE_KEYWORDS)
+        and ".id_sequences" not in statement
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("method", sorted(ACTOR_WRITES))
+def test__write__binds_the_actor(method: str) -> None:
+    conn = _ActorConnection()
+
+    ACTOR_WRITES[method](_access(conn))
+
+    writes = _write_statements(conn)
+    assert writes, f"{method} sent no write statement"
+    for statement, params in writes:
+        assert ACTOR in params.values(), f"{method}: actor not bound in {statement}"
+        assert ACTOR not in statement, f"{method}: actor interpolated into SQL"
+
+
+@pytest.mark.unit
+def test__every_write_method_is_covered() -> None:
+    """A new write method must bind the actor or be listed with a reason."""
+    write_methods = {
+        name
+        for name in DataAccess.__abstractmethods__
+        if not name.startswith(("get_", "read_"))
+    }
+
+    assert write_methods == set(ACTOR_WRITES) | set(WRITES_WITHOUT_ACTOR)
+    assert not set(ACTOR_WRITES) & set(WRITES_WITHOUT_ACTOR)
