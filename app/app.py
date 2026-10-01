@@ -151,6 +151,16 @@ def render_access_denied(username: str) -> None:
         )
 
 
+def sidebar_user_label(user: CurrentUser) -> str:
+    """Name and corporate initials, e.g. "Agnieszka Kępkowska (X0W)".
+
+    Only the initials when the directory had no name (display name = initials).
+    """
+    if user.display_name and user.display_name != user.initials:
+        return f"{user.display_name} ({user.initials})"
+    return user.initials
+
+
 ROLE_LABELS = {Actor.APPROVER: "Approver", Actor.ADMIN: "Admin"}
 
 
@@ -234,8 +244,8 @@ def main() -> None:
         mode = " · mock data" if config.is_mock else ""
         st.markdown(f"Environment: {badge}{mode}", unsafe_allow_html=True)
         st.divider()
-        user_name = st.session_state.get("current_user") or "unavailable"
-        st.caption(f"Logged user: {user_name}")
+        user_label = sidebar_user_label(st.session_state.current_user_info)
+        st.caption(f"Logged user: {user_label}")
         role_names = [ROLE_LABELS[r] for r in ROLE_LABELS if r in roles]
         if role_names:
             st.caption(f"Role: {', '.join(role_names)}")

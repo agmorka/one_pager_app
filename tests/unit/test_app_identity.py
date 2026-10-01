@@ -265,6 +265,7 @@ def test__app__name_from_the_directory(monkeypatch: pytest.MonkeyPatch) -> None:
     user = at.session_state["current_user_info"]
     assert (user.initials, user.display_name) == ("X0W", "Agnieszka Kępkowska")
     assert lookups == ["t"]  # once per session
+    assert "Logged user: Agnieszka Kępkowska (X0W)" in [c.value for c in at.caption]
 
 
 @pytest.mark.unit
@@ -288,3 +289,4 @@ def test__app__directory_failure_shows_the_initials(
     assert not at.exception
     assert not [t for t in at.title if t.value == "Access denied"]
     assert at.session_state["current_user_info"].display_name == "X0W"
+    assert "Logged user: X0W" in [c.value for c in at.caption]
