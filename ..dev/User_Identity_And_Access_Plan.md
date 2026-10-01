@@ -263,6 +263,15 @@ Record every answer in [Decision_Log.md](../docs/Decision_Log.md).
 
 **Done when:** in DEV, a DataPlatEng member sees Review and Admin, a non-member sees only the Viewer pages, and changing `ONE_PAGER_APP_GROUP_APPROVER` to another group changes this after a new session.
 
+**Status (2026-10-01): implemented in code; the DEV check above is still to be done** (it is also the early spike of step 2: run the membership query as a DataPlatEng member and as a non-member). Notes on the implementation:
+
+- `.env.example` no longer exists; the settings are documented in `config.py` and the README.
+- TST was added to the `Environment` enum, because the app is deployed there.
+- `ONE_PAGER_APP_MOCK_GROUPS` defaults to the interim group, so the local-mock user has every role (as `ONE_PAGER_APP_APPROVERS=LDU` used to give the Approver role); an empty value makes it a Viewer.
+- `app.py` resolves the identity first (fail closed, Phase 2), then creates the data access, then resolves the roles once per session (`resolve_session_roles`), because the membership check needs the data access.
+- `create_one_pager` and the Use Case write services take a required `roles` argument, so the service layer enforces the Owner/SME group, not only the pages.
+- The sidebar shows "Viewer" only when the user has no other role.
+
 ## 11. Phase 7 — Deployment, Grants and Token Expiry
 
 1. **App configuration** ([app.yml](../app/app.yml), bundle resources):
