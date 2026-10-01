@@ -4,13 +4,16 @@ Identity plan Phase 2 and Architecture.md §4.
 """
 
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
+import streamlit as st
 from streamlit.testing.v1 import AppTest
 
+from onepagerapp import data_access as data_access_package
 from onepagerapp.config import AppConfig
 from onepagerapp.data_access.mock import MockDataAccess
+from onepagerapp.documents import OnePagerDocumentStore
 from tests.conftest import FIXTURES_DIR
 
 APP_DIR = Path(__file__).resolve().parents[2] / "app"
@@ -21,6 +24,7 @@ class _RecordingDataAccess(MockDataAccess):
     """Counts ``SELECT current_user()`` calls (``get_current_user``)."""
 
     def __init__(self, username: str = "dbuadm@becoc001.onmicrosoft.com") -> None:
+        super().__init__(OnePagerDocumentStore(FIXTURES_DIR))
         self.calls = 0
         self._username = username
 
@@ -151,3 +155,86 @@ def test__app__databricks_without_proxy_headers_is_denied(
     assert [t.value for t in at.title] == ["Access denied"]
     assert "could not identify your account" in at.error[0].value
     assert "data_access" not in at.session_state
+
+
+class _FailingDataAccess(_RecordingDataAccess):
+    def get_current_user(self) -> str:
+        msg = "warehouse unavailable"
+        raise RuntimeError(msg)
+
+
+def _patch_services(
+    monkeypatch: pytest.MonkeyPatch,
+    data_access: MockDataAccess,
+    headers: dict[str, str] | None = None,
+) -> None:
+    """Use ``data_access`` instead of a real connection; fake the proxy headers."""
+    monkeypatch.setattr(
+        data_access_package, "create_data_access", lambda *_: data_access
+    )
+    monkeypatch.setattr(st, "context", SimpleNamespace(headers=headers or {}))
+
+
+@pytest.mark.unit
+def test__app__databricks_proxy_user_gets_the_app(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_access = _RecordingDataAccess()
+    _patch_services(
+        monkeypatch, data_access, {"x-forwarded-preferred-username": CORPORATE}
+    )
+
+    at = _run_app(monkeypatch, APP_MODE="databricks")
+
+    assert not at.exception
+    assert at.session_state["current_user_info"].initials == "X0W"
+    assert at.session_state["data_access"] is data_access
+    assert data_access.calls == 0  # SELECT current_user() is never used
+    assert not at.error
+
+
+@pytest.mark.unit
+def test__app__databricks_unknown_domain_is_denied(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_access = _RecordingDataAccess()
+    _patch_services(monkeypatch, data_access, {"x-forwarded-email": "x0w@guest.com"})
+
+    at = _run_app(monkeypatch, APP_MODE="databricks")
+
+    assert not at.exception
+    assert [t.value for t in at.title] == ["Access denied"]
+    assert "data_access" not in at.session_state
+    assert data_access.calls == 0
+
+
+@pytest.mark.unit
+def test__app__local_integration_uses_current_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_access = _RecordingDataAccess(CORPORATE)
+    _patch_services(monkeypatch, data_access, {"x-forwarded-email": "ignored@x.dk"})
+
+    at = _run_app(monkeypatch, APP_MODE="local-integration")
+    at.run()
+
+    assert not at.exception
+    assert at.session_state["current_user_info"].initials == "X0W"
+    assert data_access.calls == 1  # resolved once per session
+
+
+@pytest.mark.unit
+def test__app__failed_identity_lookup_is_denied(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _patch_services(monkeypatch, _FailingDataAccess())
+
+    at = _run_app(monkeypatch, APP_MODE="local-integration")
+
+    assert not at.exception
+    assert [t.value for t in at.title] == ["Access denied"]
+    assert "could not identify your account" in at.error[0].value
+    assert "current_user_info" not in at.session_state
+    assert "action=access_app outcome=permission_denied user=- username=-" in (
+        caplog.messages
+    )
