@@ -214,6 +214,8 @@ Reference/lookup table for valid One Pager status values. Populated by Liquibase
 | `sort_order` | INT | No | Display ordering in dropdowns/filters. |
 | `badge_color` | STRING | Yes | Hex color for status badges (e.g. `#65B676` for Approved). |
 | `is_terminal` | BOOLEAN | No | Whether this is an end state with no outgoing transitions. |
+| `last_updated_by` | STRING | Yes | Initials of the Admin who last changed the row in the app; NULL for seeded rows never changed. |
+| `last_updated_at` | TIMESTAMP | Yes | When the Admin last changed the row; NULL for seeded rows never changed. |
 
 **Seed data:**
 | `status` | `display_label` | `sort_order` | `badge_color` | `is_terminal` |
@@ -236,6 +238,8 @@ Reference/lookup table for valid Data Product status values.
 | `sort_order` | INT | No | Display ordering in dropdowns/filters. |
 | `badge_color` | STRING | Yes | Hex color for status badges. |
 | `is_terminal` | BOOLEAN | No | Whether this is an end state with no outgoing transitions. |
+| `last_updated_by` | STRING | Yes | Initials of the Admin who last changed the row in the app; NULL for seeded rows never changed. |
+| `last_updated_at` | TIMESTAMP | Yes | When the Admin last changed the row; NULL for seeded rows never changed. |
 
 **Seed data:**
 | `status` | `display_label` | `sort_order` | `badge_color` | `is_terminal` |
@@ -284,7 +288,21 @@ See architecture doc §7 for the full error-handling strategy.
 - If a discrepancy is ever detected: Delta is trusted for operational metadata (statuses, version, timestamps), YAML is trusted for business content.
 - **Audit fields in Delta** (`created_by`, `last_updated_by`, `reviewed_by`) store user **initials** (the authorization key). The corresponding YAML fields (`createdBy`, `reviewedBy`) store **display names**. This is intentional — Delta is optimized for authorization lookups, YAML for human readability.
 - **Initials are corporate initials** (e.g. `X0W`), derived from the username (Architecture §4). They are stored upper case, are 3 letters or digits, and the valid pattern is a setting (`ONE_PAGER_APP_INITIALS_PATTERN`, default `^[A-Z0-9]{3}$`).
-- **Who wrote a row.** All writes run as the app's service principal (Architecture §8), so Delta history (`DESCRIBE HISTORY`) shows the service principal, not the person. The audit columns above, `change_log.author_initials`, `review_comments.reviewer_initials` / `resolved_by` and `locks.locked_by_initials` are the record of who made a change. `one_pager_authorized_users` and `use_case_references` have no actor column; their changes are covered by the `change_log` entry of the same save.
+- **Who wrote a row.** All writes run as the app's service principal (Architecture §8), so Delta history (`DESCRIBE HISTORY`) shows the service principal, not the person. The app's own columns are the record of who made a change, and every change is also logged as a security event with the user's initials (Backend_Design §14):
+
+  | Table | Actor column | Written by |
+  |---|---|---|
+  | `one_pager_status` | `created_by`, `last_updated_by`, `reviewed_by` | Create, every save and every status transition set `last_updated_by` (approval also sets `reviewed_by`). A failed write is undone by restoring the previous row, including its previous actor. |
+  | `change_log` | `author_initials` | One entry per create, save and transition. |
+  | `review_comments` | `reviewer_initials`, `resolved_by` | Add / resolve a review comment. |
+  | `locks` | `locked_by_initials` | Acquire, heartbeat, release. |
+  | `use_cases` | `created_by`, `last_updated_by` | Create, edit, deprecate, restore. |
+  | `ref_*` | `last_updated_by`, `last_updated_at` | Admin add / edit of a reference value or status display; NULL for seeded rows never changed. A deleted value leaves only the security event. |
+  | `one_pager_authorized_users` | none | Changed only by create and save (from the Owner/SME list), covered by the `change_log` entry of the same operation. |
+  | `use_case_references` | none | Changed only by save (link / unlink), covered by the `change_log` entry of the save. |
+  | `id_sequences` | none | System counter; no actor. |
+
+  Compensating deletes after a failed create or comment (`delete_one_pager_records`, `delete_review_comment`) remove the app's own partial writes and need no actor; they are logged as failures.
 
 **Use Cases** are stored in the Delta `use_cases` table (not in the YAML). The YAML's `useCases` array stores only Use Case IDs (references). When the app reads a One Pager for display, it resolves the full Use Case content by joining against the `use_cases` table.
 
@@ -320,6 +338,8 @@ The following three tables store reference data managed by the Admin via the Adm
 | `domain` | STRING | No | PK. Domain name (e.g. `Core Banking`, `Payments`). |
 | `sort_order` | INT | No | Display ordering. |
 | `active` | BOOLEAN | No | Whether this domain is available for new One Pagers. Default `true`. |
+| `last_updated_by` | STRING | Yes | Initials of the Admin who last changed the row in the app; NULL for seeded rows never changed. |
+| `last_updated_at` | TIMESTAMP | Yes | When the Admin last changed the row; NULL for seeded rows never changed. |
 
 #### `ref_data_product_types`
 
@@ -328,16 +348,20 @@ The following three tables store reference data managed by the Admin via the Adm
 | `type` | STRING | No | PK. Product type (e.g. `Foundational`, `Integrated`, `Augmented`). |
 | `sort_order` | INT | No | Display ordering. |
 | `active` | BOOLEAN | No | Default `true`. |
+| `last_updated_by` | STRING | Yes | Initials of the Admin who last changed the row in the app; NULL for seeded rows never changed. |
+| `last_updated_at` | TIMESTAMP | Yes | When the Admin last changed the row; NULL for seeded rows never changed. |
 
 #### `ref_source_systems`
 
 | Column | Type | Nullable | Description |
 |---|---|---|---|
 | `system_name` | STRING | No | PK. Source system name. |
-
-Created by the Liquibase changeset `ddl/ref_source_systems.sql`.
 | `sort_order` | INT | No | Display ordering. |
 | `active` | BOOLEAN | No | Default `true`. |
+| `last_updated_by` | STRING | Yes | Initials of the Admin who last changed the row in the app; NULL for seeded rows never changed. |
+| `last_updated_at` | TIMESTAMP | Yes | When the Admin last changed the row; NULL for seeded rows never changed. |
+
+Created by the Liquibase changeset `ddl/ref_source_systems.sql`; the actor columns of all `ref_*` tables are added by `ddl/ref_audit_columns.sql`.
 
 ## 8. Open Items
 
@@ -349,4 +373,4 @@ Created by the Liquibase changeset `ddl/ref_source_systems.sql`.
 | 4 | Valid-transitions / valid-combinations reference table | Currently transition rules are enforced in code only. Consider storing them as data (enabling Help page rendering and possible Admin management). |
 | 5 | ~~Admin-managed reference data tables~~ | **Resolved:** three reference tables added (`ref_business_domains`, `ref_data_product_types`, `ref_source_systems`). Managed in-app via the Admin page. See §3. |
 | 6 | ~~JSON Schema `useCases` update to ID-only format~~ | **Resolved:** the JSON Schema continues to define `useCases` items as full objects (representing the logical/display view). The physical YAML file written by the app stores only `useCaseId` string references in this array. Validation of the `useCases` section is handled by the application layer (not raw `jsonschema` against the full-object definition). A formal schema annotation or `v1.1` update is deferred to the schema evolution cycle — the app layer handles the mismatch cleanly in the meantime. This must be addressed before E2-1 (data models) and E2-2 (validation) implementation. |
-| 7 | Actor columns on reference tables | The `ref_*` tables have no "changed by" column, and writes run as the service principal, so Admin changes to reference data are recorded only in the security-event log. Decide whether to add `last_updated_by` / `last_updated_at` (Liquibase change). See `..dev/User_Identity_And_Access_Plan.md` Phase 3. |
+| 7 | ~~Actor columns on reference tables~~ | **Resolved:** `last_updated_by` / `last_updated_at` added to every `ref_*` table (`ddl/ref_audit_columns.sql`, Decision_Log §22). |

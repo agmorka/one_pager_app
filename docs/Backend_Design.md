@@ -351,9 +351,10 @@ If transition rules are later moved to a data-driven reference table (data model
 | `volume.py` | YAML file read/write on the UC external volume |
 | `git_integration.py` | Create PR on approval; check pending-PR status; retry failed PRs |
 | `id_generator.py` | Atomic ID generation for OP/UC/BR |
+| `use_cases.py` | Use Case input rules and the Use Case write services (permission check, write, security event) |
 | `auth.py` | Extract corporate initials from the Databricks username (configurable domains, suffixes, initials pattern); build the current user with the display name from the directory (SCIM `Me`); resolve role-group membership |
 | `config.py` | Read runtime env vars (catalog, schema, volume path, secret scope) |
-| `audit.py` | Structured security-event logging |
+| `audit.py` | Structured security-event logging (one event per write, with the user's initials) |
 | `export.py` | PDF export rendering |
 | `models.py` | Pydantic/dataclass models for typed access to One Pager sections |
 

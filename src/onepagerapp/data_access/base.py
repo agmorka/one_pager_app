@@ -141,9 +141,18 @@ class DataAccess(ABC):
 
     @abstractmethod
     def insert_reference_value(
-        self, table: str, value: str, *, sort_order: int, active: bool
+        self,
+        table: str,
+        value: str,
+        *,
+        sort_order: int,
+        active: bool,
+        user_initials: str,
     ) -> bool:
         """Add a row to a ``REFERENCE_TABLES`` table, unless the key exists.
+
+        ``user_initials`` is stored in ``last_updated_by`` (with the time in
+        ``last_updated_at``), because writes run as the service principal.
 
         Returns:
             True if the row was added, False if a row with this key exists.
@@ -153,9 +162,18 @@ class DataAccess(ABC):
 
     @abstractmethod
     def update_reference_value(
-        self, table: str, value: str, *, sort_order: int, active: bool
+        self,
+        table: str,
+        value: str,
+        *,
+        sort_order: int,
+        active: bool,
+        user_initials: str,
     ) -> bool:
         """Change ``sort_order`` and ``active`` of a reference row.
+
+        Also sets ``last_updated_by`` to ``user_initials`` and
+        ``last_updated_at`` to now.
 
         Returns:
             True if the row exists and was updated, False otherwise.
@@ -167,6 +185,9 @@ class DataAccess(ABC):
     def delete_reference_value(self, table: str, value: str) -> bool:
         """Delete a reference row.
 
+        No row is left to record the actor; the caller logs the deletion as a
+        security event (Data_Model.md §5).
+
         Returns:
             True if a row was deleted, False if it did not exist.
 
@@ -174,7 +195,7 @@ class DataAccess(ABC):
         ...
 
     @abstractmethod
-    def update_status_definition(
+    def update_status_definition(  # noqa: PLR0913 - the display columns of one status
         self,
         table: str,
         status: str,
@@ -182,11 +203,13 @@ class DataAccess(ABC):
         display_label: str,
         sort_order: int,
         badge_color: str,
+        user_initials: str,
     ) -> bool:
         """Change the display columns of a ``STATUS_TABLES`` row.
 
         ``status`` and ``is_terminal`` never change: the state machine owns
-        them.
+        them. Also sets ``last_updated_by`` to ``user_initials`` and
+        ``last_updated_at`` to now.
 
         Returns:
             True if the row exists and was updated, False otherwise.

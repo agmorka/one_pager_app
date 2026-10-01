@@ -156,6 +156,13 @@ Record every answer in [Decision_Log.md](../docs/Decision_Log.md).
 
 **Done when:** every write statement carries the acting user's initials, or is documented as covered by a `change_log` entry.
 
+**Status (2026-10-01): implemented.** Notes on the implementation:
+
+- Review result: every update of `one_pager_status` sets `last_updated_by` (create, save, every transition via `apply_transitions`); compensation restores the previous row with its previous actor. PR retry is not implemented yet (the button is disabled), so it writes nothing. The table of actors per table is in Data_Model §5.
+- `ref_*` decision: actor columns `last_updated_by` / `last_updated_at` (Liquibase `ddl/ref_audit_columns.sql`, Decision_Log §22). The changeset must run before this code is deployed, because the writes now set these columns.
+- `delete_reference_value`, the compensating deletes and `id_sequences` have no actor; the reasons are listed in `test_lakehouse_writes.WRITES_WITHOUT_ACTOR`.
+- Use Case writes now go through `use_cases.create_use_case` / `update_use_case` / `set_use_case_deprecated`, which check the user and log an event; before, the pages wrote directly with no event.
+
 ## 8. Phase 4 — Split Data Access: Reads as User, Writes as Service Principal
 
 **Goal:** Option B. Needs Q5 and Q8.

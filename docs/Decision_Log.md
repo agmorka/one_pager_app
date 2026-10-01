@@ -460,3 +460,13 @@ Deleting `change_log` rows is permitted only in this compensation path, for an O
 - Membership is managed in Entra ID by the Data Platform Engineering team; the app has no role administration.
 
 **Why:** Access is managed through the company's standard group process and access reviews, nobody can grant themselves a role in the app, and moving from the interim group to dedicated groups is a configuration change only. Business Owners/SMEs and Nykredit reviewers outside DataPlatEng cannot create or review until the dedicated groups exist, which is accepted for the interim. Implementation: `..dev/User_Identity_And_Access_Plan.md` Phase 6.
+
+---
+
+## 22. Actor Columns on the Reference Tables
+
+**Context:** Writes run as the app's service principal (§19), so Delta history shows the service principal, not the person. Every operational table already records the acting user (Data_Model §5), but the Admin-managed `ref_*` tables had no "changed by" column, so an Admin's change to reference data was recorded only in the security-event log, which is kept for a limited time and is not next to the data.
+
+**Decision:** Add nullable `last_updated_by` (initials) and `last_updated_at` columns to all five `ref_*` tables (Liquibase `ddl/ref_audit_columns.sql`). Every Admin add or edit sets them; the data access write methods require the actor, so a write without one does not type-check. Seeded rows keep NULL until an Admin changes them. A deleted value leaves no row, so its record is the `delete_reference_value` security event (deletes are allowed only for unused values). The security event per change stays as the second record.
+
+**Why:** Who changed a reference value is visible next to the value itself and survives log retention, at the cost of two columns per table. An audit-event-only approach was rejected because it depends on log retention and is not visible in the data.

@@ -119,12 +119,19 @@ class ReferenceValue:
     in_use: int | None = None
 
 
-def check_can_administer(user: CurrentUser | None, roles: Collection[Actor]) -> None:
-    """Raise ``PermissionDeniedError`` (logged) unless the user is an Admin."""
-    require_identity(user, "administer")
+def check_can_administer(
+    user: CurrentUser | None, roles: Collection[Actor]
+) -> CurrentUser:
+    """Return the user if they are an Admin; else raise (logged).
+
+    Raises:
+        PermissionDeniedError: No recognised user, or not an Admin.
+
+    """
+    admin = require_identity(user, "administer")
     if can_administer(roles):
-        return
-    log_permission_denied("administer", user=user.initials if user else None)
+        return admin
+    log_permission_denied("administer", user=admin.initials)
     raise PermissionDeniedError(ADMIN_DENIED_MESSAGE)
 
 
@@ -204,7 +211,7 @@ def add_reference_value(  # noqa: PLR0913 - the parts of one new value
         AdminError: Empty, too long, or already there (in any letter case).
 
     """
-    check_can_administer(user, roles)
+    admin = check_can_administer(user, roles)
     kind = reference_kind(table)
     key = check_reference_table(table)
     cleaned = " ".join(sanitize_text(value).split())
@@ -220,7 +227,7 @@ def add_reference_value(  # noqa: PLR0913 - the parts of one new value
         msg = f"The {kind.noun} {cleaned!r} already exists."
         raise AdminError(msg)
     if not data_access.insert_reference_value(
-        table, cleaned, sort_order=order, active=True
+        table, cleaned, sort_order=order, active=True, user_initials=admin.initials
     ):
         msg = f"The {kind.noun} {cleaned!r} already exists."
         raise AdminError(msg)
@@ -248,11 +255,11 @@ def update_reference_value(  # noqa: PLR0913 - the parts of one value
         AdminError: Invalid order, or the value no longer exists.
 
     """
-    check_can_administer(user, roles)
+    admin = check_can_administer(user, roles)
     kind = reference_kind(table)
     order = _check_sort_order(sort_order)
     if not data_access.update_reference_value(
-        table, value, sort_order=order, active=active
+        table, value, sort_order=order, active=active, user_initials=admin.initials
     ):
         msg = f"The {kind.noun} {value!r} no longer exists."
         raise AdminError(msg)
@@ -368,7 +375,7 @@ def update_status_definition(  # noqa: PLR0913 - the display columns of one stat
         AdminError: Invalid values, or an unknown status.
 
     """
-    check_can_administer(user, roles)
+    admin = check_can_administer(user, roles)
     check_status_table(table)
     _, statuses = STATUS_KINDS[table]
     if status not in statuses:
@@ -387,7 +394,12 @@ def update_status_definition(  # noqa: PLR0913 - the display columns of one stat
         raise AdminError(msg)
     order = _check_sort_order(sort_order)
     if not data_access.update_status_definition(
-        table, status, display_label=label, sort_order=order, badge_color=color.upper()
+        table,
+        status,
+        display_label=label,
+        sort_order=order,
+        badge_color=color.upper(),
+        user_initials=admin.initials,
     ):
         msg = f"The status {status!r} no longer exists."
         raise AdminError(msg)

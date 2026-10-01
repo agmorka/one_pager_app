@@ -138,6 +138,35 @@ def test__add_reference_value(
 
 
 @pytest.mark.unit
+def test__admin_changes_record_the_actor(data_access: MockDataAccess) -> None:
+    add_reference_value(data_access, DOMAINS, "Risk", 8, USER, ADMIN)
+    update_reference_value(
+        data_access, DOMAINS, "HR", sort_order=4, active=False, user=USER, roles=ADMIN
+    )
+    update_status_definition(
+        data_access,
+        "ref_op_status",
+        "Draft",
+        display_label="Draft",
+        sort_order=1,
+        badge_color="#808080",
+        user=USER,
+        roles=ADMIN,
+    )
+
+    domains = data_access._reference[DOMAINS]
+    for value in ("Risk", "HR"):
+        row = next(r for r in domains if r["domain"] == value)
+        assert row["last_updated_by"] == "ADA"
+        assert row["last_updated_at"] is not None
+    draft = next(
+        r for r in data_access._status_definitions["ref_op_status"]
+        if r["status"] == "Draft"
+    )
+    assert draft["last_updated_by"] == "ADA"
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("value", "order", "message"),
     [
@@ -274,17 +303,24 @@ def test__status_definitions__refused(
 def test__lakehouse__insert_reference_value_is_parameterized() -> None:
     conn = _FakeConnection([_response(["num_affected_rows"], [["1"]])])
     assert _access(conn).insert_reference_value(
-        "ref_source_systems", NASTY, sort_order=3, active=True
+        "ref_source_systems", NASTY, sort_order=3, active=True, user_initials="ADA"
     )
     statement, params = conn.calls[0]
     assert statement.startswith("INSERT INTO cat.sch.ref_source_systems (system_name")
+    assert "last_updated_by, last_updated_at)" in statement
+    assert ":user_initials, current_timestamp()" in statement
     assert "WHERE NOT EXISTS" in statement
     assert NASTY not in statement
-    assert params == {"value": NASTY, "sort_order": 3, "active": True}
+    assert params == {
+        "value": NASTY,
+        "sort_order": 3,
+        "active": True,
+        "user_initials": "ADA",
+    }
 
     conn = _FakeConnection([_response(["num_affected_rows"], [["0"]])])
     assert not _access(conn).insert_reference_value(
-        "ref_source_systems", "SAP", sort_order=1, active=True
+        "ref_source_systems", "SAP", sort_order=1, active=True, user_initials="ADA"
     )
 
 
@@ -298,14 +334,21 @@ def test__lakehouse__update_and_delete_reference_value() -> None:
     )
     access = _access(conn)
     assert access.update_reference_value(
-        "ref_business_domains", "HR", sort_order=2, active=False
+        "ref_business_domains", "HR", sort_order=2, active=False, user_initials="ADA"
     )
     assert not access.delete_reference_value("ref_data_product_types", "Augmented")
 
     update, params = conn.calls[0]
     assert "UPDATE cat.sch.ref_business_domains SET sort_order = :sort_order" in update
+    assert "last_updated_by = :user_initials" in update
+    assert "last_updated_at = current_timestamp()" in update
     assert "WHERE domain = :value" in update
-    assert params == {"value": "HR", "sort_order": 2, "active": False}
+    assert params == {
+        "value": "HR",
+        "sort_order": 2,
+        "active": False,
+        "user_initials": "ADA",
+    }
     delete, params = conn.calls[1]
     assert delete == "DELETE FROM cat.sch.ref_data_product_types WHERE type = :value"
     assert params == {"value": "Augmented"}
@@ -320,11 +363,15 @@ def test__lakehouse__update_status_definition() -> None:
         display_label="Draft",
         sort_order=1,
         badge_color="#808080",
+        user_initials="ADA",
     )
     statement, params = conn.calls[0]
     assert statement.startswith("UPDATE cat.sch.ref_op_status SET display_label")
+    assert "last_updated_by = :user_initials" in statement
+    assert "last_updated_at = current_timestamp()" in statement
     assert "WHERE status = :status" in statement
     assert params["badge_color"] == "#808080"
+    assert params["user_initials"] == "ADA"
 
 
 @pytest.mark.unit
@@ -339,6 +386,7 @@ def test__lakehouse__only_known_tables() -> None:
             display_label="a",
             sort_order=1,
             badge_color="#000000",
+            user_initials="ADA",
         )
     assert access._connection.calls == []
 

@@ -29,10 +29,13 @@ from onepagerapp.models import (
     UseCaseInput,
     UseCasePage,
 )
-from onepagerapp.permissions import can_manage_use_cases, require_identity
+from onepagerapp.permissions import can_manage_use_cases
 from onepagerapp.use_cases import (
     USE_CASE_FIELDS,
     clean_use_case_input,
+    create_use_case,
+    set_use_case_deprecated,
+    update_use_case,
     validate_use_case_input,
 )
 
@@ -83,10 +86,8 @@ def _current_initials() -> str | None:
     return (user.initials or None) if user else None
 
 
-def _actor_initials() -> str:
-    """Initials recorded on a Use Case write; refuses unrecognised users."""
-    user = st.session_state.get("current_user_info")
-    return require_identity(user, "manage_use_cases").initials
+def _current_user_info() -> CurrentUser | None:
+    return st.session_state.get("current_user_info")
 
 
 def _used_by_label(count: int) -> str:
@@ -168,12 +169,13 @@ def _render_use_case_form(data_access: DataAccess, existing: UseCase | None) -> 
         return
 
     try:
-        initials = _actor_initials()
         with writes_data():
             if existing is None:
-                new_id = data_access.create_use_case(data, initials)
+                new_id = create_use_case(data_access, data, _current_user_info())
             else:
-                data_access.update_use_case(existing.use_case_id, data, initials)
+                update_use_case(
+                    data_access, existing.use_case_id, data, _current_user_info()
+                )
         if existing is None:
             _select_use_case(new_id)
             _flash(f"Created Use Case {new_id}.")
@@ -221,10 +223,11 @@ def _deprecate_dialog(
     if confirm_col.button("Confirm", type="primary", key="uc_deprecate_confirm"):
         try:
             with writes_data():
-                data_access.set_use_case_deprecated(
+                set_use_case_deprecated(
+                    data_access,
                     use_case.use_case_id,
                     deprecated=True,
-                    user_initials=_actor_initials(),
+                    user=_current_user_info(),
                 )
         except Exception:
             logger.exception("Failed to deprecate use case")
@@ -239,10 +242,11 @@ def _deprecate_dialog(
 def _restore(data_access: DataAccess, use_case: UseCase) -> None:
     try:
         with writes_data():
-            data_access.set_use_case_deprecated(
+            set_use_case_deprecated(
+                data_access,
                 use_case.use_case_id,
                 deprecated=False,
-                user_initials=_actor_initials(),
+                user=_current_user_info(),
             )
     except Exception:
         logger.exception("Failed to restore use case")
