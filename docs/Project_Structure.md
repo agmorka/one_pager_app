@@ -97,7 +97,6 @@ OnePagerApp/
 │   └── integration/                # Tests requiring a live Databricks connection or Streamlit AppTest
 │       ├── __init__.py
 │       └── test_sample_integration_test.py
-├── .env.example                    # Local configuration template (copy to .env)
 ├── .gitattributes
 ├── .gitignore
 ├── coverage.xml                    # Test coverage report
@@ -262,7 +261,7 @@ targets:
 ## 5. Secrets & Configuration
 
 - **No secrets in source code.** Webhook URLs, service principal credentials, Git PATs (for PR creation), and any other sensitive values are stored in Databricks secret scopes, not in `databricks.yml`, `pyproject.toml`, or any committed file.
-- **Environment-specific configuration** (catalog/schema names, volume paths, Git repo URL for the approved-One-Pager repository, Git target branch) is injected as **app environment variables** by the Databricks Asset Bundle deployment (the bundle target's `env` block maps bundle variables to env vars the app reads at runtime via `src/onepagerapp/config.py`). Key env vars: `ONE_PAGER_CATALOG`, `ONE_PAGER_SCHEMA`, `ONE_PAGER_VOLUME_PATH`, `ONE_PAGER_GIT_REPO_URL`, `ONE_PAGER_GIT_TARGET_BRANCH`, `ONE_PAGER_SECRET_SCOPE`. See `.env.example` for the full list.
+- **Environment-specific configuration** (catalog/schema names, volume paths, Git repo URL for the approved-One-Pager repository, Git target branch) is injected as **app environment variables** by the Databricks Asset Bundle deployment (the bundle target's `env` block maps bundle variables to env vars the app reads at runtime via `src/onepagerapp/config.py`). Key env vars: `ONE_PAGER_CATALOG`, `ONE_PAGER_SCHEMA`, `ONE_PAGER_VOLUME_PATH`, `ONE_PAGER_GIT_REPO_URL`, `ONE_PAGER_GIT_TARGET_BRANCH`, `ONE_PAGER_SECRET_SCOPE`. See `AppConfig` in `src/onepagerapp/config.py` for the full list.
 - **The JSON Schema file** (`resources/schemas/structure_one_pager_v_1.json`) is committed to the repo and deployed with the app — it is configuration in the sense that it drives validation, but it is not secret.
 
 ## 6. CI/CD Pipeline (Azure Pipelines)
@@ -323,7 +322,7 @@ To run the app locally for development/debugging:
 
 1. Install `uv` globally (see README for instructions).
 2. Run `uv sync` to install all dependencies from `uv.lock`.
-3. Copy `.env.example` to `.env` and fill in the required values (pointing at the DEV workspace catalog/schema/volume).
+3. Set the required environment variables (pointing at the DEV workspace catalog/schema/volume); see the README and `AppConfig` in `src/onepagerapp/config.py`.
 4. Run `streamlit run app/app.py` from the project root.
 
 A live Databricks workspace connection (DEV) is required even for local development, since the app reads/writes Delta tables and UC volumes. Unit tests (`pytest tests/unit/`) run without any Databricks connection — they test pure domain logic only.

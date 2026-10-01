@@ -75,36 +75,26 @@ databricks apps run-local --profile dev \
 
 ### Option 2: Run with Streamlit directly
 
-Start Streamlit from the `app/` directory so it picks up the BEC theme in `app/.streamlit/config.toml`.
-
 1. Install dependencies:
    ```bash
    uv sync
    ```
 
-2. Create your local configuration from the template and adjust it if needed (`.env` is git-ignored):
+2. Mock mode (no Databricks connection):
    ```bash
-   cp .env.example .env
-   ```
-   The template runs in mock mode against the sample One Pagers in `tests/fixtures/sample_one_pagers`. Every variable is described in `.env.example`.
-
-3. Run the app:
-   ```bash
-   cd app
-   uv run --env-file ../.env streamlit run app.py
+   APP_MODE=local-mock DATABRICKS_WAREHOUSE_ID=abc123 ONE_PAGER_APP_VOLUME_PATH=/tmp/vol uv run streamlit run app/app.py
    ```
 
-4. For integration mode (real tables in the DEV environment), set these values in `.env`:
+3. Integration mode (connects to real tables in DEV environment):
    ```bash
-   APP_MODE=local-integration
-   DATABRICKS_CONFIG_PROFILE=dev
-   DATABRICKS_WAREHOUSE_ID=4efe1f3d3f86e320
-   ONE_PAGER_APP_VOLUME_PATH=/Volumes/dev_bia_meta/onepager_app/one_pager_registry
+   APP_MODE=local-integration \
+     DATABRICKS_CONFIG_PROFILE=dev \
+     DATABRICKS_WAREHOUSE_ID=4efe1f3d3f86e320 \
+     ONE_PAGER_APP_VOLUME_PATH=/Volumes/dev_bia_meta/onepager_app/one_pager_registry \
+     uv run streamlit run app/app.py
    ```
 
-   In `local-mock` mode the signed-in user is `ONE_PAGER_APP_MOCK_USER` (default `lduadm@becoc001.onmicrosoft.com`, initials `LDU`). It goes through the same username parsing as a real login, so it must match `ONE_PAGER_APP_USER_DOMAINS` and `ONE_PAGER_APP_USERNAME_SUFFIXES`; otherwise the app shows "Access denied". To try the app as a corporate user, set for example `ONE_PAGER_APP_MOCK_USER=x0wadm@becoc001.onmicrosoft.com`.
-
-5. Open your browser and navigate to `http://localhost:8501`. The app opens on the Registry page, and the sidebar shows the environment badge (`ONE_PAGER_APP_ENVIRONMENT`, or derived from the catalog prefix).
+4. Open your browser and navigate to `http://localhost:8501`.
 
 ### Databricks CLI Authentication
 
