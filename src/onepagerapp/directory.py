@@ -11,10 +11,14 @@ initials.
 """
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service.iam import ComplexValue, User
+
+from onepagerapp.config import AppConfig, AppMode
+from onepagerapp.data_access.connection import USER_TOKEN_HEADER
 
 logger = logging.getLogger(__name__)
 
@@ -74,11 +78,13 @@ def directory_user_from_scim(user: User) -> DirectoryUser:
     )
 
 
-def get_me(token: str, host: str | None = None) -> DirectoryUser | None:
+def get_me(token: str | None, host: str | None = None) -> DirectoryUser | None:
     """Read the signed-in user's directory entry with their token.
 
     Args:
-        token: The user's OAuth token (``x-forwarded-access-token``).
+        token: The user's OAuth token (``x-forwarded-access-token``). None
+            uses the default authentication (the Databricks CLI profile);
+            only for ``local-integration``, where that is the developer.
         host: Workspace URL; None reads it from the environment
             (``DATABRICKS_HOST``, set by the Databricks Apps runtime).
 
@@ -89,9 +95,40 @@ def get_me(token: str, host: str | None = None) -> DirectoryUser | None:
     try:
         # auth_type is required: the Databricks Apps runtime sets OAuth env
         # vars, which conflict with this explicit token otherwise.
-        client = WorkspaceClient(host=host, token=token, auth_type="pat")
+        client = (
+            WorkspaceClient(host=host, token=token, auth_type="pat")
+            if token
+            else WorkspaceClient()
+        )
         return directory_user_from_scim(client.current_user.me())
     except Exception:  # noqa: BLE001 - a lookup failure must not block the app
         logger.warning("Reading the user from the directory (SCIM Me) failed")
         logger.debug("SCIM Me failure", exc_info=True)
         return None
+
+
+def lookup_directory_user(
+    config: AppConfig, headers: Mapping[str, str]
+) -> DirectoryUser | None:
+    """Look up the signed-in user's directory entry for the session, by mode.
+
+    - ``databricks``: SCIM ``Me`` with the forwarded user token. Without the
+      token there is no lookup; never with the service principal, which
+      would return the app's own entry.
+    - ``local-integration``: SCIM ``Me`` with the CLI profile (the developer).
+    - ``local-mock``: no lookup.
+
+    Returns:
+        The entry, or None (no lookup, or it failed); the caller then shows
+        the initials.
+
+    """
+    if config.APP_MODE is AppMode.DATABRICKS:
+        token = (headers.get(USER_TOKEN_HEADER) or "").strip()
+        if not token:
+            logger.warning("No user token: the name is not read from the directory")
+            return None
+        return get_me(token)
+    if config.APP_MODE is AppMode.LOCAL_INTEGRATION:
+        return get_me(None)
+    return None

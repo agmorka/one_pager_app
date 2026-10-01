@@ -19,6 +19,7 @@ from onepagerapp.config import AppConfig, AppMode
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.data_access import create_data_access
 from onepagerapp.data_access.factory import create_document_store
+from onepagerapp.directory import lookup_directory_user
 from onepagerapp.models import CurrentUser
 from onepagerapp.permissions import can_administer, can_review
 from onepagerapp.state_machine import Actor
@@ -90,7 +91,9 @@ def resolve_user() -> CurrentUser | None:
     """Resolve the current user once per session, before any page runs.
 
     Pages read ``st.session_state.current_user`` (raw username),
-    ``st.session_state.current_user_info`` (CurrentUser with initials) and
+    ``st.session_state.current_user_info`` (CurrentUser with initials and the
+    name from the directory), ``st.session_state.current_user_directory``
+    (the directory entry, or None) and
     ``st.session_state.current_user_roles`` (group roles: Approver, Admin).
     These are set only for a recognised user (non-empty initials).
 
@@ -117,6 +120,15 @@ def resolve_user() -> CurrentUser | None:
             log_unrecognised_user(username)
         st.session_state.unrecognised_user = username or ""
         return None
+    # The name comes from the directory, once per session. A failed lookup is
+    # logged and the initials are shown instead; it never blocks the app.
+    try:
+        directory_user = lookup_directory_user(config, st.context.headers)
+    except Exception:
+        logger.exception("Directory lookup failed; showing the initials")
+        directory_user = None
+    user = resolve_current_user(username, config, directory_user)
+    st.session_state.current_user_directory = directory_user
     st.session_state.current_user = username
     st.session_state.current_user_info = user
     st.session_state.current_user_roles = resolve_roles(user, config)

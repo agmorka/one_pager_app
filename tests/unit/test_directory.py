@@ -6,7 +6,14 @@ import pytest
 from databricks.sdk.service.iam import ComplexValue, Name, User
 
 from onepagerapp import directory
-from onepagerapp.directory import DirectoryUser, directory_user_from_scim, get_me
+from onepagerapp.config import AppConfig
+from onepagerapp.data_access.connection import USER_TOKEN_HEADER
+from onepagerapp.directory import (
+    DirectoryUser,
+    directory_user_from_scim,
+    get_me,
+    lookup_directory_user,
+)
 
 
 @pytest.mark.unit
@@ -89,3 +96,59 @@ def test__get_me__http_error_gives_none(
     assert get_me("user-token") is None
     assert "SCIM Me) failed" in caplog.text
     assert "user-token" not in caplog.text
+
+
+def _config(mode: str) -> AppConfig:
+    return AppConfig(APP_MODE=mode, ONE_PAGER_APP_VOLUME_PATH="/Volumes/x")
+
+
+@pytest.mark.unit
+def test__lookup__databricks_uses_the_forwarded_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str | None] = []
+    monkeypatch.setattr(
+        directory, "get_me", lambda token: calls.append(token) or DirectoryUser()
+    )
+
+    result = lookup_directory_user(
+        _config("databricks"), {USER_TOKEN_HEADER: "user-token"}
+    )
+
+    assert result == DirectoryUser()
+    assert calls == ["user-token"]
+
+
+@pytest.mark.unit
+def test__lookup__databricks_without_token_does_not_use_the_app_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str | None] = []
+    monkeypatch.setattr(directory, "get_me", calls.append)
+
+    assert lookup_directory_user(_config("databricks"), {}) is None
+    assert calls == []
+
+
+@pytest.mark.unit
+def test__lookup__local_integration_uses_the_cli_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str | None] = []
+    monkeypatch.setattr(
+        directory, "get_me", lambda token: calls.append(token) or DirectoryUser()
+    )
+
+    assert lookup_directory_user(_config("local-integration"), {}) is not None
+    assert calls == [None]
+
+
+@pytest.mark.unit
+def test__lookup__no_call_in_mock_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str | None] = []
+    monkeypatch.setattr(directory, "get_me", calls.append)
+    monkeypatch.setattr(directory, "WorkspaceClient", calls.append)
+
+    lookup_directory_user(_config("local-mock"), {USER_TOKEN_HEADER: "user-token"})
+
+    assert calls == []
