@@ -62,6 +62,8 @@ Roles come from group membership, checked once per session (see [docs/Architectu
 
 The defaults are the interim Data Platform Engineering group until the dedicated role groups exist; switching is a configuration change only.
 
+In `local-mock` mode the memberships come from `ONE_PAGER_APP_MOCK_GROUPS` (comma-separated group names, `{env}` allowed). The default is the interim group, so the mock user has every role; set it to an empty value to try the app as a Viewer, or to one group to try one role.
+
 ### Option 1: Run with Databricks Apps (recommended)
 
 ```bash

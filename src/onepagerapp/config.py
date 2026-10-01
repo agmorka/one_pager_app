@@ -130,21 +130,6 @@ class AppConfig(BaseModel):
             "default is the interim role group: every role. Empty: Viewer only."
         ),
     )
-    ONE_PAGER_APP_APPROVERS: str = Field(
-        "",
-        description=(
-            "Comma-separated initials of the users who act as Approvers. "
-            "Interim stand-in for the Approver UC group until group names are "
-            "decided (Architecture.md §4)."
-        ),
-    )
-    ONE_PAGER_APP_ADMINS: str = Field(
-        "",
-        description=(
-            "Comma-separated initials of the users who act as Admins. Interim "
-            "stand-in for the Admin UC group (Architecture.md §4)."
-        ),
-    )
     CLOUD_ROLE_NAME: str = "OnePagerApp"
 
     @field_validator("ONE_PAGER_APP_INITIALS_PATTERN")
@@ -229,16 +214,6 @@ class AppConfig(BaseModel):
         )
 
     @property
-    def approver_initials(self) -> frozenset[str]:
-        """Initials configured in ONE_PAGER_APP_APPROVERS (upper case)."""
-        return _initials_list(self.ONE_PAGER_APP_APPROVERS)
-
-    @property
-    def admin_initials(self) -> frozenset[str]:
-        """Initials configured in ONE_PAGER_APP_ADMINS (upper case)."""
-        return _initials_list(self.ONE_PAGER_APP_ADMINS)
-
-    @property
     def is_mock(self) -> bool:
         return self.APP_MODE == AppMode.LOCAL_MOCK
 
@@ -264,8 +239,3 @@ class AppConfig(BaseModel):
     def uses_databricks(self) -> bool:
         return self.APP_MODE in (AppMode.DATABRICKS, AppMode.LOCAL_INTEGRATION)
 
-
-def _initials_list(value: str) -> frozenset[str]:
-    return frozenset(
-        part.strip().upper() for part in value.split(",") if part.strip()
-    )
