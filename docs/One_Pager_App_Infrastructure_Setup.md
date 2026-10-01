@@ -102,6 +102,18 @@ The app's environment variables are in `app/app.yml`, which is the same for ever
 - The identity settings (`ONE_PAGER_APP_USER_DOMAINS`, `ONE_PAGER_APP_USERNAME_SUFFIXES`, `ONE_PAGER_APP_INITIALS_PATTERN`) are the same everywhere and set explicitly.
 - The role group settings stay unset while the interim DataPlatEng group is used; add them once the dedicated groups exist (the `{env}` placeholder keeps one value valid for all environments).
 
+## Promoting the Identity and Access Changes
+
+Order: DEV → INT → TST → UAT → PRD. Move on only when the previous environment has passed the smoke test. Per environment:
+
+1. **Terraform:** the `sql` and `iam.current-user:read` user API scopes on the app; the grants above (service principal: `SELECT`, `MODIFY`, `READ VOLUME`, `WRITE VOLUME`; `account users`: `SELECT`); `CAN_USE` on the warehouse.
+2. **Liquibase:** run the pipeline so `ddl/ref_audit_columns.sql` adds `last_updated_by` / `last_updated_at` to the `ref_*` tables **before** the new app version is deployed (Admin changes write these columns).
+3. **Groups:** check that `BEC_BECOC001_LHX_<ENV>_DataPlatEng` exists (Required Changes, item 6). Once dedicated role groups exist, add the `ONE_PAGER_APP_GROUP_*` settings to `app/app.yml` (with `{env}`, one value for every environment).
+4. **Deploy** the app with the bundle target of the environment. `databricks.yml` has targets `dev`, `int`, `uat` and `prd`; a `tst` target (and its pipeline stage) must be added before deploying to TST.
+5. **Check the environment:** the sidebar badge shows the right environment (derived from the registry volume's catalog). A wrong badge means the role groups of the wrong environment are checked.
+6. **Smoke test:** run the identity and access smoke test ([Testing_Strategy.md](Testing_Strategy.md) §8) and record the result in the deployment ticket.
+7. **Users who used the app before:** if names do not appear, they sign in again so their token gets the new scope ([Dev_Notes.md](Dev_Notes.md), "User authorization scopes").
+
 ## Service Principal
 
 The application is managed by environment-specific service principals:
