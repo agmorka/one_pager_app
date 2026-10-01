@@ -13,6 +13,7 @@ import pytest
 from onepagerapp.auth import resolve_current_user
 from onepagerapp.config import AppConfig
 from onepagerapp.data_access import create_data_access
+from onepagerapp.directory import DirectoryUser
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.editing import open_for_edit, save_draft, working_copy
 from onepagerapp.models import NewOnePagerInput, PersonRef
@@ -69,3 +70,32 @@ def test__corporate_user_creates_and_edits_own_one_pager(
     assert saved.errors == []
     assert saved.version == "0.2.0"
     assert data_access.get_one_pager_status_row(one_pager_id).last_updated_by == "X0W"
+
+
+@pytest.mark.unit
+def test__directory_name_reaches_the_change_log_and_document(
+    tmp_path: Path, valid_input: NewOnePagerInput
+) -> None:
+    """Identity plan Phase 5, done when: a new change log entry shows the name."""
+    config = AppConfig(
+        APP_MODE="local-mock", ONE_PAGER_APP_VOLUME_PATH=str(FIXTURES_DIR)
+    )
+    store = OnePagerDocumentStore(FIXTURES_DIR, write_path=tmp_path)
+    data_access = create_data_access(config, store)
+    user = resolve_current_user(
+        "x0wadm@becoc001.onmicrosoft.com",
+        config,
+        DirectoryUser(given_name="Agnieszka", family_name="Kępkowska"),
+    )
+    owner = PersonRef(name="Agnieszka Kępkowska", initials="X0W", email="a@bec.dk")
+
+    created = create_one_pager(
+        replace(valid_input, owner=owner), user, data_access, store, now=NOW
+    )
+
+    assert created.errors == []
+    [entry] = data_access.get_change_log(created.one_pager_id)
+    assert (entry.author_initials, entry.author_name) == ("X0W", "Agnieszka Kępkowska")
+    assert store.read(created.one_pager_id, "0.1.0").created_by == (
+        "Agnieszka Kępkowska"
+    )
