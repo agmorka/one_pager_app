@@ -75,6 +75,7 @@ def resolve_current_user(
         username=username,
         initials=initials or "",
         display_name=display_name(directory_user, initials or "") or username,
+        email=(directory_user.email if directory_user else None) or "",
     )
 
 

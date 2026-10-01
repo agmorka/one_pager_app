@@ -435,11 +435,14 @@ class CurrentUser:
         username: Raw identity from Databricks (e.g. "MJOADM@BECOC001.onmicrosoft.com").
         initials: Corporate initials derived from the username (authorization key).
         display_name: Human-readable name used in change log / YAML ``createdBy``.
+        email: Primary email from the workspace directory, or "" when unknown.
+            For pre-filling forms only; never used for authorization.
     """
 
     username: str
     initials: str
     display_name: str
+    email: str = ""
 
 
 @dataclass

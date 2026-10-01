@@ -121,11 +121,16 @@ def test__resolve_current_user__name_from_the_directory() -> None:
     user = resolve_current_user(
         "x0wadm@becoc001.onmicrosoft.com",
         _config(),
-        DirectoryUser(given_name="Agnieszka", family_name="Kępkowska"),
+        DirectoryUser(
+            given_name="Agnieszka",
+            family_name="Kępkowska",
+            emails=("agnieszka.kepkowska@bec.dk",),
+        ),
     )
 
     assert user.initials == "X0W"
     assert user.display_name == "Agnieszka Kępkowska"
+    assert user.email == "agnieszka.kepkowska@bec.dk"
 
 
 @pytest.mark.unit
