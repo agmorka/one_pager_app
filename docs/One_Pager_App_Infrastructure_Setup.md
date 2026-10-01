@@ -47,6 +47,28 @@ Users have no direct privileges on Databricks resources; privileges are granted 
 
 Unity Catalog grants must go to an account-level group; the workspace-local `users` group cannot receive them. The role groups below need no Unity Catalog grants, because all writes go through the service principal.
 
+### Grants as SQL (for the platform team)
+
+Terraform is the source of truth; these statements show the same grants for review, or for checking an environment by hand. Replace `<catalog>` (e.g. `dev_bia_meta`) and `<spn-application-id>` (the application ID of `bp-spn-lhx-opa-<env>-001`). Grants on the schema apply to every table in it, including tables added later.
+
+```sql
+-- App service principal: reads and writes (all writes run as the app).
+GRANT USE CATALOG ON CATALOG <catalog> TO `<spn-application-id>`;
+GRANT USE SCHEMA, SELECT, MODIFY ON SCHEMA <catalog>.onepager_app TO `<spn-application-id>`;
+GRANT READ VOLUME, WRITE VOLUME
+  ON VOLUME <catalog>.onepager_app.one_pager_registry TO `<spn-application-id>`;
+
+-- All employees: read only (reads run as the signed-in user).
+GRANT USE CATALOG ON CATALOG <catalog> TO `account users`;
+GRANT USE SCHEMA, SELECT ON SCHEMA <catalog>.onepager_app TO `account users`;
+
+-- Check: only the service principal may have MODIFY / WRITE VOLUME.
+SHOW GRANTS ON SCHEMA <catalog>.onepager_app;
+SHOW GRANTS ON VOLUME <catalog>.onepager_app.one_pager_registry;
+```
+
+`CAN_USE` on the SQL warehouse is a workspace permission, not a Unity Catalog grant; it is set in Terraform for the service principal and for all employees.
+
 ## Application Roles
 
 Application roles come from Entra ID groups (automatic identity management is enabled, so Entra ID groups are available in Databricks without a sync job). Group names are app settings:
