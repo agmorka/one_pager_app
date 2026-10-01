@@ -98,14 +98,31 @@ class LakehouseAccess(DataAccess):
         self._connection = DatabricksConnection(config)
         self._document_store = document_store
 
-    def _execute(
+    # Every statement goes through one of these two, so the identity of each
+    # method is visible where it runs (Architecture.md §8, Decision_Log §19).
+
+    def _read(
         self,
         statement: str,
         parameters: Mapping[str, SqlParameterValue] | None = None,
     ) -> StatementResponse:
-        """Run a statement as the signed-in user."""
+        """Run a read as the signed-in user, so their Unity Catalog grants apply."""
         return self._connection.execute_statement(
             statement, parameters, identity=Identity.USER
+        )
+
+    def _write(
+        self,
+        statement: str,
+        parameters: Mapping[str, SqlParameterValue] | None = None,
+    ) -> StatementResponse:
+        """Run a write as the service principal (users have no ``MODIFY``).
+
+        Also used for reads that are part of a write (the ID sequence), which
+        must see what the writer sees even without the user's ``SELECT``.
+        """
+        return self._connection.execute_statement(
+            statement, parameters, identity=Identity.APP
         )
 
     @property
@@ -121,7 +138,7 @@ class LakehouseAccess(DataAccess):
         return f"{catalog}.{schema}"
 
     def get_current_user(self) -> str:
-        response = self._execute("SELECT current_user()")
+        response = self._read("SELECT current_user()")
         rows = (response.result.data_array if response.result else None) or []
         if not rows:
             msg = "Failed to retrieve current user"
@@ -132,7 +149,7 @@ class LakehouseAccess(DataAccess):
         query = f"SELECT * FROM {self._fqn_prefix}.{table_name}"  # noqa: S608
         fqn = f"{self._fqn_prefix}.{table_name}"
         try:
-            response = self._execute(query)
+            response = self._read(query)
             
             # Extract schema/columns from response
             schema = response.manifest.schema if response.manifest else None
@@ -205,7 +222,7 @@ class LakehouseAccess(DataAccess):
     ) -> bool:
         key = check_reference_table(table)
         fqn = f"{self._fqn_prefix}.{table}"
-        response = self._execute(
+        response = self._write(
             f"INSERT INTO {fqn} "  # noqa: S608
             f"({key}, sort_order, active, last_updated_by, last_updated_at) "
             f"SELECT :value, :sort_order, :active, :user_initials, "
@@ -230,7 +247,7 @@ class LakehouseAccess(DataAccess):
         user_initials: str,
     ) -> bool:
         key = check_reference_table(table)
-        response = self._execute(
+        response = self._write(
             f"UPDATE {self._fqn_prefix}.{table} "  # noqa: S608
             f"SET sort_order = :sort_order, active = :active, "
             f"last_updated_by = :user_initials, "
@@ -246,7 +263,7 @@ class LakehouseAccess(DataAccess):
 
     def delete_reference_value(self, table: str, value: str) -> bool:
         key = check_reference_table(table)
-        response = self._execute(
+        response = self._write(
             f"DELETE FROM {self._fqn_prefix}.{table} WHERE {key} = :value",  # noqa: S608
             parameters={"value": value},
         )
@@ -263,7 +280,7 @@ class LakehouseAccess(DataAccess):
         user_initials: str,
     ) -> bool:
         check_status_table(table)
-        response = self._execute(
+        response = self._write(
             f"UPDATE {self._fqn_prefix}.{table} "  # noqa: S608
             f"SET display_label = :display_label, sort_order = :sort_order, "
             f"badge_color = :badge_color, last_updated_by = :user_initials, "
@@ -358,7 +375,7 @@ class LakehouseAccess(DataAccess):
         # Count total rows matching filter
         count_query = f"SELECT COUNT(*) as total FROM {fqn} WHERE {where_clause}"
         try:
-            count_response = self._execute(count_query)
+            count_response = self._read(count_query)
             count_rows = (count_response.result.data_array if count_response.result else None) or []
             total_rows = int(count_rows[0][0]) if count_rows else 0
         except Exception as e:
@@ -378,7 +395,7 @@ class LakehouseAccess(DataAccess):
         )
         
         try:
-            response = self._execute(query)
+            response = self._read(query)
             schema = response.manifest.schema if response.manifest else None
             columns = [col.name for col in (schema.columns if schema else None) or []]
             rows = (response.result.data_array if response.result else None) or []
@@ -434,7 +451,7 @@ class LakehouseAccess(DataAccess):
         )
         
         try:
-            response = self._execute(query)
+            response = self._read(query)
             schema = response.manifest.schema if response.manifest else None
             columns = [col.name for col in (schema.columns if schema else None) or []]
             rows = (response.result.data_array if response.result else None) or []
@@ -502,7 +519,7 @@ class LakehouseAccess(DataAccess):
         )
         
         try:
-            response = self._execute(
+            response = self._read(
                 query, parameters={"one_pager_id": one_pager_id}
             )
             
@@ -551,7 +568,7 @@ class LakehouseAccess(DataAccess):
         )
         
         try:
-            response = self._execute(
+            response = self._read(
                 query, parameters={"one_pager_id": one_pager_id}
             )
             
@@ -595,7 +612,7 @@ class LakehouseAccess(DataAccess):
         )
         
         try:
-            response = self._execute(
+            response = self._read(
                 query, parameters={"one_pager_id": one_pager_id}
             )
             
@@ -651,7 +668,7 @@ class LakehouseAccess(DataAccess):
     def _select_locks(self, one_pager_ids: list[str]) -> list[LockInfo]:
         fqn = f"{self._fqn_prefix}.locks"
         markers = ", ".join(f":id_{i}" for i in range(len(one_pager_ids)))
-        response = self._execute(
+        response = self._read(
             "SELECT one_pager_id, locked_by_initials, locked_by_name, session_id, "  # noqa: S608
             f"acquired_at, last_heartbeat, expires_at FROM {fqn} "
             f"WHERE one_pager_id IN ({markers})",
@@ -680,7 +697,7 @@ class LakehouseAccess(DataAccess):
         """
         fqn = f"{self._fqn_prefix}.locks"
         try:
-            response = self._execute(
+            response = self._write(
                 f"MERGE INTO {fqn} AS t "  # noqa: S608
                 "USING (SELECT :one_pager_id AS one_pager_id) AS s "
                 "ON t.one_pager_id = s.one_pager_id "
@@ -722,7 +739,7 @@ class LakehouseAccess(DataAccess):
         expires_at: datetime,
     ) -> bool:
         fqn = f"{self._fqn_prefix}.locks"
-        response = self._execute(
+        response = self._write(
             f"UPDATE {fqn} SET last_heartbeat = :last_heartbeat, "  # noqa: S608
             "expires_at = :expires_at WHERE one_pager_id = :one_pager_id "
             "AND locked_by_initials = :locked_by_initials "
@@ -739,7 +756,7 @@ class LakehouseAccess(DataAccess):
 
     def delete_lock(self, one_pager_id: str, *, locked_by_initials: str) -> bool:
         fqn = f"{self._fqn_prefix}.locks"
-        response = self._execute(
+        response = self._write(
             f"DELETE FROM {fqn} WHERE one_pager_id = :one_pager_id "  # noqa: S608
             "AND locked_by_initials = :locked_by_initials",
             parameters={
@@ -757,7 +774,7 @@ class LakehouseAccess(DataAccess):
         """Read the last assigned value of an id_sequences counter."""
         fqn = f"{self._fqn_prefix}.id_sequences"
         rows = self._response_rows(
-            self._execute(
+            self._write(
                 f"SELECT last_value FROM {fqn} WHERE id_type = :id_type",  # noqa: S608
                 {"id_type": id_type},
             )
@@ -781,7 +798,7 @@ class LakehouseAccess(DataAccess):
         """
         fqn = f"{self._fqn_prefix}.id_sequences"
         try:
-            response = self._execute(
+            response = self._write(
                 f"UPDATE {fqn} SET last_value = :new_value "  # noqa: S608
                 "WHERE id_type = :id_type AND last_value = :current_value",
                 {"id_type": id_type, "new_value": new, "current_value": expected},
@@ -793,7 +810,7 @@ class LakehouseAccess(DataAccess):
 
     def get_one_pager_ids_for_data_product(self, data_product: str) -> list[str]:
         fqn = f"{self._fqn_prefix}.one_pager_status"
-        response = self._execute(
+        response = self._read(
             f"SELECT one_pager_id FROM {fqn} "  # noqa: S608
             "WHERE data_product = :data_product ORDER BY one_pager_id",
             parameters={"data_product": data_product},
@@ -802,7 +819,7 @@ class LakehouseAccess(DataAccess):
 
     def get_authorized_users(self, one_pager_id: str) -> list[AuthorizedUser]:
         fqn = f"{self._fqn_prefix}.one_pager_authorized_users"
-        response = self._execute(
+        response = self._read(
             f"SELECT one_pager_id, user_initials, user_name, user_email, "  # noqa: S608
             f"user_team, role FROM {fqn} WHERE one_pager_id = :one_pager_id "
             "ORDER BY role, user_initials",
@@ -840,7 +857,7 @@ class LakehouseAccess(DataAccess):
                     f"role_{i}": user.role,
                 }
             )
-        self._execute(
+        self._write(
             f"INSERT INTO {fqn} "  # noqa: S608
             "(one_pager_id, user_initials, user_name, user_email, user_team, role) "
             f"VALUES {', '.join(values)}",
@@ -849,7 +866,7 @@ class LakehouseAccess(DataAccess):
 
     def append_change_log(self, entry: ChangeLogEntry) -> None:
         fqn = f"{self._fqn_prefix}.change_log"
-        self._execute(
+        self._write(
             f"INSERT INTO {fqn} "  # noqa: S608
             "(one_pager_id, version, event_type, author_initials, author_name, "
             "summary, from_status, to_status, status_field, created_at) VALUES "
@@ -890,7 +907,7 @@ class LakehouseAccess(DataAccess):
         for i, entry in enumerate(entries):
             values.append("(" + ", ".join(f":{c}_{i}" for c in columns) + ")")
             parameters.update({f"{c}_{i}": getattr(entry, c) for c in columns})
-        self._execute(
+        self._write(
             f"INSERT INTO {fqn} ({', '.join(columns)}) "  # noqa: S608
             f"VALUES {', '.join(values)}",
             parameters=parameters,
@@ -904,7 +921,7 @@ class LakehouseAccess(DataAccess):
         markers = markers.replace(
             ":reviewed_at", "CAST(:reviewed_at AS TIMESTAMP)"
         )
-        self._execute(
+        self._write(
             f"INSERT INTO {fqn} ({columns}) VALUES ({markers})",  # noqa: S608
             parameters={c: getattr(row, c) for c in _ONE_PAGER_STATUS_COLUMNS},
         )
@@ -913,7 +930,7 @@ class LakehouseAccess(DataAccess):
         # Status row first so the One Pager disappears from the Registry even
         # if one of the later deletes fails.
         for table in ("one_pager_status", "one_pager_authorized_users", "change_log"):
-            self._execute(
+            self._write(
                 f"DELETE FROM {self._fqn_prefix}.{table} "  # noqa: S608
                 "WHERE one_pager_id = :one_pager_id",
                 parameters={"one_pager_id": one_pager_id},
@@ -925,7 +942,7 @@ class LakehouseAccess(DataAccess):
 
     def get_one_pager_status_row(self, one_pager_id: str) -> OnePagerStatusRow | None:
         fqn = f"{self._fqn_prefix}.one_pager_status"
-        response = self._execute(
+        response = self._read(
             f"SELECT {', '.join(_ONE_PAGER_STATUS_COLUMNS)} FROM {fqn} "  # noqa: S608
             "WHERE one_pager_id = :one_pager_id",
             parameters={"one_pager_id": one_pager_id},
@@ -937,7 +954,7 @@ class LakehouseAccess(DataAccess):
         self, one_pager_status: str
     ) -> list[OnePagerStatusRow]:
         fqn = f"{self._fqn_prefix}.one_pager_status"
-        response = self._execute(
+        response = self._read(
             f"SELECT {', '.join(_ONE_PAGER_STATUS_COLUMNS)} FROM {fqn} "  # noqa: S608
             "WHERE one_pager_status = :one_pager_status "
             "ORDER BY last_updated_at ASC, one_pager_id ASC",
@@ -947,7 +964,7 @@ class LakehouseAccess(DataAccess):
 
     def get_pending_pr_rows(self) -> list[OnePagerStatusRow]:
         fqn = f"{self._fqn_prefix}.one_pager_status"
-        response = self._execute(
+        response = self._read(
             f"SELECT {', '.join(_ONE_PAGER_STATUS_COLUMNS)} FROM {fqn} "  # noqa: S608
             "WHERE pending_pr = true "
             "ORDER BY reviewed_at ASC NULLS LAST, one_pager_id ASC"
@@ -957,7 +974,7 @@ class LakehouseAccess(DataAccess):
     def update_authorized_users(self, users: list[AuthorizedUser]) -> None:
         fqn = f"{self._fqn_prefix}.one_pager_authorized_users"
         for user in users:
-            self._execute(
+            self._write(
                 f"UPDATE {fqn} SET user_name = :user_name, "  # noqa: S608
                 "user_email = :user_email, user_team = :user_team, role = :role "
                 "WHERE one_pager_id = :one_pager_id AND user_initials = :user_initials",
@@ -982,7 +999,7 @@ class LakehouseAccess(DataAccess):
             f"initials_{i}": initials for i, initials in enumerate(user_initials)
         }
         parameters["one_pager_id"] = one_pager_id
-        self._execute(
+        self._write(
             f"DELETE FROM {fqn} WHERE one_pager_id = :one_pager_id "  # noqa: S608
             f"AND user_initials IN ({markers})",
             parameters=parameters,
@@ -1006,7 +1023,7 @@ class LakehouseAccess(DataAccess):
             expected_version=expected_version,
             expected_status=expected_status,
         )
-        response = self._execute(
+        response = self._write(
             f"UPDATE {fqn} SET {assignments} "  # noqa: S608
             "WHERE one_pager_id = :one_pager_id AND version = :expected_version "
             "AND one_pager_status = :expected_status",
@@ -1049,7 +1066,7 @@ class LakehouseAccess(DataAccess):
     def add_review_comment(self, comment: ReviewComment) -> None:
         fqn = f"{self._fqn_prefix}.review_comments"
         # NULL parameters are untyped; cast the nullable TIMESTAMP explicitly.
-        self._execute(
+        self._write(
             f"INSERT INTO {fqn} "  # noqa: S608
             "(one_pager_id, version, section, reviewer_initials, reviewer_name, "
             "comment, resolved, resolved_by, created_at, resolved_at) VALUES "
@@ -1079,7 +1096,7 @@ class LakehouseAccess(DataAccess):
         resolved_at: datetime,
     ) -> bool:
         fqn = f"{self._fqn_prefix}.review_comments"
-        response = self._execute(
+        response = self._write(
             f"UPDATE {fqn} SET resolved = true, resolved_by = :resolved_by, "  # noqa: S608
             "resolved_at = :resolved_at "
             "WHERE id = :id AND one_pager_id = :one_pager_id AND resolved = false",
@@ -1094,7 +1111,7 @@ class LakehouseAccess(DataAccess):
 
     def delete_review_comment(self, comment: ReviewComment) -> None:
         fqn = f"{self._fqn_prefix}.review_comments"
-        self._execute(
+        self._write(
             f"DELETE FROM {fqn} WHERE one_pager_id = :one_pager_id "  # noqa: S608
             "AND reviewer_initials = :reviewer_initials AND created_at = :created_at",
             parameters={
@@ -1217,11 +1234,11 @@ class LakehouseAccess(DataAccess):
         )
         try:
             count_rows = self._response_rows(
-                self._execute(count_query, parameters)
+                self._read(count_query, parameters)
             )
             total_rows = int(count_rows[0]["total"]) if count_rows else 0
             rows = self._response_rows(
-                self._execute(page_query, parameters)
+                self._read(page_query, parameters)
             )
         except Exception as e:
             logger.error(f"Failed to fetch use cases: {e}")
@@ -1239,7 +1256,7 @@ class LakehouseAccess(DataAccess):
         query = self._use_cases_select("uc.use_case_id = :use_case_id")
         try:
             rows = self._response_rows(
-                self._execute(
+                self._read(
                     query, {"use_case_id": use_case_id}
                 )
             )
@@ -1257,7 +1274,7 @@ class LakehouseAccess(DataAccess):
         )
         try:
             rows = self._response_rows(
-                self._execute(
+                self._read(
                     query, {"use_case_id": use_case_id}
                 )
             )
@@ -1268,7 +1285,7 @@ class LakehouseAccess(DataAccess):
         return [str(row["one_pager_id"]) for row in rows]
 
     def get_linked_use_case_ids(self, one_pager_id: str) -> list[str]:
-        response = self._execute(
+        response = self._read(
             f"SELECT use_case_id FROM {self._fqn_prefix}.use_case_references "  # noqa: S608
             "WHERE one_pager_id = :one_pager_id ORDER BY use_case_id",
             parameters={"one_pager_id": one_pager_id},
@@ -1278,7 +1295,7 @@ class LakehouseAccess(DataAccess):
     def add_use_case_reference(self, one_pager_id: str, use_case_id: str) -> None:
         # MERGE keeps the (one_pager_id, use_case_id) key unique; Delta does
         # not enforce the primary key.
-        self._execute(
+        self._write(
             f"MERGE INTO {self._fqn_prefix}.use_case_references t "  # noqa: S608
             "USING (SELECT :one_pager_id AS one_pager_id, "
             ":use_case_id AS use_case_id) s "
@@ -1289,7 +1306,7 @@ class LakehouseAccess(DataAccess):
         )
 
     def remove_use_case_reference(self, one_pager_id: str, use_case_id: str) -> None:
-        self._execute(
+        self._write(
             f"DELETE FROM {self._fqn_prefix}.use_case_references "  # noqa: S608
             "WHERE one_pager_id = :one_pager_id AND use_case_id = :use_case_id",
             parameters={"one_pager_id": one_pager_id, "use_case_id": use_case_id},
@@ -1324,7 +1341,7 @@ class LakehouseAccess(DataAccess):
             "user_initials": user_initials,
         }
         try:
-            self._execute(query, parameters)
+            self._write(query, parameters)
         except Exception as e:
             logger.error(f"Failed to create use case {use_case_id}: {e}")
             msg = f"Failed to create Use Case: {e}"
@@ -1345,7 +1362,7 @@ class LakehouseAccess(DataAccess):
             f"WHERE use_case_id = :use_case_id"
         )
         try:
-            response = self._execute(
+            response = self._write(
                 query, {**parameters, "use_case_id": use_case_id}
             )
         except Exception as e:

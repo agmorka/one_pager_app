@@ -768,6 +768,9 @@ def test__write__binds_the_actor(method: str) -> None:
 
     writes = _write_statements(conn)
     assert writes, f"{method} sent no write statement"
+    # Writes, and the ID-sequence read that is part of a write, run as the
+    # service principal (identity plan Phase 4).
+    assert set(conn.identities) == {Identity.APP}, f"{method} ran as the user"
     for statement, params in writes:
         assert ACTOR in params.values(), f"{method}: actor not bound in {statement}"
         assert ACTOR not in statement, f"{method}: actor interpolated into SQL"
