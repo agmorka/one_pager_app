@@ -115,15 +115,16 @@ def document_to_dict(document: OnePagerDocument) -> dict[str, Any]:
 
 def document_to_yaml(document: OnePagerDocument) -> str:
     """Serialize an OnePagerDocument to YAML text."""
-    return yaml.safe_dump(
+    text: str = yaml.safe_dump(
         document_to_dict(document),
         sort_keys=False,
         allow_unicode=True,
         default_flow_style=False,
     )
+    return text
 
 
-def _optional_str(value: Any) -> str | None:
+def _optional_str(value: Any) -> str | None:  # noqa: ANN401 - any YAML scalar
     """Return ``value`` as a string, or None when absent.
 
     YAML may parse unquoted timestamps into datetime objects; they are kept as

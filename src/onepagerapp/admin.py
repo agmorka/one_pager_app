@@ -30,12 +30,7 @@ from onepagerapp.data_access.base import (
     check_reference_table,
     check_status_table,
 )
-from onepagerapp.models import (
-    CurrentUser,
-    OnePagerStatusRow,
-    RegistryFilter,
-    StatusRef,
-)
+from onepagerapp.models import CurrentUser, OnePagerStatusRow, RegistryFilter, StatusRef
 from onepagerapp.permissions import (
     PermissionDeniedError,
     can_administer,
@@ -191,6 +186,7 @@ def _log_change(
         action,
         Outcome.SUCCESS,
         user=user.initials if user else None,
+        one_pager_id=None,
         table=table,
         **details,
     )

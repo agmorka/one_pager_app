@@ -10,31 +10,39 @@ The view:
 4. Renders paginated interactive table with sortable column headers and a View
    button per row
 5. Each ID click navigates to the Preview page for that One Pager
-6. Handles all page states: Loading, Populated, Empty (no filters), Empty (after filter), Error
+6. Handles all page states: Loading, Populated, Empty (no filters), Empty (after
+   filter), Error
 
-Per Backend_Design.md §3, all authenticated users can read the registry (no role filtering in v1).
-Per UI_Design.md §4.2, table rows are interactive and ID links navigate to preview on click.
+Per Backend_Design.md §3, all authenticated users can read the registry (no role
+filtering in v1). Per UI_Design.md §4.2, table rows are interactive and ID links
+navigate to preview on click.
 """
 
 import logging
 
+import pandas as pd
 import streamlit as st
 
 from adapters import cache
+from adapters.navigation import open_editor, open_preview
+from adapters.page import (
+    current_roles,
+    current_user,
+    render_error_state,
+    require_data_access,
+)
 from adapters.theme import (
     TOTAL_CARD_COLOR,
     get_dp_status_colors,
     get_op_status_colors,
 )
 from onepagerapp.data_access.base import DataAccess
-from onepagerapp.data_access.connection import (
-    ReadAccessDeniedError,
-    SessionExpiredError,
-)
+from onepagerapp.data_access.connection import user_error_message
 from onepagerapp.locking import get_active_locks
 from onepagerapp.models import (
     LockInfo,
     RegistryFilter,
+    RegistryPage,
     RegistrySort,
     UseCase,
     UseCaseFilter,
@@ -42,6 +50,9 @@ from onepagerapp.models import (
 from onepagerapp.permissions import can_create_one_pager
 
 logger = logging.getLogger(__name__)
+
+REFERENCE_ERROR_MESSAGE = "Couldn't load the reference data. Please retry."
+LOAD_ERROR_MESSAGE = "Couldn't load the One Pagers. Please retry."
 
 # Pagination settings
 ROWS_PER_PAGE = 20
@@ -58,7 +69,16 @@ FILTER_DEFAULTS: dict[str, str] = {
 }
 
 # Table columns to display
-TABLE_COLUMNS = ["ID", "Product", "Domain", "DP Type", "Owner", "OP Status", "DP Status", "Lock"]
+TABLE_COLUMNS = [
+    "ID",
+    "Product",
+    "Domain",
+    "DP Type",
+    "Owner",
+    "OP Status",
+    "DP Status",
+    "Lock",
+]
 
 # Table column title -> RegistryRow field it sorts by. Lock is not sortable.
 SORTABLE_COLUMNS: dict[str, str] = {
@@ -81,78 +101,85 @@ LOCKS_UNAVAILABLE = "?"
 
 
 # ============================================================================
-# Cached Data Loaders
+# Cached Data
 # ============================================================================
 
+
 @st.cache_data
-def _get_cached_op_status_colors(_data_access):
+def _get_cached_op_status_colors(_data_access: DataAccess) -> dict[str, str]:
     """Load and cache One Pager status colors for the session.
-    
+
     Args:
         _data_access: Data access instance (used for cache key).
-        
+
     Returns:
         Dict mapping One Pager status → hex color code.
+
     """
     return get_op_status_colors(_data_access)
 
 
 @st.cache_data
-def _get_cached_dp_status_colors(_data_access):
+def _get_cached_dp_status_colors(_data_access: DataAccess) -> dict[str, str]:
     """Load and cache Data Product status colors for the session.
-    
+
     Args:
         _data_access: Data access instance (used for cache key).
-        
+
     Returns:
         Dict mapping Data Product status → hex color code.
+
     """
     return get_dp_status_colors(_data_access)
 
 
 @st.cache_data
-def _get_cached_business_domains(_data_access):
+def _get_cached_business_domains(_data_access: DataAccess) -> pd.DataFrame:
     """Load and cache business domain reference data for the session.
-    
+
     Args:
         _data_access: Data access instance (used for cache key).
-        
+
     Returns:
         DataFrame with domain reference data.
+
     """
     return _data_access.get_ref_business_domains()
 
 
 @st.cache_data
-def _get_cached_data_product_types(_data_access):
+def _get_cached_data_product_types(_data_access: DataAccess) -> pd.DataFrame:
     """Load and cache data product type reference data for the session.
-    
+
     Args:
         _data_access: Data access instance (used for cache key).
-        
+
     Returns:
         DataFrame with data product type reference data.
+
     """
     return _data_access.get_ref_data_product_types()
 
 
 # ============================================================================
-# Render Helpers
+# Helpers
 # ============================================================================
+
 
 def _render_metric_card(
     label: str, value: int, color: str, *, active: bool = False
 ) -> str:
     """Generate HTML for a colored metric card.
-    
+
     Args:
         label: Text label for the metric.
         value: Numeric value to display.
         color: Hex color code for the card background.
         active: Whether the table is currently filtered by this card.
-        
+
     Returns:
         HTML string for the metric card.
+
     """
     outline = "outline:3px solid #1B1B1B;outline-offset:2px;" if active else ""
     return (
@@ -172,11 +199,12 @@ def _render_metrics(
     status_counts: dict, op_status_colors: dict, active_status: str
 ) -> None:
     """Render the status metrics row; the card of the status filter is outlined.
-    
+
     Args:
         status_counts: Dict mapping status → count.
         op_status_colors: Dict mapping status → hex color.
         active_status: The OP status filter in effect ("All" when none).
+
     """
     metric_cols = st.columns(len(op_status_colors) + 1)
     total = sum(status_counts.values())
@@ -186,8 +214,12 @@ def _render_metrics(
         ),
         unsafe_allow_html=True,
     )
-    status_counts_enriched = {status: status_counts.get(status, 0) for status in op_status_colors.keys()}
-    for col, (status, count) in zip(metric_cols[1:], status_counts_enriched.items(), strict=False):
+    status_counts_enriched = {
+        status: status_counts.get(status, 0) for status in op_status_colors
+    }
+    for col, (status, count) in zip(
+        metric_cols[1:], status_counts_enriched.items(), strict=False
+    ):
         color = op_status_colors.get(status, "#808080")
         col.markdown(
             _render_metric_card(status, count, color, active=active_status == status),
@@ -228,20 +260,26 @@ def use_case_option_label(use_case: UseCase) -> str:
     return f"{label} (deprecated)" if use_case.deprecated else label
 
 
-def _render_filter_bar(op_status_colors: dict, dp_status_colors: dict, 
-                       domain_options: list, type_options: list,
-                       use_case_labels: dict[str, str]) -> tuple:
+def _render_filter_bar(
+    op_status_colors: dict,
+    dp_status_colors: dict,
+    domain_options: list,
+    type_options: list,
+    use_case_labels: dict[str, str],
+) -> tuple:
     """Render the filter bar and return current filter values.
-    
+
     Args:
         op_status_colors: Dict mapping OP status → color.
         dp_status_colors: Dict mapping DP status → color.
         domain_options: List of available domains.
         type_options: List of available data product types.
         use_case_labels: Use Case ID → option label ("All" is added here).
-        
+
     Returns:
-        Tuple of (product_name, op_status, dp_status, owner, domain, data_type, use_case) filters.
+        Tuple of (product_name, op_status, dp_status, owner, domain, data_type,
+        use_case) filters.
+
     """
     filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
     with filter_col1:
@@ -250,12 +288,16 @@ def _render_filter_bar(op_status_colors: dict, dp_status_colors: dict,
         )
     with filter_col2:
         filter_op_status = st.selectbox(
-            "OP Status", options=["All", *op_status_colors], key="filter_op_status",
+            "OP Status",
+            options=["All", *op_status_colors],
+            key="filter_op_status",
             on_change=_reset_page,
         )
     with filter_col3:
         filter_dp_status = st.selectbox(
-            "DP Status", options=["All", *dp_status_colors], key="filter_dp_status",
+            "DP Status",
+            options=["All", *dp_status_colors],
+            key="filter_dp_status",
             on_change=_reset_page,
         )
     with filter_col4:
@@ -289,8 +331,15 @@ def _render_filter_bar(op_status_colors: dict, dp_status_colors: dict,
         st.markdown("")
         st.button("Clear filters", on_click=_clear_filters)
 
-    return (filter_product_name, filter_op_status, filter_dp_status, filter_owner,
-            filter_domain, filter_type, filter_use_case)
+    return (
+        filter_product_name,
+        filter_op_status,
+        filter_dp_status,
+        filter_owner,
+        filter_domain,
+        filter_type,
+        filter_use_case,
+    )
 
 
 def _navigate_to_create() -> None:
@@ -298,24 +347,24 @@ def _navigate_to_create() -> None:
     # Drop any leftover form state so the new document starts blank.
     for key in [k for k in st.session_state if str(k).startswith("create_")]:
         del st.session_state[key]
-    st.session_state["editor_mode"] = "create"
-    st.switch_page("views/editor.py")
+    open_editor("create")
 
 
 def _can_create() -> bool:
     """Whether the signed-in user may create One Pagers (Owner/SME group)."""
-    return can_create_one_pager(
-        st.session_state.get("current_user_info"),
-        st.session_state.get("current_user_roles", frozenset()),
-    )
+    return can_create_one_pager(current_user(), current_roles())
 
 
 def _render_new_button(key: str) -> None:
     """Render [+ New] for users allowed to create One Pagers (UI_Design §4.1)."""
-    if _can_create():
-        # Button labels are Markdown; a leading "+" would render as a bullet.
-        if st.button("➕ New", key=key, type="primary", help="Create a new One Pager"):
-            _navigate_to_create()
+    # Button labels are Markdown; a leading "+" would render as a bullet.
+    if _can_create() and st.button(
+        "➕ New",  # noqa: RUF001
+        key=key,
+        type="primary",
+        help="Create a new One Pager",
+    ):
+        _navigate_to_create()
 
 
 def _navigate_to_preview(one_pager_id: str) -> None:
@@ -323,10 +372,9 @@ def _navigate_to_preview(one_pager_id: str) -> None:
 
     Args:
         one_pager_id: The ID of the One Pager to preview.
+
     """
-    # session_state survives st.switch_page; query params set here would be cleared.
-    st.session_state["preview_one_pager_id"] = one_pager_id
-    st.switch_page("views/preview.py")
+    open_preview(one_pager_id)
 
 
 # Column layout ratios shared by the header and every data row so cells align.
@@ -385,7 +433,9 @@ def lock_cell(lock: LockInfo | None) -> str:
     return f"🔒 {lock.locked_by_initials}" if lock else ""
 
 
-def _load_locks(data_access, registry_page) -> dict[str, LockInfo] | None:
+def _load_locks(
+    data_access: DataAccess, registry_page: RegistryPage
+) -> dict[str, LockInfo] | None:
     """Active locks of the rows on this page, read fresh (never cached).
 
     Returns None when the locks cannot be read; the table still renders.
@@ -399,12 +449,15 @@ def _load_locks(data_access, registry_page) -> dict[str, LockInfo] | None:
         return None
 
 
-def _render_interactive_table(registry_page, locks: dict[str, LockInfo] | None) -> None:
+def _render_interactive_table(
+    registry_page: RegistryPage, locks: dict[str, LockInfo] | None
+) -> None:
     """Render registry data as a table with a "View" button on each row.
 
     Args:
         registry_page: Page object with rows and metadata.
         locks: Active locks by One Pager ID, or None if they could not be read.
+
     """
     st.caption(
         "Click the View button on a row to open the One Pager in the Preview page. "
@@ -427,7 +480,9 @@ def _render_interactive_table(registry_page, locks: dict[str, LockInfo] | None) 
             row.owner_name,
             row.one_pager_status,
             row.data_product_status,
-            lock_cell(locks.get(row.one_pager_id)) if locks is not None else LOCKS_UNAVAILABLE,
+            lock_cell(locks.get(row.one_pager_id))
+            if locks is not None
+            else LOCKS_UNAVAILABLE,
         ]
         row_cols = st.columns(_ROW_COLUMN_RATIOS)
         for col, value in zip(row_cols[:-1], values, strict=False):
@@ -444,10 +499,11 @@ def _render_interactive_table(registry_page, locks: dict[str, LockInfo] | None) 
 
 def _render_pagination(current_page: int, total_pages: int) -> None:
     """Render pagination controls.
-    
+
     Args:
         current_page: Current page number (1-indexed).
         total_pages: Total number of pages.
+
     """
     st.markdown("---")
     pag_cols = st.columns([4, 1, 1, 1, 4])
@@ -468,24 +524,32 @@ def _render_pagination(current_page: int, total_pages: int) -> None:
 
 
 # ============================================================================
-# Page State Renderers
+# Page States
 # ============================================================================
 
+
 def _render_page_state_populated(
-    registry_page, total_pages: int, current_page: int, locks: dict[str, LockInfo] | None
+    registry_page: RegistryPage,
+    total_pages: int,
+    current_page: int,
+    locks: dict[str, LockInfo] | None,
 ) -> None:
     """Render populated page state with interactive table and pagination.
-    
+
     Args:
         registry_page: Page object with rows and metadata.
         total_pages: Total number of pages.
         current_page: Current page number.
         locks: Active locks by One Pager ID, or None if unavailable.
+
     """
-    st.markdown(f"**Showing {len(registry_page.rows)} of {registry_page.total_rows} One Pagers**")
-    
+    st.markdown(
+        f"**Showing {len(registry_page.rows)} of {registry_page.total_rows} "
+        "One Pagers**"
+    )
+
     _render_interactive_table(registry_page, locks)
-    
+
     if total_pages > 1:
         _render_pagination(current_page, total_pages)
 
@@ -502,10 +566,9 @@ def _render_page_state_empty_no_filters() -> None:
 def _render_page_state_empty_with_filters() -> None:
     """Render page state when filters are applied but no results match."""
     st.warning(
-        "🔍 **No One Pagers match your filters.** "
-        "Try adjusting your filter criteria."
+        "🔍 **No One Pagers match your filters.** Try adjusting your filter criteria."
     )
-    col1, col2, col3 = st.columns([1, 1, 3])
+    col1, _, _ = st.columns([1, 1, 3])
     with col1:
         if st.button("Clear all filters"):
             _clear_filters()
@@ -515,6 +578,8 @@ def _render_page_state_empty_with_filters() -> None:
 # ============================================================================
 # Registry Page
 # ============================================================================
+
+data_access = require_data_access()
 
 # Page title and description, with [+ New] on the right
 title_col, new_col = st.columns([6, 1])
@@ -527,58 +592,34 @@ st.markdown("Browse, search, and filter all One Pagers.")
 st.markdown("")
 st.markdown("")
 
-# Initialize data access and load reference data
+# Load reference data (status colors)
 try:
-    data_access = st.session_state.data_access
     op_status_colors = _get_cached_op_status_colors(data_access)
     dp_status_colors = _get_cached_dp_status_colors(data_access)
-except (ReadAccessDeniedError, SessionExpiredError) as e:
-    st.error(str(e))
-    st.stop()
-except RuntimeError as e:
-    logger.exception("Failed to load reference data")
-    st.error(
-        f"**Unable to load reference data:**\n\n{e}\n\n"
-        "Please check that:\n"
-        "1. All tables have been deployed via Liquibase migrations\n"
-        "2. Tables have the required columns: `status`, `display_label`, `sort_order`, `badge_color`, `is_terminal`\n"
-        "3. Tables are not empty"
-    )
-    st.stop()
-except KeyError as e:
-    logger.exception("Missing required column in reference data")
-    st.error(
-        f"**Missing column in reference data:** `{e.args[0]}`\n\n"
-        "Reference tables must have columns: `status`, `display_label`, `sort_order`, `badge_color`, `is_terminal`"
-    )
-    st.stop()
 except Exception as e:
-    logger.exception("Unexpected error loading reference data")
-    st.error(
-        f"**Unexpected error:** {type(e).__name__}: {e}\n\n"
-        "Please check the server logs for more details."
+    logger.exception("Failed to load reference data")
+    render_error_state(
+        user_error_message(e, REFERENCE_ERROR_MESSAGE), key="registry_retry_reference"
     )
-    st.stop()
 
 # Load filter dropdown options
 try:
     domains_df = _get_cached_business_domains(data_access)
-    domain_options = ["All"] + domains_df["domain"].tolist()
-except Exception as e:
+    domain_options = ["All", *domains_df["domain"].tolist()]
+except Exception:
     logger.exception("Failed to load business domains")
     domain_options = ["All"]
 
 try:
     types_df = _get_cached_data_product_types(data_access)
-    type_options = ["All"] + types_df["type"].tolist()
-except Exception as e:
+    type_options = ["All", *types_df["type"].tolist()]
+except Exception:
     logger.exception("Failed to load data product types")
     type_options = ["All"]
 
 try:
     use_case_labels = {
-        uc.use_case_id: use_case_option_label(uc)
-        for uc in _load_use_cases(data_access)
+        uc.use_case_id: use_case_option_label(uc) for uc in _load_use_cases(data_access)
     }
 except Exception:
     logger.exception("Failed to load use cases for the registry filter")
@@ -587,12 +628,16 @@ except Exception:
 # Render metrics row
 st.markdown("**Status Summary**")
 filter_obj = RegistryFilter(
-    product_name=None, op_status=None, dp_status=None, 
-    owner=None, domain=None, data_product_type=None
+    product_name=None,
+    op_status=None,
+    dp_status=None,
+    owner=None,
+    domain=None,
+    data_product_type=None,
 )
 try:
     status_counts = cache.get_registry_status_counts(data_access, filter_obj)
-except Exception as e:
+except Exception:
     logger.exception("Failed to fetch status counts")
     status_counts = dict.fromkeys(op_status_colors, 0)
 
@@ -604,8 +649,15 @@ st.markdown("")
 
 # Render filter bar
 st.markdown("**Filters**")
-(filter_product_name, filter_op_status, filter_dp_status, 
- filter_owner, filter_domain, filter_type, filter_use_case) = _render_filter_bar(
+(
+    filter_product_name,
+    filter_op_status,
+    filter_dp_status,
+    filter_owner,
+    filter_domain,
+    filter_type,
+    filter_use_case,
+) = _render_filter_bar(
     op_status_colors, dp_status_colors, domain_options, type_options, use_case_labels
 )
 st.markdown("")
@@ -623,15 +675,17 @@ current_filter = RegistryFilter(
 )
 
 # Check if any filter is active
-has_active_filter = any([
-    filter_product_name,
-    filter_op_status != "All",
-    filter_dp_status != "All",
-    filter_owner,
-    filter_domain != "All",
-    filter_type != "All",
-    filter_use_case != "All",
-])
+has_active_filter = any(
+    [
+        filter_product_name,
+        filter_op_status != "All",
+        filter_dp_status != "All",
+        filter_owner,
+        filter_domain != "All",
+        filter_type != "All",
+        filter_use_case != "All",
+    ]
+)
 
 # Initialize pagination state
 if "registry_page" not in st.session_state:
@@ -647,38 +701,26 @@ try:
             ROWS_PER_PAGE,
             current_sort(),
         )
-    
+
     total_pages = registry_page.total_pages
     current_page = st.session_state.registry_page
     current_page = min(current_page, total_pages) if total_pages > 0 else 1
-    
+
     # Render appropriate page state
     if registry_page.rows:
         _render_page_state_populated(
-            registry_page, total_pages, current_page, _load_locks(data_access, registry_page)
+            registry_page,
+            total_pages,
+            current_page,
+            _load_locks(data_access, registry_page),
         )
     elif not has_active_filter and registry_page.total_rows == 0:
         _render_page_state_empty_no_filters()
     elif has_active_filter and registry_page.total_rows == 0:
         _render_page_state_empty_with_filters()
 
-except (ReadAccessDeniedError, SessionExpiredError) as e:
-    st.error(str(e))
-
-except RuntimeError as e:
-    logger.exception("Failed to fetch registry data")
-    st.error(
-        f"**Unable to load One Pagers**\n\n"
-        f"Please check that:\n"
-        f"1. All tables have been deployed via Liquibase migrations\n"
-        f"2. Tables are accessible and not empty\n"
-        f"3. Check server logs for detailed error information"
-    )
-
 except Exception as e:
-    logger.exception("Unexpected error fetching registry data")
-    st.error(
-        f"**Unexpected error**\n\n"
-        f"An error occurred while loading One Pagers. "
-        f"Please check the server logs for details and try again."
+    logger.exception("Failed to fetch registry data")
+    render_error_state(
+        user_error_message(e, LOAD_ERROR_MESSAGE), key="registry_retry_load"
     )

@@ -15,6 +15,7 @@ Pure Python — no Streamlit, no storage.
 
 from dataclasses import dataclass
 from enum import Enum
+from functools import partial
 from typing import Any
 
 OP_STATUS_FIELD = "one_pager_status"
@@ -148,7 +149,8 @@ _OWNER = (Actor.OWNER_SME,)
 _SYSTEM = (Actor.SYSTEM,)
 
 
-def _op(  # noqa: PLR0913 - mirrors the columns of the Backend_Design table
+def _rule(  # noqa: PLR0913 - mirrors the columns of the Backend_Design table
+    status_field: str,
     action: str,
     from_status: str,
     to_status: str,
@@ -159,7 +161,7 @@ def _op(  # noqa: PLR0913 - mirrors the columns of the Backend_Design table
 ) -> TransitionRule:
     return TransitionRule(
         action=action,
-        status_field=OP_STATUS_FIELD,
+        status_field=status_field,
         from_status=from_status,
         to_status=to_status,
         actors=actors,
@@ -169,25 +171,9 @@ def _op(  # noqa: PLR0913 - mirrors the columns of the Backend_Design table
     )
 
 
-def _dp(  # noqa: PLR0913 - mirrors the columns of the Backend_Design table
-    action: str,
-    from_status: str,
-    to_status: str,
-    actors: tuple[Actor, ...],
-    label: str,
-    summary: str,
-    **guards: Any,  # noqa: ANN401 - TransitionRule guard fields
-) -> TransitionRule:
-    return TransitionRule(
-        action=action,
-        status_field=DP_STATUS_FIELD,
-        from_status=from_status,
-        to_status=to_status,
-        actors=actors,
-        label=label,
-        summary=summary,
-        **guards,
-    )
+# Rules of the One Pager status and of the Data Product status.
+_op = partial(_rule, OP_STATUS_FIELD)
+_dp = partial(_rule, DP_STATUS_FIELD)
 
 
 _CANCELLABLE = (DRAFT, READY_FOR_REVIEW, IN_REVIEW)

@@ -14,7 +14,6 @@ Per Requirements_and_Scope.md §14, Use Case IDs are assigned by the application
 never entered by the user.
 """
 
-import re
 from collections.abc import Collection
 from typing import TYPE_CHECKING
 
@@ -26,6 +25,7 @@ from onepagerapp.permissions import (
     require_identity,
 )
 from onepagerapp.state_machine import Actor
+from onepagerapp.validation import sanitize_text
 
 if TYPE_CHECKING:
     from onepagerapp.data_access.base import DataAccess
@@ -41,13 +41,6 @@ USE_CASE_FIELDS: dict[str, tuple[str, int]] = {
     "decision_enabled": ("Decision enabled", 1000),
 }
 
-_HTML_TAG = re.compile(r"<[^>]*>")
-
-
-def _clean_text(value: str | None) -> str:
-    """Strip HTML tags and surrounding whitespace (Testing_Strategy.md §6)."""
-    return _HTML_TAG.sub("", value or "").strip()
-
 
 def clean_use_case_input(data: UseCaseInput) -> UseCaseInput:
     """Return a copy of the input with HTML tags and outer whitespace removed.
@@ -60,10 +53,10 @@ def clean_use_case_input(data: UseCaseInput) -> UseCaseInput:
 
     """
     return UseCaseInput(
-        persona=_clean_text(data.persona),
-        goal=_clean_text(data.goal),
-        scenario=_clean_text(data.scenario),
-        decision_enabled=_clean_text(data.decision_enabled),
+        persona=sanitize_text(data.persona),
+        goal=sanitize_text(data.goal),
+        scenario=sanitize_text(data.scenario),
+        decision_enabled=sanitize_text(data.decision_enabled),
         priority=(data.priority or "").strip(),
     )
 

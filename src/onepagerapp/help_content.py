@@ -59,8 +59,7 @@ ROLES: tuple[RoleInfo, ...] = (
     ),
     RoleInfo(
         "Approver",
-        "A member of the Approver group (reviewers from the partner "
-        "institution).",
+        "A member of the Approver group (reviewers from the partner institution).",
         "Approves or rejects One Pagers in review and adds section-level "
         "review comments. Never on a One Pager where they are Owner or SME.",
     ),
@@ -200,9 +199,7 @@ def status_legend(
     listed last with the default color, so the legend is always complete.
     """
     rows = {
-        str(r["status"]): r
-        for r in ref_statuses.to_dict("records")
-        if "status" in r
+        str(r["status"]): r for r in ref_statuses.to_dict("records") if "status" in r
     }
 
     def order(status: str) -> tuple[int, int]:

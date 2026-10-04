@@ -13,7 +13,7 @@ re-run, which is the lock heartbeat (Backend_Design.md §6).
 import logging
 import re
 from collections.abc import Callable
-from datetime import UTC, timedelta
+from datetime import timedelta
 
 import pandas as pd
 import streamlit as st
@@ -28,6 +28,19 @@ from adapters.edit_tabs import (
     render_requirements_tab,
     render_scope_tab,
     render_use_cases_tab,
+)
+from adapters.navigation import (
+    EDITOR_ID_KEY,
+    EDITOR_MODE_KEY,
+    open_in_editor,
+    open_preview,
+)
+from adapters.page import (
+    ALERT_ICON,
+    current_user,
+    render_error_state,
+    show_flash,
+    timestamp_label,
 )
 from adapters.session import current_session_id
 from adapters.workflow_actions import resolve_comment_and_report
@@ -255,7 +268,7 @@ def _resolve_in_editor(
 
 
 def _render_checklist(doc: OnePagerDocument) -> int:
-    """Validation checklist per tab (strict tier); returns the issue count."""
+    """Render the validation checklist per tab (strict tier); return the count."""
     issues = issues_by_tab(submission_issues(doc, st.session_state[STATUS_ROW_KEY]))
     st.markdown("**Validation checklist**")
     for tab in [t for t in TABS if t != REVIEW_TAB]:
@@ -281,12 +294,12 @@ def _render_open_comments(data_access: DataAccess, one_pager_id: str) -> None:
         comments = data_access.get_review_comments(one_pager_id)
     except Exception:
         logger.exception(f"Failed to load the review comments of {one_pager_id}")
-        st.warning("Review comments are unavailable right now.", icon="⚠️")
+        st.warning("Review comments are unavailable right now.", icon=ALERT_ICON)
         return
     if not comments:
         st.caption("No review comments.")
         return
-    user = st.session_state.get("current_user_info")
+    user = current_user()
     unresolved = [c for c in comments if not c.resolved]
     resolved = [c for c in comments if c.resolved]
     if not unresolved:
@@ -334,7 +347,7 @@ def render_review_tab(doc: OnePagerDocument, data_access: DataAccess) -> None:
         reason = f"Fix the {issue_count} issue(s) of the checklist first."
     else:
         reason = "Sends the One Pager to review. Releases your lock."
-    user = st.session_state.get("current_user_info")
+    user = current_user()
     if st.button(
         "Submit for Review",
         key="edit_review_submit",
@@ -374,18 +387,15 @@ TABS: dict[str, TabRenderer] = {
 def _lock_expiry(lock: LockInfo | None) -> str:
     if lock is None:
         return ""
-    expires = lock.expires_at
-    if expires.tzinfo is not None:
-        expires = expires.astimezone(UTC)
-    return f" (expires {expires.strftime('%H:%M')} UTC)"
+    return f" (expires {timestamp_label(lock.expires_at, '%H:%M')})"
 
 
-def _go_to_preview(one_pager_id: str) -> None:
+def _leave_editor(one_pager_id: str, flash: str | None = None) -> None:
+    """Clear the editor's state and switch to Preview of the One Pager."""
     clear_edit_state()
-    st.session_state.pop("editor_mode", None)
-    st.session_state.pop("editor_one_pager_id", None)
-    st.session_state["preview_one_pager_id"] = one_pager_id
-    st.switch_page("views/preview.py")
+    st.session_state.pop(EDITOR_MODE_KEY, None)
+    st.session_state.pop(EDITOR_ID_KEY, None)
+    open_preview(one_pager_id, flash)
 
 
 def close_editor(data_access: DataAccess, one_pager_id: str, user: CurrentUser) -> None:
@@ -395,7 +405,7 @@ def close_editor(data_access: DataAccess, one_pager_id: str, user: CurrentUser) 
     except Exception:
         # The lock expires on its own; leaving the editor must not fail.
         logger.exception(f"Failed to release the lock on {one_pager_id}")
-    _go_to_preview(one_pager_id)
+    _leave_editor(one_pager_id)
 
 
 def is_dirty() -> bool:
@@ -463,12 +473,6 @@ def _release_quietly(
     clear_edit_state()
 
 
-def _return_to_editor(one_pager_id: str) -> None:
-    st.session_state["editor_mode"] = "edit"
-    st.session_state["editor_one_pager_id"] = one_pager_id
-    st.switch_page("views/editor.py")
-
-
 @st.dialog("You have unsaved changes")
 def _confirm_leave(
     data_access: DataAccess, one_pager_id: str, user: CurrentUser
@@ -481,7 +485,7 @@ def _confirm_leave(
     if col_back.button(
         "Return to the Editor", type="primary", use_container_width=True
     ):
-        _return_to_editor(one_pager_id)
+        open_in_editor(one_pager_id)
     if col_discard.button("Discard changes", use_container_width=True):
         _release_quietly(data_access, one_pager_id, user)
         st.rerun()
@@ -497,8 +501,8 @@ def navigation_guard(
     edit_id = st.session_state.get(ONE_PAGER_KEY)
     action = guard_action(
         on_editor_page=page_title == "Editor",
-        editor_mode=st.session_state.get("editor_mode"),
-        editor_one_pager_id=st.session_state.get("editor_one_pager_id"),
+        editor_mode=st.session_state.get(EDITOR_MODE_KEY),
+        editor_one_pager_id=st.session_state.get(EDITOR_ID_KEY),
         edit_one_pager_id=edit_id,
         dirty=is_dirty(),
     )
@@ -512,7 +516,7 @@ def navigation_guard(
     with st.sidebar:
         st.warning(f"Unsaved changes in the Editor ({edit_id}).", icon="✏️")
         if st.button("Return to the Editor", key="guard_return"):
-            _return_to_editor(edit_id)
+            open_in_editor(edit_id)
     if st.session_state.get("guard_prompted") != edit_id:
         st.session_state["guard_prompted"] = edit_id
         _confirm_leave(data_access, edit_id, user)
@@ -520,7 +524,7 @@ def navigation_guard(
 
 def _stop_with_preview_link(one_pager_id: str) -> None:
     if st.button("Open in Preview", key="edit_open_preview"):
-        _go_to_preview(one_pager_id)
+        _leave_editor(one_pager_id)
     st.stop()
 
 
@@ -544,10 +548,9 @@ def _open(data_access: DataAccess, one_pager_id: str, user: CurrentUser) -> None
         _stop_with_preview_link(one_pager_id)
     except Exception as e:  # DocumentMissingError or storage failure
         logger.exception(f"Failed to open {one_pager_id} for editing")
-        st.error(user_error_message(e, LOAD_ERROR_MESSAGE), icon="⚠️")
-        if st.button("Retry", key="edit_retry_open"):
-            st.rerun()
-        st.stop()
+        render_error_state(
+            user_error_message(e, LOAD_ERROR_MESSAGE), key="edit_retry_open"
+        )
 
     if not session.lock.acquired:
         st.warning(session.lock.message, icon="🔒")
@@ -577,7 +580,7 @@ def _heartbeat(data_access: DataAccess, one_pager_id: str, user: CurrentUser) ->
         st.error(
             "Couldn't confirm your edit lock. Your changes are preserved — "
             "please retry.",
-            icon="⚠️",
+            icon=ALERT_ICON,
         )
         if st.button("Retry", key="edit_retry_lock"):
             st.rerun()
@@ -791,14 +794,9 @@ def _submit(data_access: DataAccess, one_pager_id: str, user: CurrentUser) -> No
             "Fix them (see the summary below), save, and submit again."
         )
         return
-    clear_edit_state()
-    st.session_state.pop("editor_mode", None)
-    st.session_state.pop("editor_one_pager_id", None)
-    st.session_state["preview_one_pager_id"] = one_pager_id
-    st.session_state["preview_flash"] = (
-        f"{one_pager_id} was submitted for review and is now In Review."
+    _leave_editor(
+        one_pager_id, f"{one_pager_id} was submitted for review and is now In Review."
     )
-    st.switch_page("views/preview.py")
 
 
 def render_bottom_bar(
@@ -860,7 +858,7 @@ def render_edit_mode(
     user: CurrentUser | None,
 ) -> None:
     """Render the Editor for the One Pager in ``editor_one_pager_id``."""
-    one_pager_id = st.session_state.get("editor_one_pager_id")
+    one_pager_id = st.session_state.get(EDITOR_ID_KEY)
     if not one_pager_id or user is None:
         st.title("Editor")
         st.info("Open a One Pager in Preview and choose **Edit**.")
@@ -876,10 +874,8 @@ def render_edit_mode(
 
     banner = st.session_state.get(BANNER_KEY)
     if banner:
-        st.error(banner, icon="⚠️")
-    flash = st.session_state.pop(FLASH_KEY, None)
-    if flash:
-        st.success(flash)
+        st.error(banner, icon=ALERT_ICON)
+    show_flash(FLASH_KEY)
 
     active = render_tab_bar()
     # Placed above the tab but filled after it, so the badges reflect the

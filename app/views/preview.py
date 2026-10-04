@@ -1,9 +1,10 @@
 """Preview page — read-only view of a single One Pager.
 
 Displays the complete One Pager document with header, status timeline, content sections,
-change log, review comments, and lock indicator. The action bar shows the actions that
-apply to the user's role and the One Pager's statuses (``permissions.get_action_states``,
-derived from the workflow state machine); actions not implemented yet are disabled.
+change log, review comments, and lock indicator. The action bar shows the actions
+that apply to the user's role and the One Pager's statuses
+(``permissions.get_action_states``, derived from the workflow state machine);
+actions not implemented yet are disabled.
 
 The view:
 1. Resolves one_pager_id from session state or the query param; without one it
@@ -19,14 +20,46 @@ Per UI_Design.md §4.4, actions depend on role and status.
 """
 
 import logging
-from datetime import UTC, datetime
 
 import pandas as pd
 import streamlit as st
 
-from onepagerapp.auth import resolve_current_user
+from adapters.navigation import (
+    PREVIEW_FLASH_KEY,
+    PREVIEW_ID_KEY,
+    REVIEW_MODE_KEY,
+    REVIEW_PAGE,
+    go_to_registry,
+    open_in_editor,
+)
+from adapters.page import (
+    ALERT_ICON,
+    current_roles,
+    render_error_state,
+    require_data_access,
+    set_flash,
+    show_flash,
+    signed_in_user,
+    timestamp_label,
+)
+from adapters.theme import (
+    DEFAULT_BADGE_COLOR,
+    get_dp_status_colors,
+    get_op_status_colors,
+)
+from adapters.workflow_actions import (
+    add_comment_and_report,
+    approve_and_report,
+    cancel_and_report,
+    change_dp_status_and_report,
+    export_pdf_and_report,
+    reject_and_report,
+    resolve_comment_and_report,
+    update_and_report,
+)
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.data_access.connection import user_error_message
+from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.export import (
     BUSINESS_CONCEPT_COLUMNS,
     CDE_LINEAGE_COLUMNS,
@@ -51,25 +84,11 @@ from onepagerapp.permissions import (
     AUTHORIZED_ROLES,
     ActionState,
     PermissionDeniedError,
-    can_view_one_pager,
     get_action_states,
     get_status_timeline_stages,
 )
-from adapters.theme import get_op_status_colors, get_dp_status_colors, DEFAULT_BADGE_COLOR
-from adapters.workflow_actions import (
-    REVIEW_MODE_KEY,
-    add_comment_and_report,
-    approve_and_report,
-    cancel_and_report,
-    change_dp_status_and_report,
-    export_pdf_and_report,
-    reject_and_report,
-    resolve_comment_and_report,
-    update_and_report,
-)
 from onepagerapp.review import MAX_COMMENT_LENGTH, SECTION_LABELS, section_label
 from onepagerapp.state_machine import IN_REVIEW, Actor, TransitionRule
-from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.workflow import data_product_options, plan_approval
 
 logger = logging.getLogger(__name__)
@@ -79,48 +98,35 @@ LOAD_ERROR_MESSAGE = "Couldn't load this One Pager. Please retry."
 
 
 # ============================================================================
-# Helpers: Render Components
+# Render Components
 # ============================================================================
-
-
-def render_error_state(message: str, key: str) -> None:
-    """Show a user-friendly error banner with a Retry button, then stop the page.
-
-    No exception text or internals are shown; callers log the details.
-
-    Args:
-        message: Friendly message for the banner.
-        key: Unique widget key for the Retry button.
-    """
-    st.error(message, icon="⚠️")
-    if st.button("Retry", key=key):
-        st.rerun()
-    st.stop()
 
 
 def render_status_badge(status: str, color: str) -> None:
     """Render a colored status badge inline.
-    
+
     Args:
         status: Status text to display.
         color: Hex color code for the dot.
+
     """
     html = f"""
     <span style="display: inline-flex; align-items: center; gap: 6px;">
         <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background-color: {color}; flex-shrink: 0;"></span>
         <span style="font-weight: 500; font-size: 0.95em;">{status}</span>
     </span>
-    """
+    """  # noqa: E501 - one HTML element per line
     st.markdown(html, unsafe_allow_html=True)
 
 
 def render_status_timeline(current_status: str) -> None:
     """Render the One Pager status timeline (Draft → Ready → In Review → Approved).
-    
+
     Shows the linear progression with current stage highlighted.
-    
+
     Args:
         current_status: Current one_pager_status value.
+
     """
     stages = get_status_timeline_stages()
     # Find current stage index
@@ -128,17 +134,20 @@ def render_status_timeline(current_status: str) -> None:
         (i for i, s in enumerate(stages) if s["status"] == current_status),
         None,
     )
-    
+
     st.subheader("Status Timeline")
-    
+
     # Render as: ● Draft  →  ● Ready for Review  →  ● In Review  →  ● Approved
     # Current stage is bold/highlighted
-    timeline_html = '<div style="display: flex; align-items: center; gap: 10px; font-size: 0.9em; margin: 1rem 0;">'
-    
+    timeline_html = (
+        '<div style="display: flex; align-items: center; gap: 10px; '
+        'font-size: 0.9em; margin: 1rem 0;">'
+    )
+
     for i, stage in enumerate(stages):
         is_current = i == current_idx
         is_past = current_idx is not None and i < current_idx
-        
+
         # Dot color: blue if current, green if past, gray if future
         if is_current:
             dot_color = "#3599B8"
@@ -149,43 +158,50 @@ def render_status_timeline(current_status: str) -> None:
         else:
             dot_color = "#CCCCCC"
             font_weight = "normal"
-        
-        timeline_html += f'<span style="font-weight: {font_weight}; color: {dot_color};">● {stage["label"]}</span>'
-        
+
+        timeline_html += (
+            f'<span style="font-weight: {font_weight}; color: {dot_color};">'
+            f"● {stage['label']}</span>"
+        )
+
         # Add arrow between stages (not after last one)
         if i < len(stages) - 1:
             arrow_color = "#65B676" if is_past else "#CCCCCC"
-            timeline_html += f'<span style="color: {arrow_color}; margin: 0 5px;">→</span>'
-    
-    timeline_html += '</div>'
+            timeline_html += (
+                f'<span style="color: {arrow_color}; margin: 0 5px;">→</span>'
+            )
+
+    timeline_html += "</div>"
     st.markdown(timeline_html, unsafe_allow_html=True)
 
 
 def render_header(preview_data: PreviewData, op_colors: dict, dp_colors: dict) -> None:
     """Render the One Pager header with metadata and status badges.
-    
+
     Args:
         preview_data: Complete preview data.
         op_colors: Map of One Pager status → color.
         dp_colors: Map of Data Product status → color.
+
     """
     header = preview_data.header
-    
+
     col1, col2, col3 = st.columns([2, 1, 1])
-    
+
     with col1:
         st.title(header.product_name)
         st.markdown(f"**ID:** {header.one_pager_id} | **Version:** {header.version}")
         st.markdown(
             f"**Owner:** {header.owner_name} ({header.owner_email}) | "
-            f"**Last Updated:** {header.last_updated_at.strftime('%Y-%m-%d %H:%M')} by {header.last_updated_by}"
+            f"**Last Updated:** {header.last_updated_at.strftime('%Y-%m-%d %H:%M')} "
+            f"by {header.last_updated_by}"
         )
-    
+
     with col2:
         st.markdown("**One Pager Status**")
         color = op_colors.get(header.one_pager_status, DEFAULT_BADGE_COLOR)
         render_status_badge(header.one_pager_status, color)
-    
+
     with col3:
         st.markdown("**Data Product Status**")
         color = dp_colors.get(header.data_product_status, DEFAULT_BADGE_COLOR)
@@ -199,11 +215,15 @@ def _table(rows: list[dict], columns: dict[str, str]) -> pd.DataFrame:
         rows: List items as stored in the document.
         columns: Document key → column label, in display order (the column
             definitions of ``onepagerapp.export``, shared with the PDF).
+
     """
     # Cells are always strings: a column mixing e.g. booleans with "" for
     # missing values cannot be serialized to Arrow by st.dataframe.
     return pd.DataFrame(
-        [{label: cell_text(row, keys) for keys, label in columns.items()} for row in rows],
+        [
+            {label: cell_text(row, keys) for keys, label in columns.items()}
+            for row in rows
+        ],
         columns=list(columns.values()),
     )
 
@@ -222,7 +242,9 @@ def _show_list(items: list[str], empty: str) -> None:
         st.write(f"*{empty}*")
 
 
-def render_content_sections(preview_data: PreviewData, use_case_rows: list[dict]) -> None:
+def render_content_sections(
+    preview_data: PreviewData, use_case_rows: list[dict]
+) -> None:
     """Render the One Pager document content as collapsible sections.
 
     Sections follow the editor-tab order (UI_Design.md §4.4): Description,
@@ -232,6 +254,7 @@ def render_content_sections(preview_data: PreviewData, use_case_rows: list[dict]
     Args:
         preview_data: Complete preview data.
         use_case_rows: Use Case rows from ``resolve_use_cases``.
+
     """
     doc = preview_data.document
 
@@ -241,14 +264,19 @@ def render_content_sections(preview_data: PreviewData, use_case_rows: list[dict]
         st.write(doc.description or "*No description provided.*")
 
     with st.expander("🎯 Business Problem Statement"):
-        st.write(doc.business_problem_statement or "*No business problem statement provided.*")
+        st.write(
+            doc.business_problem_statement
+            or "*No business problem statement provided.*"
+        )
 
     with st.expander("💼 Use Cases"):
         _show_table(use_case_rows, USE_CASE_COLUMNS, "No use cases provided.")
 
     with st.expander("✅ Business Requirements"):
         _show_table(
-            doc.business_requirements, REQUIREMENT_COLUMNS, "No business requirements provided."
+            doc.business_requirements,
+            REQUIREMENT_COLUMNS,
+            "No business requirements provided.",
         )
 
     with st.expander("📊 Data Sources"):
@@ -256,16 +284,21 @@ def render_content_sections(preview_data: PreviewData, use_case_rows: list[dict]
 
     with st.expander("🔍 Data Product Preview"):
         _show_table(
-            doc.data_product_preview, DATA_ELEMENT_COLUMNS, "No data product preview provided."
+            doc.data_product_preview,
+            DATA_ELEMENT_COLUMNS,
+            "No data product preview provided.",
         )
 
     with st.expander("🔐 Classification"):
         dc = doc.data_classification
         if dc:
-            st.write(f"**Classification Level:** {dc.get('classificationLevel') or 'N/A'}")
+            st.write(
+                f"**Classification Level:** {dc.get('classificationLevel') or 'N/A'}"
+            )
             st.write(f"**Contains PII:** {'Yes' if dc.get('containsPII') else 'No'}")
             st.write(
-                f"**Contains Sensitive Data:** {'Yes' if dc.get('containsSensitiveData') else 'No'}"
+                "**Contains Sensitive Data:** "
+                f"{'Yes' if dc.get('containsSensitiveData') else 'No'}"
             )
         else:
             st.write("*No classification provided.*")
@@ -274,7 +307,9 @@ def render_content_sections(preview_data: PreviewData, use_case_rows: list[dict]
             st.write(dc["retentionRequirements"])
         else:
             _show_table(
-                doc.retention_requirements, RETENTION_COLUMNS, "No retention requirements provided."
+                doc.retention_requirements,
+                RETENTION_COLUMNS,
+                "No retention requirements provided.",
             )
 
     with st.expander("🏛️ Governance"):
@@ -287,11 +322,15 @@ def render_content_sections(preview_data: PreviewData, use_case_rows: list[dict]
         )
         st.markdown("**CDE Quality**")
         _show_table(
-            governance.get("cdeQuality", []), CDE_QUALITY_COLUMNS, "No CDE quality rules provided."
+            governance.get("cdeQuality", []),
+            CDE_QUALITY_COLUMNS,
+            "No CDE quality rules provided.",
         )
         st.markdown("**CDE Lineage**")
         _show_table(
-            governance.get("cdeLineage", []), CDE_LINEAGE_COLUMNS, "No CDE lineage provided."
+            governance.get("cdeLineage", []),
+            CDE_LINEAGE_COLUMNS,
+            "No CDE lineage provided.",
         )
 
     with st.expander("🧭 Scope & Questions"):
@@ -305,32 +344,33 @@ def render_content_sections(preview_data: PreviewData, use_case_rows: list[dict]
 
 def render_change_log(preview_data: PreviewData) -> None:
     """Render the change log (newest-first).
-    
+
     Args:
         preview_data: Complete preview data.
+
     """
     st.subheader("Change Log")
-    
+
     if not preview_data.change_log:
         st.info("No changes recorded yet.")
         return
-    
+
     for entry in preview_data.change_log:
         # Render each entry as a container
         with st.container(border=True):
             col1, col2, col3 = st.columns([1, 2, 2])
-            
+
             with col1:
                 st.markdown(f"**v{entry.version}**")
                 st.caption(entry.created_at.strftime("%Y-%m-%d %H:%M"))
-            
+
             with col2:
                 st.markdown(f"**{entry.event_type.replace('_', ' ').title()}**")
                 st.caption(f"By {entry.author_name} ({entry.author_initials})")
-            
+
             with col3:
                 st.write(entry.summary)
-                
+
                 # For status transitions, show the from/to
                 if entry.event_type == "status_transition":
                     st.caption(
@@ -347,10 +387,10 @@ def _resolve(
     if error:
         st.session_state["preview_comment_error"] = error
     else:
-        st.session_state["preview_flash"] = "The comment was marked as resolved."
+        set_flash(PREVIEW_FLASH_KEY, "The comment was marked as resolved.")
 
 
-def render_review_comments(
+def render_review_comments(  # noqa: C901 - one branch per comment state
     preview_data: PreviewData,
     data_access: DataAccess | None = None,
     user: CurrentUser | None = None,
@@ -366,11 +406,12 @@ def render_review_comments(
         data_access: Data access used to resolve comments.
         user: The current user.
         resolve: State of the resolve action for this user and One Pager.
+
     """
     st.subheader("Review Comments")
     error = st.session_state.pop("preview_comment_error", None)
     if error:
-        st.error(error, icon="⚠️")
+        st.error(error, icon=ALERT_ICON)
 
     if not preview_data.review_comments:
         st.info("No review comments yet.")
@@ -388,22 +429,35 @@ def render_review_comments(
     for section, comments in by_section.items():
         unresolved = [c for c in comments if not c.resolved]
         resolved = [c for c in comments if c.resolved]
-        with st.expander(f"🗨️ {section} ({len(unresolved)} open)", expanded=bool(unresolved)):
+        with st.expander(
+            f"🗨️ {section} ({len(unresolved)} open)", expanded=bool(unresolved)
+        ):
             if unresolved:
                 st.markdown("**Unresolved:**")
                 for comment in unresolved:
                     with st.container(border=True):
-                        st.markdown(f"**{comment.reviewer_name}** ({comment.reviewer_initials})")
-                        st.caption(f"v{comment.version} • {comment.created_at.strftime('%Y-%m-%d %H:%M')}")
+                        st.markdown(
+                            f"**{comment.reviewer_name}** ({comment.reviewer_initials})"
+                        )
+                        st.caption(
+                            f"v{comment.version} • "
+                            f"{comment.created_at.strftime('%Y-%m-%d %H:%M')}"
+                        )
                         st.write(comment.comment)
                         if can_resolve:
                             st.button(
                                 "✅ Mark resolved",
                                 key=f"preview_resolve_{comment.id}",
                                 disabled=not resolve.enabled,
-                                help=resolve.tooltip or "Mark this comment as addressed",
+                                help=resolve.tooltip
+                                or "Mark this comment as addressed",
                                 on_click=_resolve,
-                                args=(data_access, comment.one_pager_id, comment.id, user),
+                                args=(
+                                    data_access,
+                                    comment.one_pager_id,
+                                    comment.id,
+                                    user,
+                                ),
                             )
                         else:
                             st.info("⚠️ Unresolved — awaiting action")
@@ -412,23 +466,21 @@ def render_review_comments(
                 st.markdown("**Resolved:**")
                 for comment in resolved:
                     with st.container(border=True):
-                        st.markdown(f"**{comment.reviewer_name}** ({comment.reviewer_initials})")
+                        st.markdown(
+                            f"**{comment.reviewer_name}** ({comment.reviewer_initials})"
+                        )
                         st.caption(
-                            f"v{comment.version} • {comment.created_at.strftime('%Y-%m-%d %H:%M')} "
+                            f"v{comment.version} • "
+                            f"{comment.created_at.strftime('%Y-%m-%d %H:%M')} "
                             f"• Resolved by {comment.resolved_by}"
                         )
                         st.write(comment.comment)
                         st.success("✅ Resolved")
 
 
-def _lock_time(value: datetime, fmt: str) -> str:
-    """Format a lock timestamp in UTC (lock times are stored in UTC)."""
-    if value.tzinfo is not None:
-        value = value.astimezone(UTC)
-    return value.strftime(fmt) + " UTC"
-
-
-def _release_my_lock(data_access: DataAccess, one_pager_id: str, user: CurrentUser) -> None:
+def _release_my_lock(
+    data_access: DataAccess, one_pager_id: str, user: CurrentUser
+) -> None:
     """Handle **Release my lock**: release, then re-run with a confirmation."""
     try:
         released = release_lock(data_access, one_pager_id, user)
@@ -437,10 +489,13 @@ def _release_my_lock(data_access: DataAccess, one_pager_id: str, user: CurrentUs
         return
     except Exception:
         logger.exception(f"Failed to release lock on {one_pager_id}")
-        st.error("Couldn't release the lock. Please retry.", icon="⚠️")
+        st.error("Couldn't release the lock. Please retry.", icon=ALERT_ICON)
         return
-    st.session_state["preview_flash"] = (
-        "Your lock was released." if released else "This One Pager is no longer locked."
+    set_flash(
+        PREVIEW_FLASH_KEY,
+        "Your lock was released."
+        if released
+        else "This One Pager is no longer locked.",
     )
     st.rerun()
 
@@ -461,12 +516,13 @@ def render_lock_indicator(
         preview_data: Complete preview data.
         lock: The active lock, or None.
         user: The current user.
+
     """
     if lock is None:
         return
 
-    acquired = _lock_time(lock.acquired_at, "%Y-%m-%d %H:%M")
-    expires = _lock_time(lock.expires_at, "%H:%M")
+    acquired = timestamp_label(lock.acquired_at, "%Y-%m-%d %H:%M")
+    expires = timestamp_label(lock.expires_at, "%H:%M")
     header = preview_data.header
     action = get_action_states(
         current_user_initials=user.initials,
@@ -510,7 +566,7 @@ ACTION_BUTTONS = {
 
 
 def load_authorized_initials(data_access: DataAccess, one_pager_id: str) -> set[str]:
-    """Initials of the Owner/SMEs; empty (edit disabled) if they cannot be read."""
+    """Return the Owner/SMEs' initials; empty (edit disabled) if unreadable."""
     try:
         users = data_access.get_authorized_users(one_pager_id)
     except Exception:
@@ -519,26 +575,23 @@ def load_authorized_initials(data_access: DataAccess, one_pager_id: str) -> set[
     return {u.user_initials for u in users if u.role in AUTHORIZED_ROLES}
 
 
-def open_editor(one_pager_id: str) -> None:
-    """Open the Editor in edit mode for this One Pager."""
-    st.session_state["editor_mode"] = "edit"
-    st.session_state["editor_one_pager_id"] = one_pager_id
-    st.switch_page("views/editor.py")
-
-
 @st.dialog("Cancel this One Pager?")
-def confirm_cancel(data_access: DataAccess, one_pager_id: str, user: CurrentUser) -> None:
-    """Confirmation for **Cancel One Pager** (UI_Design.md §5): it is permanent."""
+def confirm_cancel(
+    data_access: DataAccess, one_pager_id: str, user: CurrentUser
+) -> None:
+    """Confirm **Cancel One Pager** (UI_Design.md §5): it is permanent."""
     st.write(
         "Cancelling is permanent: the One Pager and its Data Product both become "
         "**Cancelled** and can no longer be edited."
     )
-    reason = st.text_area("Reason (optional)", key="preview_cancel_reason", max_chars=500)
+    reason = st.text_area(
+        "Reason (optional)", key="preview_cancel_reason", max_chars=500
+    )
     col_confirm, col_keep = st.columns(2)
     if col_confirm.button("Cancel One Pager", type="primary", use_container_width=True):
         error = cancel_and_report(data_access, one_pager_id, user, reason)
         if error:
-            st.error(error, icon="⚠️")
+            st.error(error, icon=ALERT_ICON)
             return
         st.rerun()
     if col_keep.button("Keep it", use_container_width=True):
@@ -558,7 +611,7 @@ def confirm_update(
     if col_confirm.button("Confirm", type="primary", use_container_width=True):
         error = update_and_report(data_access, one_pager_id, user)
         if error:
-            st.error(error, icon="⚠️")
+            st.error(error, icon=ALERT_ICON)
             return
         st.rerun()
     if col_back.button("Cancel", key="preview_update_back", use_container_width=True):
@@ -587,7 +640,7 @@ def confirm_reject(
     if col_confirm.button("Confirm Reject", type="primary", use_container_width=True):
         error = reject_and_report(data_access, one_pager_id, user, reason, roles)
         if error:
-            st.error(error, icon="⚠️")
+            st.error(error, icon=ALERT_ICON)
             return
         st.rerun()
     if col_back.button("Cancel", key="preview_reject_back", use_container_width=True):
@@ -602,7 +655,7 @@ def confirm_approve(
     user: CurrentUser,
     roles: frozenset[Actor],
 ) -> None:
-    """Shows what the approval does (version, DP status) before it is made."""
+    """Show what the approval does (version, DP status) before it is made."""
     row = data_access.get_one_pager_status_row(one_pager_id)
     if row is None:
         st.error(f"One Pager {one_pager_id} not found.")
@@ -620,7 +673,7 @@ def confirm_approve(
             data_access, document_store, one_pager_id, user, roles
         )
         if error:
-            st.error(error, icon="⚠️")
+            st.error(error, icon=ALERT_ICON)
             return
         st.rerun()
     if col_back.button("Cancel", key="preview_approve_back", use_container_width=True):
@@ -653,7 +706,7 @@ def add_comment_dialog(
             data_access, one_pager_id, user, section, text, roles
         )
         if error:
-            st.error(error, icon="⚠️")
+            st.error(error, icon=ALERT_ICON)
             return
         st.rerun()
     if col_back.button("Cancel", key="preview_comment_back", use_container_width=True):
@@ -661,7 +714,7 @@ def add_comment_dialog(
 
 
 def in_review_mode(one_pager_id: str, status: str, roles: frozenset[Actor]) -> bool:
-    """Opened from the Review queue by an Approver while it is In Review."""
+    """Tell whether an Approver opened it from the Review queue while In Review."""
     return (
         st.session_state.get(REVIEW_MODE_KEY) == one_pager_id
         and status == IN_REVIEW
@@ -680,7 +733,7 @@ def render_review_banner(one_pager_id: str) -> None:
         "Back to Review queue", key="preview_back_to_queue", use_container_width=True
     ):
         st.session_state.pop(REVIEW_MODE_KEY, None)
-        st.switch_page("views/review.py")
+        st.switch_page(REVIEW_PAGE)
 
 
 @st.dialog("Export PDF")
@@ -696,7 +749,9 @@ def export_pdf_dialog(
             data_access, one_pager_id, user, status_colors
         )
     if error or export is None:
-        st.error(error or "The PDF could not be created. Please retry.", icon="⚠️")
+        st.error(
+            error or "The PDF could not be created. Please retry.", icon=ALERT_ICON
+        )
         return
     st.write(
         "The PDF contains every section of the current version, with its Use "
@@ -720,8 +775,10 @@ def change_dp_status_dialog(
     user: CurrentUser,
     options: list[TransitionRule],
 ) -> None:
-    """Menu of the valid DP transitions (UI_Design.md §4.4); asks before
-    destructive ones such as Deprecate."""
+    """Offer the valid DP transitions (UI_Design.md §4.4).
+
+    Asks before destructive ones such as Deprecate.
+    """
     by_target = {rule.to_status: rule for rule in options}
     target = st.selectbox(
         "New status",
@@ -732,7 +789,7 @@ def change_dp_status_dialog(
     rule = by_target[target]
     confirmed = True
     if rule.requires_confirmation:
-        st.warning(f"**{rule.label}** cannot be undone.", icon="⚠️")
+        st.warning(f"**{rule.label}** cannot be undone.", icon=ALERT_ICON)
         confirmed = st.checkbox(
             f"Yes, {rule.label.lower()} this Data Product",
             key="preview_dp_confirm",
@@ -748,14 +805,14 @@ def change_dp_status_dialog(
             data_access, one_pager_id, target, user, confirmed=confirmed
         )
         if error:
-            st.error(error, icon="⚠️")
+            st.error(error, icon=ALERT_ICON)
             return
         st.rerun()
     if col_back.button("Back", use_container_width=True):
         st.rerun()
 
 
-def render_action_bar(
+def render_action_bar(  # noqa: C901, PLR0912, PLR0913 - one branch per action
     data_access: DataAccess,
     preview_data: PreviewData,
     lock: LockInfo | None,
@@ -770,12 +827,14 @@ def render_action_bar(
     are not implemented yet stay disabled with a "coming soon" tooltip.
 
     Args:
+        data_access: Data access for the actions.
         preview_data: Complete preview data.
         lock: The active lock, or None.
         user: The current user.
         authorized_initials: Initials of the Owner/SMEs of this One Pager.
         roles: Group roles of the user (Approver, Admin).
         status_colors: Badge colors of the OP and DP statuses, for the PDF.
+
     """
     header = preview_data.header
     actions = get_action_states(
@@ -809,7 +868,7 @@ def render_action_bar(
         st.caption("Waiting for an Approver's review.")
 
     if clicked == "edit":
-        open_editor(header.one_pager_id)
+        open_in_editor(header.one_pager_id)
     elif clicked == "cancel":
         confirm_cancel(data_access, header.one_pager_id, user)
     elif clicked == "update":
@@ -827,15 +886,11 @@ def render_action_bar(
             roles,
         )
     elif clicked == "export_pdf":
-        export_pdf_dialog(
-            data_access, header.one_pager_id, user, status_colors or {}
-        )
+        export_pdf_dialog(data_access, header.one_pager_id, user, status_colors or {})
     elif clicked == "change_dp_status":
         row = data_access.get_one_pager_status_row(header.one_pager_id)
         options = (
-            data_product_options(
-                row, owner_or_sme=user.initials in authorized_initials
-            )
+            data_product_options(row, owner_or_sme=user.initials in authorized_initials)
             if row
             else []
         )
@@ -848,38 +903,35 @@ def render_action_bar(
 # ============================================================================
 
 # Initialize services from session state
-if not st.session_state.get("services_initialized"):
-    st.error("Services not initialized. Please refresh the page.")
-    st.stop()
-
-data_access: DataAccess = st.session_state.data_access
-current_user_info: CurrentUser = st.session_state.get(
-    "current_user_info"
-) or resolve_current_user(
-    st.session_state.get("current_user", "unknown"), st.session_state.config
-)
-current_roles: frozenset[Actor] = st.session_state.get(
-    "current_user_roles", frozenset()
-)
+data_access = require_data_access()
+user = signed_in_user()
+roles = current_roles()
 
 # Resolve one_pager_id: internal navigation (session_state) takes priority since
 # st.switch_page clears query params; fall back to a query param (deep link).
-selected_id = st.session_state.get("preview_one_pager_id")
+selected_id = st.session_state.get(PREVIEW_ID_KEY)
 query_one_pager_id = st.query_params.get("one_pager_id")
 if selected_id:
     one_pager_id = selected_id
 elif query_one_pager_id:
-    one_pager_id = query_one_pager_id[0] if isinstance(query_one_pager_id, list) else query_one_pager_id
+    one_pager_id = (
+        query_one_pager_id[0]
+        if isinstance(query_one_pager_id, list)
+        else query_one_pager_id
+    )
 else:
     # No silent default (UI_Design.md §4.4): ask the user to pick a One Pager.
     st.title("Preview")
-    st.info("No One Pager selected. Open one from the Registry with the **View** button.")
+    st.info(
+        "No One Pager selected. Open one from the Registry with the **View** button."
+    )
     if st.button("Go to Registry", key="preview_go_to_registry"):
-        st.switch_page("views/registry.py")
+        go_to_registry()
     st.stop()
 
-# Keep session_state and the URL in sync so refresh/bookmark resolves the same One Pager.
-st.session_state["preview_one_pager_id"] = one_pager_id
+# Keep session_state and the URL in sync, so a refresh or bookmark resolves the
+# same One Pager.
+st.session_state[PREVIEW_ID_KEY] = one_pager_id
 st.query_params["one_pager_id"] = one_pager_id
 
 
@@ -911,12 +963,10 @@ except Exception as e:
     )
 
 # One-time confirmation after a redirect (e.g. "One Pager OP-0003 created").
-flash = st.session_state.pop("preview_flash", None)
-if flash:
-    st.success(flash)
+show_flash(PREVIEW_FLASH_KEY)
 
 # Populated state: render all regions
-if in_review_mode(one_pager_id, preview_data.header.one_pager_status, current_roles):
+if in_review_mode(one_pager_id, preview_data.header.one_pager_status, roles):
     render_review_banner(one_pager_id)
 
 render_header(preview_data, op_colors, dp_colors)
@@ -936,15 +986,17 @@ render_action_bar(
     data_access,
     preview_data,
     lock,
-    current_user_info,
+    user,
     authorized_initials,
-    current_roles,
+    roles,
     {**dp_colors, **op_colors},
 )
 
 st.divider()
 
-render_content_sections(preview_data, resolve_use_cases(data_access, preview_data.document))
+render_content_sections(
+    preview_data, resolve_use_cases(data_access, preview_data.document)
+)
 
 st.divider()
 
@@ -955,20 +1007,19 @@ st.divider()
 render_review_comments(
     preview_data,
     data_access,
-    current_user_info,
+    user,
     get_action_states(
-        current_user_initials=current_user_info.initials,
+        current_user_initials=user.initials,
         owner_initials=preview_data.header.owner_initials,
         one_pager_status=preview_data.header.one_pager_status,
         is_locked=lock is not None,
         lock_holder_initials=lock.locked_by_initials if lock else None,
         authorized_initials=authorized_initials,
         data_product_status=preview_data.header.data_product_status,
-        roles=current_roles,
+        roles=roles,
     )["resolve_comment"],
 )
 
 st.divider()
 
-render_lock_indicator(data_access, preview_data, lock, current_user_info)
-
+render_lock_indicator(data_access, preview_data, lock, user)

@@ -12,12 +12,21 @@ from typing import NoReturn
 import streamlit as st
 
 from adapters.edit_mode import navigation_guard
+from adapters.navigation import (
+    ADMIN_PAGE,
+    EDITOR_PAGE,
+    HELP_PAGE,
+    PREVIEW_PAGE,
+    REGISTRY_PAGE,
+    REVIEW_PAGE,
+    USE_CASES_PAGE,
+)
 from adapters.theme import apply_theme, environment_badge, role_badges
 from onepagerapp.audit import log_unrecognised_user
 from onepagerapp.auth import resolve_current_user, resolve_roles
 from onepagerapp.config import AppConfig, AppMode, Environment
-from onepagerapp.data_access.base import DataAccess
 from onepagerapp.data_access import create_data_access
+from onepagerapp.data_access.base import DataAccess
 from onepagerapp.data_access.factory import create_document_store
 from onepagerapp.directory import lookup_directory_user
 from onepagerapp.models import CurrentUser
@@ -207,7 +216,7 @@ VIEW_AS_KEY = "view_as"
 
 
 def view_as_options(roles: frozenset[Actor]) -> list[str]:
-    """"View as" choices: only for Admins, and only roles the user really has.
+    """List the "View as" choices: only for Admins, only roles the user has.
 
     Switching can only take roles away, never add one the user does not
     have, so it is safe for the services, which trust the session's roles.
@@ -354,23 +363,23 @@ def navigation_entries(roles: frozenset[Actor]) -> list[tuple[str, str]]:
     Review only for Approvers, Admin only for Admins.
     """
     entries = [
-        ("views/registry.py", "Registry"),
-        ("views/preview.py", "Preview"),
-        ("views/editor.py", "Editor"),
+        (REGISTRY_PAGE, "Registry"),
+        (PREVIEW_PAGE, "Preview"),
+        (EDITOR_PAGE, "Editor"),
     ]
     if can_review(roles):
-        entries.append(("views/review.py", "Review"))
-    entries.append(("views/use_cases.py", "Use Cases"))
-    entries.append(("views/help.py", "Help"))
+        entries.append((REVIEW_PAGE, "Review"))
+    entries.append((USE_CASES_PAGE, "Use Cases"))
+    entries.append((HELP_PAGE, "Help"))
     if can_administer(roles):
-        entries.append(("views/admin.py", "Admin"))
+        entries.append((ADMIN_PAGE, "Admin"))
     return entries
 
 
 def build_pages(roles: frozenset[Actor]) -> list:
-    """The ``st.Page`` objects of ``navigation_entries``; Registry is the default."""
+    """Build the ``st.Page`` objects of ``navigation_entries`` (Registry default)."""
     return [
-        st.Page(script, title=title, default=script == "views/registry.py")
+        st.Page(script, title=title, default=script == REGISTRY_PAGE)
         for script, title in navigation_entries(roles)
     ]
 
@@ -398,7 +407,7 @@ def main() -> None:
             # The identity comes from SELECT current_user(), which needs the
             # data access; in the other modes it is created after the check.
             init_services()
-    except Exception:
+    except Exception:  # noqa: BLE001 - the global error boundary
         _stop_on_service_error()
 
     # Fail closed (Architecture.md §4): no page and no data access for a user
@@ -410,7 +419,7 @@ def main() -> None:
 
     try:
         init_services()
-    except Exception:
+    except Exception:  # noqa: BLE001 - the global error boundary
         _stop_on_service_error()
 
     group_roles = resolve_session_roles()
@@ -433,6 +442,7 @@ def main() -> None:
     render_sidebar_logo()
 
     pg.run()
+
 
 if __name__ == "__main__":
     main()

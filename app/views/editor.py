@@ -15,20 +15,35 @@ import logging
 
 import pandas as pd
 import streamlit as st
+
 from adapters.cache import writes_data
 from adapters.edit_mode import render_edit_mode
-
+from adapters.navigation import EDITOR_MODE_KEY, go_to_registry, open_preview
+from adapters.page import (
+    ALERT_ICON,
+    current_roles,
+    current_user,
+    render_retry_banner,
+    require_data_access,
+    require_document_store,
+)
+from onepagerapp.data_access.base import DataAccess
 from onepagerapp.data_access.connection import user_error_message
+from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import CurrentUser, NewOnePagerInput, PersonRef, ValidationError
 from onepagerapp.permissions import PermissionDeniedError, can_create_one_pager
-from onepagerapp.state_machine import Actor
 from onepagerapp.validation import (
     DATA_PRODUCT_RULE,
     EMAIL_PATTERN,
     MAX_NAME_LENGTH,
     MAX_TEXT_LENGTH,
 )
-from onepagerapp.workflow import CreateError, active_reference_values, create_one_pager
+from onepagerapp.workflow import (
+    CREATE_FAILED_MESSAGE,
+    CreateError,
+    active_reference_values,
+    create_one_pager,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,17 +53,17 @@ _BANNER_KEY = "create_banner"
 
 
 # ============================================================================
-# Cached reference data
+# Cached Data
 # ============================================================================
 
 
 @st.cache_data(ttl=3600)
-def _get_domain_options(_data_access) -> list[str]:  # noqa: ANN001
+def _get_domain_options(_data_access: DataAccess) -> list[str]:
     return active_reference_values(_data_access.get_ref_business_domains(), "domain")
 
 
 @st.cache_data(ttl=3600)
-def _get_type_options(_data_access) -> list[str]:  # noqa: ANN001
+def _get_type_options(_data_access: DataAccess) -> list[str]:
     return active_reference_values(_data_access.get_ref_data_product_types(), "type")
 
 
@@ -57,12 +72,8 @@ def _get_type_options(_data_access) -> list[str]:  # noqa: ANN001
 # ============================================================================
 
 
-def _roles() -> frozenset[Actor]:
-    return st.session_state.get("current_user_roles", frozenset())
-
-
 def _prefill_email(user: CurrentUser | None) -> str:
-    """The directory email, else the username when it looks like an email."""
+    """Return the directory email, else the username when it looks like one."""
     if user is None:
         return ""
     for candidate in (user.email, user.username):
@@ -138,18 +149,18 @@ def _show_errors(prefix: str) -> None:
     """Render the errors whose field path equals or starts with ``prefix``."""
     for error in st.session_state.get(_ERRORS_KEY, []):
         if error.field_path == prefix or error.field_path.startswith(prefix + "."):
-            st.error(error.message, icon="⚠️")
+            st.error(error.message, icon=ALERT_ICON)
 
 
 def _show_sme_errors() -> None:
     for error in st.session_state.get(_ERRORS_KEY, []):
         path = error.field_path
         if path == "smes":
-            st.error(error.message, icon="⚠️")
+            st.error(error.message, icon=ALERT_ICON)
         elif path.startswith("smes["):
             index = int(path[5 : path.index("]")])
             field = path.split(".", 1)[1] if "." in path else ""
-            st.error(f"SME row {index + 1} ({field}): {error.message}", icon="⚠️")
+            st.error(f"SME row {index + 1} ({field}): {error.message}", icon=ALERT_ICON)
 
 
 _FIELD_LABELS = {
@@ -165,7 +176,7 @@ _FIELD_LABELS = {
 
 
 def _render_error_summary(errors: list[ValidationError]) -> None:
-    """Validation summary panel at the bottom (UI_Design §4.2)."""
+    """Render the validation summary panel at the bottom (UI_Design §4.2)."""
     if not errors:
         return
     lines = []
@@ -181,8 +192,8 @@ def _render_error_summary(errors: list[ValidationError]) -> None:
 
 def _go_to_registry() -> None:
     _clear_form_state()
-    st.session_state.pop("editor_mode", None)
-    st.switch_page("views/registry.py")
+    st.session_state.pop(EDITOR_MODE_KEY, None)
+    go_to_registry()
 
 
 @st.dialog("Discard new One Pager?")
@@ -195,7 +206,12 @@ def _confirm_cancel() -> None:
         st.rerun()
 
 
-def _submit(data_access, document_store, user: CurrentUser, smes_df) -> None:  # noqa: ANN001
+def _submit(
+    data_access: DataAccess,
+    document_store: OnePagerDocumentStore,
+    user: CurrentUser,
+    smes_df: pd.DataFrame,
+) -> None:
     """Run the create action and route to Preview on success."""
     data = NewOnePagerInput(
         data_product=st.session_state.create_data_product,
@@ -216,7 +232,7 @@ def _submit(data_access, document_store, user: CurrentUser, smes_df) -> None:  #
     try:
         with st.spinner("Creating One Pager..."), writes_data():
             result = create_one_pager(
-                data, user, data_access, document_store, roles=_roles()
+                data, user, data_access, document_store, roles=current_roles()
             )
     except PermissionDeniedError as e:
         st.session_state[_BANNER_KEY] = str(e)
@@ -228,9 +244,7 @@ def _submit(data_access, document_store, user: CurrentUser, smes_df) -> None:  #
         return
     except Exception:
         logger.exception("Unexpected error creating a One Pager")
-        st.session_state[_BANNER_KEY] = (
-            "Create failed — your changes are preserved, please retry."
-        )
+        st.session_state[_BANNER_KEY] = CREATE_FAILED_MESSAGE
         st.session_state[_ERRORS_KEY] = []
         return
 
@@ -240,40 +254,35 @@ def _submit(data_access, document_store, user: CurrentUser, smes_df) -> None:  #
 
     # Success: remember the ID first so a re-run can never create a second one.
     _clear_form_state()
-    st.session_state.pop("editor_mode", None)
-    st.session_state["preview_one_pager_id"] = result.one_pager_id
-    st.session_state["preview_flash"] = (
-        f"One Pager {result.one_pager_id} created as Draft (v{result.version})."
+    st.session_state.pop(EDITOR_MODE_KEY, None)
+    open_preview(
+        str(result.one_pager_id),
+        flash=f"One Pager {result.one_pager_id} created as Draft (v{result.version}).",
     )
-    st.switch_page("views/preview.py")
 
 
 # ============================================================================
 # Editor Page
 # ============================================================================
 
-if not st.session_state.get("services_initialized"):
-    st.error("Services not initialized. Please refresh the page.")
-    st.stop()
+data_access = require_data_access()
+document_store = require_document_store()
+user = current_user()
 
-data_access = st.session_state.data_access
-document_store = st.session_state.document_store
-user: CurrentUser | None = st.session_state.get("current_user_info")
-
-if st.session_state.get("editor_mode") == "edit":
+if st.session_state.get(EDITOR_MODE_KEY) == "edit":
     render_edit_mode(data_access, document_store, user)
     st.stop()
 
-if st.session_state.get("editor_mode") != "create":
+if st.session_state.get(EDITOR_MODE_KEY) != "create":
     st.title("Editor")
     st.info(
-        "Start from the Registry (➕ New) or from a One Pager's Edit action."
+        "Start from the Registry (➕ New) or from a One Pager's Edit action."  # noqa: RUF001
     )
     if st.button("📋 Go to the Registry"):
-        st.switch_page("views/registry.py")
+        go_to_registry()
     st.stop()
 
-if not can_create_one_pager(user, _roles()):
+if not can_create_one_pager(user, current_roles()):
     st.title("New One Pager")
     st.error("You don't have permission to create One Pagers.")
     st.stop()
@@ -285,16 +294,20 @@ try:
     type_options = _get_type_options(data_access)
 except Exception as e:
     logger.exception("Failed to load reference data for the editor")
-    st.error(user_error_message(e, "Couldn't load the reference data. Please retry."))
-    if st.button("Retry"):
+    if render_retry_banner(
+        user_error_message(e, "Couldn't load the reference data. Please retry."),
+        key="editor_retry",
+    ):
         st.cache_data.clear()
         st.rerun()
     st.stop()
 
 # Header
 st.title("New One Pager")
-st.markdown("**Status:** ● Draft &nbsp;·&nbsp; **Data Product status:** ● In Definition "
-            "&nbsp;·&nbsp; **Version:** v0.1.0")
+st.markdown(
+    "**Status:** ● Draft &nbsp;·&nbsp; **Data Product status:** ● In Definition "
+    "&nbsp;·&nbsp; **Version:** v0.1.0"
+)
 
 banner = st.session_state.get(_BANNER_KEY)
 if banner:
@@ -315,7 +328,8 @@ st.text_input(
     key="create_data_product",
     max_chars=63,
     placeholder="e.g. customer_master",
-    help="Registered unique name of the Data Product. " + DATA_PRODUCT_RULE
+    help="Registered unique name of the Data Product. "
+    + DATA_PRODUCT_RULE
     + " It cannot be changed later.",
 )
 _show_errors("dataProduct")
@@ -421,9 +435,7 @@ _render_error_summary(st.session_state.get(_ERRORS_KEY, []))
 
 col_create, col_cancel, _ = st.columns([1, 1, 4])
 with col_create:
-    create_clicked = st.button(
-        "Create Draft", type="primary", use_container_width=True
-    )
+    create_clicked = st.button("Create Draft", type="primary", use_container_width=True)
 with col_cancel:
     cancel_clicked = st.button("Cancel", use_container_width=True)
 

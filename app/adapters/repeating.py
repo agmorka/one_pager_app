@@ -22,6 +22,7 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
+from adapters.page import ALERT_ICON
 from onepagerapp.validation import sanitize_text
 
 TEXT = "text"
@@ -280,7 +281,7 @@ def _render_form(section: RepeatingSection, items: list[dict[str, Any]]) -> None
         for spec in section.fields:
             _render_widget(section, spec)
         for message in st.session_state.get(f"{section.key}_form_errors", []):
-            st.error(message, icon="⚠️")
+            st.error(message, icon=ALERT_ICON)
         col_ok, col_cancel, _ = st.columns([1, 1, 3])
         ok = col_ok.button(
             "Add" if target == "new" else "Apply",

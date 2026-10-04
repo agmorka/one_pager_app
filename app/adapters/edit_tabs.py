@@ -11,6 +11,7 @@ from typing import Any
 import streamlit as st
 
 from adapters.cache import get_use_cases, writes_data
+from adapters.page import ALERT_ICON, current_roles, current_user
 from adapters.repeating import (
     BOOL,
     DATE,
@@ -66,10 +67,6 @@ def bound(key: str, value: object) -> str:
     if key not in st.session_state:
         st.session_state[key] = value
     return key
-
-
-def _current_user() -> CurrentUser | None:
-    return st.session_state.get("current_user_info")
 
 
 # ============================================================================
@@ -133,7 +130,7 @@ def _render_link_existing(doc: OnePagerDocument, data_access: DataAccess) -> Non
         logger.exception("Failed to load Use Cases")
         st.error(
             user_error_message(e, "Couldn't load the Use Cases. Please retry."),
-            icon="⚠️",
+            icon=ALERT_ICON,
         )
         return
     if not options:
@@ -163,10 +160,8 @@ def _render_link_existing(doc: OnePagerDocument, data_access: DataAccess) -> Non
 
 
 def _render_create_use_case(doc: OnePagerDocument, data_access: DataAccess) -> None:
-    user = _current_user()
-    if user is None or not can_manage_use_cases(
-        user.initials, st.session_state.get("current_user_roles", frozenset())
-    ):
+    user = current_user()
+    if user is None or not can_manage_use_cases(user.initials, current_roles()):
         return
     with st.expander("➕ Create a new Use Case"):  # noqa: RUF001
         for name, (label, max_length) in USE_CASE_FIELDS.items():
@@ -179,7 +174,7 @@ def _render_create_use_case(doc: OnePagerDocument, data_access: DataAccess) -> N
             key="edit_uc_new_priority",
         )
         for message in st.session_state.get("edit_uc_new_errors", []):
-            st.error(message, icon="⚠️")
+            st.error(message, icon=ALERT_ICON)
         if st.button("Create and link", key="edit_uc_create", type="primary"):
             _create_use_case(doc, data_access, user)
 
@@ -207,7 +202,7 @@ def _create_use_case(
                 data_access,
                 data,
                 user,
-                roles=st.session_state.get("current_user_roles", frozenset()),
+                roles=current_roles(),
             )
     except Exception:
         logger.exception("Failed to create a Use Case from the editor")

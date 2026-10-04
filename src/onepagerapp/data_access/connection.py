@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from datetime import date, datetime
 from enum import Enum
 
+import streamlit as st
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.errors import PermissionDenied, Unauthenticated
 from databricks.sdk.service.sql import (
@@ -14,7 +15,6 @@ from databricks.sdk.service.sql import (
     StatementResponse,
     StatementState,
 )
-import streamlit as st
 
 from onepagerapp.config import AppConfig, AppMode
 
@@ -210,6 +210,7 @@ def to_statement_parameters(
 
     Returns:
         Parameter list for ``statement_execution.execute_statement``.
+
     """
     items = []
     for name, value in parameters.items():
@@ -270,6 +271,7 @@ class DatabricksConnection:
 
         Args:
             config: Application configuration containing warehouse details.
+
         """
         self._config = config
         self._ws = service_client(config)
@@ -343,6 +345,7 @@ class DatabricksConnection:
                 (logged; generic message).
             MissingUserTokenError: ``USER`` in deployed mode without a token.
             RuntimeError: If all retry attempts fail.
+
         """
         bound = to_statement_parameters(parameters) if parameters else None
         client = self._client(identity)

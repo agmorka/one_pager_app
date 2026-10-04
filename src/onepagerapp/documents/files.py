@@ -16,7 +16,8 @@ from pathlib import Path
 from typing import Protocol
 
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.errors import DatabricksError, NotFound, ResourceConflict
+from databricks.sdk.errors import NotFound, ResourceConflict
+from databricks.sdk.errors.base import DatabricksError
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,11 @@ class FileAccess(Protocol):
 
     def list_files(self, path: Path) -> list[str]:
         """Names of the files in ``path`` (empty when it does not exist)."""
+
+
+def _os_error(path: Path, error: DatabricksError) -> OSError:
+    """Return the ``OSError`` the store handles for a failed Files API call."""
+    return OSError(f"{path}: {error}")
 
 
 class LocalFiles:
@@ -90,8 +96,10 @@ class VolumeFiles:
         except NotFound as e:
             raise FileNotFoundError(str(path)) from e
         except DatabricksError as e:
-            msg = f"{path}: {e}"
-            raise OSError(msg) from e
+            raise _os_error(path, e) from e
+        if response.contents is None:
+            msg = f"{path}: the download returned no content"
+            raise OSError(msg)
         with response.contents as contents:
             return contents.read().decode("utf-8")
 
@@ -101,8 +109,7 @@ class VolumeFiles:
         except NotFound:
             return False
         except DatabricksError as e:
-            msg = f"{path}: {e}"
-            raise OSError(msg) from e
+            raise _os_error(path, e) from e
         return True
 
     def create(self, path: Path, content: str) -> None:
@@ -114,8 +121,7 @@ class VolumeFiles:
         except ResourceConflict as e:
             raise FileExistsError(str(path)) from e
         except DatabricksError as e:
-            msg = f"{path}: {e}"
-            raise OSError(msg) from e
+            raise _os_error(path, e) from e
 
     def delete(self, path: Path) -> None:
         try:
@@ -123,8 +129,7 @@ class VolumeFiles:
         except NotFound as e:
             raise FileNotFoundError(str(path)) from e
         except DatabricksError as e:
-            msg = f"{path}: {e}"
-            raise OSError(msg) from e
+            raise _os_error(path, e) from e
 
     def list_dirs(self, path: Path) -> list[str]:
         return [name for name, is_dir in self._entries(path) if is_dir]
@@ -144,5 +149,4 @@ class VolumeFiles:
         except NotFound:
             return []
         except DatabricksError as e:
-            msg = f"{path}: {e}"
-            raise OSError(msg) from e
+            raise _os_error(path, e) from e
