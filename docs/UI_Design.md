@@ -35,6 +35,7 @@ flowchart LR
 - Navigation links: Registry, Editor, Review (visible to Approvers), Preview, Use Cases, Help, Admin (visible to Admins)
 - The Editor is always registered (Streamlit 1.38 cannot hide a single page and `st.switch_page` needs registered pages). Opened without an edit/create intent, it shows "Start from the Registry (➕ New) or from a One Pager's Edit action" and a button back to the Registry.
 - Active page highlighted
+- **View as (Admins only):** a "View as" selector under the role badges switches the user type the app is shown as: All my roles (default), Owner/SME, Approver, Admin or Viewer. Only roles the Admin really has are offered, so it can take roles away but never add one; pages, buttons and service checks all use the chosen role. A caption "Viewing as … (your roles: …)" is shown while a single role is chosen. Per-record Owner/SME rights (One Pagers where the Admin is listed as Owner or SME) still apply. The choice lasts for the session and each switch is logged.
 - BEC logo at the bottom
 
 ### Page visibility by role
