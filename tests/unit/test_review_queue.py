@@ -9,22 +9,32 @@ from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.permissions import PermissionDeniedError, can_review
 from onepagerapp.review import get_review_queue
 from onepagerapp.state_machine import Actor
-from tests.users import make_user
-
-APPROVER = make_user("CJO")
+from tests.helpers import ADMIN_ROLES, APPROVER, APPROVER_ROLES, IN_REVIEW_ID
 
 
 @pytest.mark.unit
-def test__can_review__approvers_only() -> None:
-    assert can_review({Actor.APPROVER})
-    assert not can_review({Actor.ADMIN})
-    assert not can_review(set())
+@pytest.mark.parametrize(
+    ("roles", "allowed"),
+    [(APPROVER_ROLES, True), (ADMIN_ROLES, False), (frozenset(), False)],
+    ids=["approver", "admin", "viewer"],
+)
+def test__roles__can_review__approvers_only(
+    roles: frozenset[Actor], allowed: bool
+) -> None:
+    """Only Approvers review."""
+    # When
+    result = can_review(roles)
+
+    # Then
+    assert result is allowed
 
 
 @pytest.mark.unit
-def test__review_queue__in_review_only_oldest_first(
+def test__older_one_pager_in_review__get_review_queue__in_review_oldest_first(
     mock_data_access: MockDataAccess,
 ) -> None:
+    """The queue holds In Review items, the longest waiting first."""
+    # Given an extra One Pager In Review since 1 September
     older = replace(
         mock_data_access._status_rows["OP-0001"],
         one_pager_id="OP-0009",
@@ -34,15 +44,19 @@ def test__review_queue__in_review_only_oldest_first(
     )
     mock_data_access._status_rows["OP-0009"] = older
 
-    queue = get_review_queue(mock_data_access, APPROVER, {Actor.APPROVER})
+    # When
+    queue = get_review_queue(mock_data_access, APPROVER, APPROVER_ROLES)
 
-    assert [r.one_pager_id for r in queue] == ["OP-0009", "OP-0002"]
+    # Then
+    assert [r.one_pager_id for r in queue] == ["OP-0009", IN_REVIEW_ID]
     assert all(r.one_pager_status == "In Review" for r in queue)
 
 
 @pytest.mark.unit
-def test__review_queue__denied_for_non_approvers(
+def test__admin_without_approver_role__get_review_queue__refused(
     mock_data_access: MockDataAccess,
 ) -> None:
+    """The queue is for Approvers only."""
+    # When / Then
     with pytest.raises(PermissionDeniedError):
-        get_review_queue(mock_data_access, APPROVER, {Actor.ADMIN})
+        get_review_queue(mock_data_access, APPROVER, ADMIN_ROLES)

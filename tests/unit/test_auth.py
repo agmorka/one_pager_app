@@ -1,3 +1,5 @@
+"""Initials from the corporate username, display names and the current user."""
+
 import pytest
 
 from onepagerapp.auth import (
@@ -5,29 +7,31 @@ from onepagerapp.auth import (
     initials_from_username,
     resolve_current_user,
 )
-from onepagerapp.config import AppConfig
 from onepagerapp.directory import DirectoryUser
+from tests.helpers import config
 
-
-def _config(**overrides: str) -> AppConfig:
-    return AppConfig(ONE_PAGER_APP_VOLUME_PATH="/Volumes/x", **overrides)
+CORPORATE = "x0wadm@becoc001.onmicrosoft.com"
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    ("username", "expected"),
+    "username",
     [
-        ("x0wadm@becoc001.onmicrosoft.com", "X0W"),
-        ("X0WADM@BECOC001.ONMICROSOFT.COM", "X0W"),
-        ("X0wAdm@BecOC001.onmicrosoft.com", "X0W"),
-        ("MJOADM@BECOC001.onmicrosoft.com", "MJO"),
-        (" mjoadm@becoc001.onmicrosoft.com ", "MJO"),
+        "x0wadm@becoc001.onmicrosoft.com",
+        "X0WADM@BECOC001.ONMICROSOFT.COM",
+        "X0wAdm@BecOC001.onmicrosoft.com",
+        " x0wadm@becoc001.onmicrosoft.com ",
     ],
 )
-def test__initials_from_username__corporate_format(
-    username: str, expected: str
+def test__corporate_username__initials_from_username__upper_case_initials(
+    username: str,
 ) -> None:
-    assert initials_from_username(username, _config()) == expected
+    """Case and surrounding spaces do not matter."""
+    # When
+    initials = initials_from_username(username, config())
+
+    # Then
+    assert initials == "X0W"
 
 
 @pytest.mark.unit
@@ -47,40 +51,64 @@ def test__initials_from_username__corporate_format(
         None,
     ],
 )
-def test__initials_from_username__not_recognised(username: str | None) -> None:
-    assert initials_from_username(username, _config()) is None
+def test__other_username__initials_from_username__none(username: str | None) -> None:
+    """Usernames that do not follow the corporate format are not recognised."""
+    # When
+    initials = initials_from_username(username, config())
+
+    # Then
+    assert initials is None
 
 
 @pytest.mark.unit
-def test__initials_from_username__suffix_list_accepts_both_formats() -> None:
-    config = _config(ONE_PAGER_APP_USERNAME_SUFFIXES="adm,")
+@pytest.mark.parametrize(
+    ("settings", "username", "expected"),
+    [
+        (
+            {"ONE_PAGER_APP_USERNAME_SUFFIXES": "adm,"},
+            "x0wadm@becoc001.onmicrosoft.com",
+            "X0W",
+        ),
+        (
+            {"ONE_PAGER_APP_USERNAME_SUFFIXES": "adm,"},
+            "x0w@becoc001.onmicrosoft.com",
+            "X0W",
+        ),
+        (
+            {"ONE_PAGER_APP_USERNAME_SUFFIXES": ""},
+            "x0w@becoc001.onmicrosoft.com",
+            "X0W",
+        ),
+        ({"ONE_PAGER_APP_USERNAME_SUFFIXES": ""}, CORPORATE, None),
+        ({"ONE_PAGER_APP_USER_DOMAINS": "bec.dk"}, "x0wadm@BEC.dk", "X0W"),
+        ({"ONE_PAGER_APP_USER_DOMAINS": "bec.dk"}, CORPORATE, None),
+        (
+            {"ONE_PAGER_APP_INITIALS_PATTERN": r"^[A-Z]{2,4}$"},
+            "abadm@becoc001.onmicrosoft.com",
+            "AB",
+        ),
+        ({"ONE_PAGER_APP_INITIALS_PATTERN": r"^[A-Z]{2,4}$"}, CORPORATE, None),
+    ],
+    ids=[
+        "suffix-list-with-suffix",
+        "suffix-list-without-suffix",
+        "no-suffix-without-suffix",
+        "no-suffix-with-suffix",
+        "changed-domain-new",
+        "changed-domain-old",
+        "pattern-match",
+        "pattern-mismatch",
+    ],
+)
+def test__configured_format__initials_from_username__follows_settings(
+    settings: dict[str, str], username: str, expected: str | None
+) -> None:
+    """Suffixes, domains and the initials pattern are configurable."""
+    # When
+    initials = initials_from_username(username, config(**settings))
 
-    assert initials_from_username("x0wadm@becoc001.onmicrosoft.com", config) == "X0W"
-    assert initials_from_username("x0w@becoc001.onmicrosoft.com", config) == "X0W"
-
-
-@pytest.mark.unit
-def test__initials_from_username__without_suffix() -> None:
-    config = _config(ONE_PAGER_APP_USERNAME_SUFFIXES="")
-
-    assert initials_from_username("x0w@becoc001.onmicrosoft.com", config) == "X0W"
-    assert initials_from_username("x0wadm@becoc001.onmicrosoft.com", config) is None
-
-
-@pytest.mark.unit
-def test__initials_from_username__changed_domain() -> None:
-    config = _config(ONE_PAGER_APP_USER_DOMAINS="bec.dk")
-
-    assert initials_from_username("x0wadm@BEC.dk", config) == "X0W"
-    assert initials_from_username("x0wadm@becoc001.onmicrosoft.com", config) is None
-
-
-@pytest.mark.unit
-def test__initials_from_username__configured_pattern() -> None:
-    config = _config(ONE_PAGER_APP_INITIALS_PATTERN=r"^[A-Z]{2,4}$")
-
-    assert initials_from_username("abadm@becoc001.onmicrosoft.com", config) == "AB"
-    assert initials_from_username("x0wadm@becoc001.onmicrosoft.com", config) is None
+    # Then
+    assert initials == expected
 
 
 @pytest.mark.unit
@@ -101,36 +129,50 @@ def test__initials_from_username__configured_pattern() -> None:
         (None, "X0W"),
     ],
 )
-def test__display_name__directory_then_initials(
+def test__directory_entry__display_name__full_name_then_display_then_initials(
     directory_user: DirectoryUser | None, expected: str
 ) -> None:
-    assert display_name(directory_user, "X0W") == expected
+    """The best name the directory has, else the initials."""
+    # When
+    name = display_name(directory_user, "X0W")
+
+    # Then
+    assert name == expected
 
 
 @pytest.mark.unit
-def test__resolve_current_user__recognised_username() -> None:
-    user = resolve_current_user("x0wadm@becoc001.onmicrosoft.com", _config())
+def test__no_directory_entry__resolve_current_user__initials_as_name() -> None:
+    """Without a directory entry the initials are the name."""
+    # When
+    user = resolve_current_user(CORPORATE, config())
 
-    assert user.username == "x0wadm@becoc001.onmicrosoft.com"
-    assert user.initials == "X0W"
-    assert user.display_name == "X0W"  # no directory entry: the initials
-
-
-@pytest.mark.unit
-def test__resolve_current_user__name_from_the_directory() -> None:
-    user = resolve_current_user(
-        "x0wadm@becoc001.onmicrosoft.com",
-        _config(),
-        DirectoryUser(
-            given_name="Agnieszka",
-            family_name="Kępkowska",
-            emails=("agnieszka.kepkowska@bec.dk",),
-        ),
+    # Then
+    assert (user.username, user.initials, user.display_name) == (
+        CORPORATE,
+        "X0W",
+        "X0W",
     )
 
+
+@pytest.mark.unit
+def test__directory_entry__resolve_current_user__directory_name_initials_email() -> (
+    None
+):
+    """The name comes from the directory; the email from the initials."""
+    # Given
+    directory_user = DirectoryUser(
+        given_name="Agnieszka",
+        family_name="Kępkowska",
+        emails=("agnieszka.kepkowska@bec.dk",),
+    )
+
+    # When
+    user = resolve_current_user(CORPORATE, config(), directory_user)
+
+    # Then
     assert user.initials == "X0W"
     assert user.display_name == "Agnieszka Kępkowska"
-    assert user.email == "x0w@bec.dk"  # from the initials, not the directory
+    assert user.email == "x0w@bec.dk"
 
 
 @pytest.mark.unit
@@ -146,42 +188,47 @@ def test__resolve_current_user__name_from_the_directory() -> None:
         ),
     ],
 )
-def test__resolve_current_user__name_without_the_admin_account(
+def test__name_with_admin_account__resolve_current_user__account_removed(
     directory_user: DirectoryUser,
 ) -> None:
-    user = resolve_current_user(
-        "x0wadm@becoc001.onmicrosoft.com", _config(), directory_user
-    )
+    """The admin account in a directory name is not part of the name."""
+    # When
+    user = resolve_current_user(CORPORATE, config(), directory_user)
 
+    # Then
     assert user.display_name == "Agnieszka Kępkowska"
 
 
 @pytest.mark.unit
-def test__resolve_current_user__only_the_admin_account_falls_back_to_initials() -> (
-    None
-):
+def test__name_is_only_the_admin_account__resolve_current_user__initials() -> None:
+    """Nothing left after removing the account falls back to the initials."""
+    # When
     user = resolve_current_user(
-        "x0wadm@becoc001.onmicrosoft.com",
-        _config(),
-        DirectoryUser(display_name="X0WADM"),
+        CORPORATE, config(), DirectoryUser(display_name="X0WADM")
     )
 
+    # Then
     assert user.display_name == "X0W"
 
 
 @pytest.mark.unit
-def test__resolve_current_user__email_domain_is_configurable() -> None:
+def test__email_domain_setting__resolve_current_user__email_in_that_domain() -> None:
+    """The email domain is configurable."""
+    # When
     user = resolve_current_user(
-        "x0wadm@becoc001.onmicrosoft.com",
-        _config(ONE_PAGER_APP_EMAIL_DOMAIN="example.com"),
+        CORPORATE, config(ONE_PAGER_APP_EMAIL_DOMAIN="example.com")
     )
 
+    # Then
     assert user.email == "x0w@example.com"
 
 
 @pytest.mark.unit
-def test__resolve_current_user__unrecognised_username_has_no_initials() -> None:
-    user = resolve_current_user("alice.brown@company.com", _config())
+def test__unrecognised_username__resolve_current_user__no_initials() -> None:
+    """Initials are never guessed; the username is shown instead."""
+    # When
+    user = resolve_current_user("alice.brown@company.com", config())
 
+    # Then
     assert user.initials == ""
-    assert user.display_name == "alice.brown@company.com"  # never guessed
+    assert user.display_name == "alice.brown@company.com"

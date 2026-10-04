@@ -2,10 +2,12 @@
 
 import pytest
 
-from onepagerapp.permissions import IMPLEMENTED_ACTIONS, get_action_states
+from onepagerapp.permissions import IMPLEMENTED_ACTIONS, ActionState, get_action_states
 from onepagerapp.state_machine import Actor
 
 OWNER = "MJO"
+APPROVER_ROLE = (Actor.APPROVER,)
+REVIEW_ACTIONS = {"approve", "reject", "add_comment"}
 
 
 def _states(
@@ -15,7 +17,8 @@ def _states(
     user: str = OWNER,
     holder: str | None = None,
     roles: tuple[Actor, ...] = (),
-) -> dict:
+) -> dict[str, ActionState]:
+    """Return the action states of a One Pager owned by MJO (SME DPR)."""
     return get_action_states(
         user,
         OWNER,
@@ -28,7 +31,8 @@ def _states(
     )
 
 
-def _visible(states: dict) -> set[str]:
+def _visible(states: dict[str, ActionState]) -> set[str]:
+    """Return the visible workflow actions (always-present ones left out)."""
     return {name for name, s in states.items() if s.visible} - {
         "release_lock",
         "resolve_comment",
@@ -48,58 +52,87 @@ def _visible(states: dict) -> set[str]:
         ("Cancelled", "Cancelled", set()),
     ],
 )
-def test__owner_actions_by_status(op: str, dp: str, expected: set[str]) -> None:
-    assert _visible(_states(op, dp)) == expected
+def test__owner_and_statuses__action_states__actions_of_the_state_machine(
+    op: str, dp: str, expected: set[str]
+) -> None:
+    """The Owner sees the actions the state machine allows."""
+    # When
+    visible = _visible(_states(op, dp))
+
+    # Then
+    assert visible == expected
 
 
 @pytest.mark.unit
-def test__viewer_sees_no_workflow_actions() -> None:
-    assert _visible(_states("Draft", "In Definition", user="XYZ")) == set()
-    assert _states("Draft", "In Definition", user="XYZ")["export_pdf"].visible
+def test__viewer__action_states__only_export() -> None:
+    """A Viewer sees no workflow action but can export."""
+    # When
+    states = _states("Draft", "In Definition", user="XYZ")
+
+    # Then
+    assert _visible(states) == set()
+    assert states["export_pdf"].visible
 
 
 @pytest.mark.unit
-def test__approver_actions_respect_segregation_of_duties() -> None:
-    approver = _states(
-        "In Review", "In Definition", user="APP", roles=(Actor.APPROVER,)
-    )
-    assert {"approve", "reject", "add_comment"} <= _visible(approver)
+def test__approver_of_one_pager_in_review__action_states__review_enabled() -> None:
+    """An Approver can approve, reject and comment."""
+    # When
+    states = _states("In Review", "In Definition", user="APP", roles=APPROVER_ROLE)
 
-    self_review = _states("In Review", "In Definition", roles=(Actor.APPROVER,))
-    assert not self_review["approve"].visible
-
-
-@pytest.mark.unit
-def test__admin_can_cancel_any() -> None:
-    admin = _states("In Review", "In Definition", user="ADM", roles=(Actor.ADMIN,))
-    assert _visible(admin) == {"cancel"}
+    # Then
+    assert _visible(states) >= REVIEW_ACTIONS
+    assert all(states[name].enabled for name in REVIEW_ACTIONS)
 
 
 @pytest.mark.unit
-def test__not_implemented_actions_stay_disabled() -> None:
-    states = _states("Approved", "Ready for Development")
-    for name in ("update", "change_dp_status"):
-        if name not in IMPLEMENTED_ACTIONS:
-            assert not states[name].enabled
-            assert "coming" in states[name].tooltip or "arrives" in states[name].tooltip
+def test__approver_who_is_owner__action_states__no_approve() -> None:
+    """Segregation of duties: the Owner cannot approve their own One Pager."""
+    # When
+    states = _states("In Review", "In Definition", roles=APPROVER_ROLE)
+
+    # Then
+    assert not states["approve"].visible
 
 
 @pytest.mark.unit
-def test__edit_enabled_unless_locked_by_other() -> None:
-    assert _states("Draft", "In Definition")["edit"].enabled
-    locked = _states("Draft", "In Definition", holder="DPR")
-    assert not locked["edit"].enabled
-    assert locked["edit"].visible
+def test__admin__action_states__cancel_any() -> None:
+    """An Admin can cancel any One Pager before approval."""
+    # When
+    states = _states("In Review", "In Definition", user="ADM", roles=(Actor.ADMIN,))
+
+    # Then
+    assert _visible(states) == {"cancel"}
 
 
 @pytest.mark.unit
-def test__review_actions_are_enabled_for_approvers() -> None:
-    approver = _states(
-        "In Review", "In Definition", user="APP", roles=(Actor.APPROVER,)
-    )
-    for name in ("approve", "reject", "add_comment"):
-        assert approver[name].visible
-        assert approver[name].enabled, name
+@pytest.mark.parametrize("name", ["update", "change_dp_status"])
+def test__approved_one_pager__action_states_for_owner__implemented_actions_enabled(
+    name: str,
+) -> None:
+    """Implemented actions are enabled (others would say "coming soon")."""
+    # When
+    state = _states("Approved", "Ready for Development")[name]
+
+    # Then
+    assert name in IMPLEMENTED_ACTIONS
+    assert state.enabled
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("holder", "enabled"), [(None, True), ("DPR", False)], ids=["free", "locked"]
+)
+def test__draft_lock__action_states__edit_disabled_when_locked_by_other(
+    holder: str | None, enabled: bool
+) -> None:
+    """Edit stays visible but is disabled while someone else holds the lock."""
+    # When
+    edit = _states("Draft", "In Definition", holder=holder)["edit"]
+
+    # Then
+    assert edit.visible
+    assert edit.enabled is enabled
 
 
 @pytest.mark.unit
@@ -112,20 +145,37 @@ def test__review_actions_are_enabled_for_approvers() -> None:
         ("Approved", False),
     ],
 )
-def test__resolve_comment_for_owner_while_reworking(op: str, *, enabled: bool) -> None:
-    owner = _states(op, "In Definition")["resolve_comment"]
-    assert owner.visible
-    assert owner.enabled is enabled
+def test__owner__action_states__resolve_comment_while_reworking(
+    op: str, *, enabled: bool
+) -> None:
+    """The Owner resolves comments only while the One Pager is in Draft."""
+    # When
+    resolve = _states(op, "In Definition")["resolve_comment"]
 
-    viewer = _states(op, "In Definition", user="XYZ")["resolve_comment"]
-    assert not viewer.visible
-    assert not viewer.enabled
+    # Then
+    assert resolve.visible
+    assert resolve.enabled is enabled
 
 
 @pytest.mark.unit
-def test__reject_of_an_update_is_offered_to_approvers() -> None:
-    approver = _states("In Review", "Active", user="APP", roles=(Actor.APPROVER,))
-    assert {"approve", "reject", "add_comment"} <= _visible(approver)
-    assert approver["reject"].enabled
-    # Update is the Owner's action on Approved, never offered in review.
-    assert not approver["update"].visible
+@pytest.mark.parametrize("op", ["Draft", "Draft Update", "In Review", "Approved"])
+def test__viewer__action_states__resolve_comment_hidden(op: str) -> None:
+    """Viewers never resolve comments."""
+    # When
+    resolve = _states(op, "In Definition", user="XYZ")["resolve_comment"]
+
+    # Then
+    assert not resolve.visible
+    assert not resolve.enabled
+
+
+@pytest.mark.unit
+def test__update_in_review__action_states_for_approver__review_but_no_update() -> None:
+    """Rejecting an update is offered; Update itself is never offered in review."""
+    # When
+    states = _states("In Review", "Active", user="APP", roles=APPROVER_ROLE)
+
+    # Then
+    assert _visible(states) >= REVIEW_ACTIONS
+    assert states["reject"].enabled
+    assert not states["update"].visible

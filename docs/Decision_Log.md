@@ -454,7 +454,7 @@ Deleting `change_log` rows is permitted only in this compensation path, for an O
 **Decision:**
 
 - One Entra ID group per role; the names are settings `ONE_PAGER_APP_GROUP_OWNER_SME`, `ONE_PAGER_APP_GROUP_APPROVER`, `ONE_PAGER_APP_GROUP_ADMIN`, with a `{env}` placeholder for the environment.
-- **Interim:** the dedicated groups do not exist yet. All three settings default to `BEC_BECOC001_LHX_{env}_DataPlatEng` (`…_DEV_…`, `…_INT_…`, `…_TST_…`, `…_UAT_…`, `…_PRD_…`). Its members act as Owner/SME, Approver and Admin; everyone else is a Viewer. The app logs a warning and, outside DEV, shows an "interim roles" notice while the default is in use.
+- **Interim:** the dedicated groups do not exist yet. All three settings default to `PAG-BEC-LHX-{env}-DataPlatEng-Base` (`…-DEV-…`, `…-INT-…`, `…-TST-…`, `…-UAT-…`, `…-PRD-…`). Its members act as Owner/SME, Approver and Admin; everyone else is a Viewer. The app logs a warning and, outside DEV, shows an "interim roles" notice while the default is in use.
 - **Viewer = every employee**; there is no Viewer group.
 - Membership is checked once per session as the user: `is_account_group_member(:group) OR is_member(:group)`. A failed check gives Viewer only.
 - `can_create_one_pager` and `can_manage_use_cases` require the Owner/SME group (`Actor.OWNER_SME_GROUP`), in the pages and in the services (`create_one_pager` and the Use Case writes take the session's roles). Editing an existing One Pager still needs only the per-record Owner/SME listing, so business Owners/SMEs listed on a One Pager can edit it without the group.

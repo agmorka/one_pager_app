@@ -1,37 +1,26 @@
 """Unsaved-changes guard: dirty detection and the navigation guard."""
 
-from pathlib import Path
+from collections.abc import Callable
 from types import ModuleType
 
 import pytest
-import streamlit as st
 from streamlit.testing.v1 import AppTest
 
+from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.editing import has_unsaved_changes, working_copy
 from onepagerapp.models import OnePagerDocument
-from tests.unit.test_edit_pages_smoke import _button, _editor, _tab
-from tests.unit.test_edit_pages_smoke import services as services  # noqa: PLC0414
-
-APP_DIR = Path(__file__).resolve().parents[2] / "app"
+from tests.helpers import NEW_ID, button_labelled, editor_page, switch_tab
 
 
 @pytest.fixture
-def edit_mode(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
-    monkeypatch.syspath_prepend(str(APP_DIR))
-    from adapters import edit_mode  # noqa: PLC0415
-
-    return edit_mode
+def edit_mode(import_app_module: Callable[[str], ModuleType]) -> ModuleType:
+    """Return ``adapters.edit_mode``."""
+    return import_app_module("adapters.edit_mode")
 
 
 @pytest.fixture
-def switched(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    targets: list[str] = []
-    monkeypatch.setattr(st, "switch_page", targets.append)
-    monkeypatch.syspath_prepend(str(APP_DIR))
-    return targets
-
-
-def _doc() -> OnePagerDocument:
+def saved() -> OnePagerDocument:
+    """Return a minimal saved Draft document."""
     return OnePagerDocument(
         structure_definition="structure_one_pager_v_2.json",
         data_product="p",
@@ -49,18 +38,74 @@ def _doc() -> OnePagerDocument:
     )
 
 
-@pytest.mark.unit
-def test__has_unsaved_changes() -> None:
-    saved = _doc()
-    working = working_copy(saved)
-    assert not has_unsaved_changes(saved, working)
+def _guard_script() -> None:
+    """Run the navigation guard as the Registry page would."""
+    import streamlit as st  # noqa: PLC0415
 
+    from adapters.edit_mode import navigation_guard  # noqa: PLC0415
+
+    navigation_guard(
+        "Registry", st.session_state.data_access, st.session_state.current_user_info
+    )
+    st.write("page body")
+
+
+def _registry_after(editor: AppTest) -> AppTest:
+    """Run the guard with the Editor's session state, as on leaving the Editor."""
+    at = AppTest.from_function(_guard_script, default_timeout=30)
+    for key, value in editor.session_state.filtered_state.items():
+        at.session_state[key] = value
+    return at.run()
+
+
+def _edited_problem(data_access: MockDataAccess) -> AppTest:
+    """Open the Editor and change the problem statement without saving."""
+    at = switch_tab(editor_page(data_access).run(), "Business Problem")
+    at.text_area(key="edit_problem").input("Changed").run()
+    return at
+
+
+@pytest.mark.unit
+def test__untouched_working_copy__has_unsaved_changes__false(
+    saved: OnePagerDocument,
+) -> None:
+    """A fresh working copy is clean."""
+    # When
+    dirty = has_unsaved_changes(saved, working_copy(saved))
+
+    # Then
+    assert not dirty
+
+
+@pytest.mark.unit
+def test__only_whitespace_and_blank_rows__has_unsaved_changes__false(
+    saved: OnePagerDocument,
+) -> None:
+    """Changes that normalization removes do not count."""
+    # Given
+    working = working_copy(saved)
     working.description = "  Desc  "
     working.smes.append({"name": "", "initials": ""})
-    assert not has_unsaved_changes(saved, working)  # normalization only
 
+    # When
+    dirty = has_unsaved_changes(saved, working)
+
+    # Then
+    assert not dirty
+
+
+@pytest.mark.unit
+def test__new_assumption__has_unsaved_changes__true(saved: OnePagerDocument) -> None:
+    """Real content changes count."""
+    # Given
+    working = working_copy(saved)
     working.assumptions.append("New assumption")
-    assert has_unsaved_changes(saved, working)
+
+    # When
+    dirty = has_unsaved_changes(saved, working)
+
+    # Then
+    assert dirty
 
 
 @pytest.mark.unit
@@ -75,7 +120,7 @@ def test__has_unsaved_changes() -> None:
         ("Editor", "edit", "OP-2", "OP-1", False, "release"),  # other One Pager
     ],
 )
-def test__guard_action(
+def test__navigation_state__guard_action__none_confirm_or_release(
     edit_mode: ModuleType,
     page: str,
     mode: str | None,
@@ -84,83 +129,85 @@ def test__guard_action(
     dirty: bool,
     expected: str,
 ) -> None:
-    assert (
-        edit_mode.guard_action(
-            on_editor_page=page == "Editor",
-            editor_mode=mode,
-            editor_one_pager_id=editor_id,
-            edit_one_pager_id=edit_id,
-            dirty=dirty,
-        )
-        == expected
+    """Leaving an edit session asks first if dirty, else releases the lock."""
+    # When
+    action = edit_mode.guard_action(
+        on_editor_page=page == "Editor",
+        editor_mode=mode,
+        editor_one_pager_id=editor_id,
+        edit_one_pager_id=edit_id,
+        dirty=dirty,
     )
+
+    # Then
+    assert action == expected
 
 
 @pytest.mark.unit
-def test__editor__close_with_unsaved_changes_asks_first(
-    services: dict,  # noqa: F811
-    switched: list[str],
+def test__unsaved_changes__click_close_editor__confirmation_and_lock_kept(
+    alices_draft: MockDataAccess, switched: list[str]
 ) -> None:
-    at = _tab(_editor(services).run(), "Business Problem")
-    at.text_area(key="edit_problem").input("Changed").run()
+    """Close asks for confirmation instead of discarding changes."""
+    # Given
+    at = _edited_problem(alices_draft)
     assert any("Unsaved changes" in c.value for c in at.caption)
 
-    _button(at, "Close editor").click().run()
+    # When
+    button_labelled(at, "Close editor").click().run()
 
+    # Then
     assert not at.exception
-    assert switched == []  # the confirmation dialog is shown instead
-    assert services["data_access"].get_lock("OP-0003") is not None
-
-
-def _guard_script() -> None:
-    import streamlit as st  # noqa: PLC0415
-    from adapters.edit_mode import navigation_guard  # noqa: PLC0415
-
-    navigation_guard(
-        "Registry", st.session_state.data_access, st.session_state.current_user_info
-    )
-    st.write("page body")
-
-
-def _guard_app(state: dict) -> AppTest:
-    at = AppTest.from_function(_guard_script, default_timeout=30)
-    for key, value in state.items():
-        at.session_state[key] = value
-    return at
+    assert switched == []
+    assert alices_draft.get_lock(NEW_ID) is not None
 
 
 @pytest.mark.unit
-def test__guard__clean_session_is_closed_and_lock_released(
-    services: dict,  # noqa: F811
-    switched: list[str],
+def test__clean_edit_session__navigate_away__closed_and_lock_released(
+    alices_draft: MockDataAccess, switched: list[str]
 ) -> None:
-    editor = _editor(services).run()
-    state = dict(editor.session_state.filtered_state)
-    assert services["data_access"].get_lock("OP-0003") is not None
+    """Leaving a clean session closes it and releases the lock."""
+    # Given
+    editor = editor_page(alices_draft).run()
+    assert alices_draft.get_lock(NEW_ID) is not None
 
-    at = _guard_app(state).run()
+    # When
+    at = _registry_after(editor)
 
+    # Then
     assert not at.exception
-    assert services["data_access"].get_lock("OP-0003") is None
+    assert alices_draft.get_lock(NEW_ID) is None
     assert "edit_document" not in at.session_state
 
 
 @pytest.mark.unit
-def test__guard__dirty_session_keeps_lock_and_warns(
-    services: dict,  # noqa: F811
-    switched: list[str],
+def test__dirty_edit_session__navigate_away__warned_and_kept(
+    alices_draft: MockDataAccess, switched: list[str]
 ) -> None:
-    editor = _tab(_editor(services).run(), "Business Problem")
-    editor.text_area(key="edit_problem").input("Changed").run()
-    state = dict(editor.session_state.filtered_state)
+    """Leaving a dirty session keeps the lock and the changes, with a warning."""
+    # Given
+    editor = _edited_problem(alices_draft)
 
-    at = _guard_app(state).run()
+    # When
+    at = _registry_after(editor)
 
+    # Then
     assert not at.exception
     assert "Unsaved changes in the Editor" in at.sidebar.warning[0].value
-    assert services["data_access"].get_lock("OP-0003") is not None
+    assert alices_draft.get_lock(NEW_ID) is not None
     assert at.session_state["edit_document"].business_problem_statement == "Changed"
 
+
+@pytest.mark.unit
+def test__dirty_session_warning__click_return__back_in_the_editor(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """The warning links back to the Editor."""
+    # Given
+    at = _registry_after(_edited_problem(alices_draft))
+
+    # When
     at.sidebar.button(key="guard_return").click().run()
+
+    # Then
     assert switched == ["views/editor.py"]
     assert at.session_state["editor_mode"] == "edit"

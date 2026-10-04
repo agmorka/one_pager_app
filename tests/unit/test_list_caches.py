@@ -1,184 +1,198 @@
 """Registry and Use Case list caching (UI_Design.md §6)."""
 
-import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from types import ModuleType
 
 import pytest
-from streamlit.testing.v1 import AppTest
 
 from onepagerapp.config import AppConfig
 from onepagerapp.data_access import lakehouse
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
-from onepagerapp.models import (
-    RegistryFilter,
-    RegistryPage,
-    RegistrySort,
-    UseCaseFilter,
-    UseCasePage,
-)
-from tests.conftest import FIXTURES_DIR
-from tests.users import CREATOR_ROLES, make_user
+from onepagerapp.models import RegistryFilter, RegistrySort, UseCaseFilter
+from tests.helpers import mock_data_access, page_app
 
-APP_DIR = Path(__file__).resolve().parents[2] / "app"
-sys.path.insert(0, str(APP_DIR))
-
-from adapters import cache  # noqa: E402
+COUNTED = {
+    "get_registry": "registry",
+    "get_registry_status_counts": "counts",
+    "get_use_cases": "use_cases",
+}
 
 
-class _CountingDataAccess(MockDataAccess):
-    """Mock data access that counts the list queries."""
+def _count_list_queries(data_access: MockDataAccess) -> dict[str, int]:
+    """Count the list queries of ``data_access``; return the live counters."""
+    calls = dict.fromkeys(COUNTED.values(), 0)
 
-    def __init__(self, store: OnePagerDocumentStore) -> None:
-        super().__init__(store)
-        self.calls: dict[str, int] = {"registry": 0, "counts": 0, "use_cases": 0}
+    def counting(method: Callable, key: str) -> Callable:
+        def wrapper(*args: object, **kwargs: object) -> object:
+            calls[key] += 1
+            return method(*args, **kwargs)
 
-    def get_registry(
-        self,
-        filter: RegistryFilter,  # noqa: A002
-        page: int,
-        page_size: int,
-        sort: RegistrySort | None = None,
-    ) -> RegistryPage:
-        self.calls["registry"] += 1
-        return super().get_registry(filter, page, page_size, sort)
+        return wrapper
 
-    def get_registry_status_counts(
-        self,
-        filter: RegistryFilter,  # noqa: A002
-    ) -> dict[str, int]:
-        self.calls["counts"] += 1
-        return super().get_registry_status_counts(filter)
-
-    def get_use_cases(
-        self,
-        filter: UseCaseFilter,  # noqa: A002
-        page: int,
-        page_size: int,
-    ) -> UseCasePage:
-        self.calls["use_cases"] += 1
-        return super().get_use_cases(filter, page, page_size)
-
-
-@pytest.fixture(autouse=True)
-def _clean_caches() -> Iterator[None]:
-    cache.invalidate_list_caches()
-    yield
-    cache.invalidate_list_caches()
+    for name, key in COUNTED.items():
+        setattr(data_access, name, counting(getattr(data_access, name), key))
+    return calls
 
 
 @pytest.fixture
-def data_access(tmp_path: Path) -> _CountingDataAccess:
-    return _CountingDataAccess(OnePagerDocumentStore(FIXTURES_DIR, write_path=tmp_path))
+def cache(import_app_module: Callable[[str], ModuleType]) -> Iterator[ModuleType]:
+    """Return ``adapters.cache`` with empty caches before and after the test."""
+    module = import_app_module("adapters.cache")
+    module.invalidate_list_caches()
+    yield module
+    module.invalidate_list_caches()
+
+
+@pytest.fixture
+def calls(mock_data_access: MockDataAccess) -> dict[str, int]:
+    """Count the list queries of the mock data access."""
+    return _count_list_queries(mock_data_access)
 
 
 @pytest.mark.unit
-def test__registry__repeated_reads_hit_the_cache(
-    data_access: _CountingDataAccess,
+def test__registry_read_once__read_again__served_from_cache(
+    cache: ModuleType, mock_data_access: MockDataAccess, calls: dict[str, int]
 ) -> None:
-    first = cache.get_registry(data_access, RegistryFilter(), 1, 20)
-    second = cache.get_registry(data_access, RegistryFilter(), 1, 20)
+    """The same Registry page is queried once."""
+    # Given
+    first = cache.get_registry(mock_data_access, RegistryFilter(), 1, 20)
 
-    assert data_access.calls["registry"] == 1
+    # When
+    second = cache.get_registry(mock_data_access, RegistryFilter(), 1, 20)
+
+    # Then
+    assert calls["registry"] == 1
     assert [r.one_pager_id for r in second.rows] == [r.one_pager_id for r in first.rows]
 
 
 @pytest.mark.unit
-def test__registry__filter_sort_and_page_are_part_of_the_key(
-    data_access: _CountingDataAccess,
+def test__different_filter_sort_and_page__get_registry__one_query_each(
+    cache: ModuleType, mock_data_access: MockDataAccess, calls: dict[str, int]
 ) -> None:
-    cache.get_registry(data_access, RegistryFilter(), 1, 20)
-    cache.get_registry(data_access, RegistryFilter(op_status="Draft"), 1, 20)
-    cache.get_registry(data_access, RegistryFilter(use_case_id="UC-001"), 1, 20)
-    cache.get_registry(data_access, RegistryFilter(), 2, 20)
+    """Filter, sort and page are part of the cache key."""
+    # When
+    cache.get_registry(mock_data_access, RegistryFilter(), 1, 20)
+    cache.get_registry(mock_data_access, RegistryFilter(op_status="Draft"), 1, 20)
+    cache.get_registry(mock_data_access, RegistryFilter(use_case_id="UC-001"), 1, 20)
+    cache.get_registry(mock_data_access, RegistryFilter(), 2, 20)
     cache.get_registry(
-        data_access, RegistryFilter(), 1, 20, RegistrySort("product_name")
+        mock_data_access, RegistryFilter(), 1, 20, RegistrySort("product_name")
     )
     cache.get_registry(
-        data_access, RegistryFilter(), 1, 20, RegistrySort("product_name", True)
+        mock_data_access, RegistryFilter(), 1, 20, RegistrySort("product_name", True)
     )
 
-    assert data_access.calls["registry"] == 6
-
-    by_draft = cache.get_registry(data_access, RegistryFilter(op_status="Draft"), 1, 20)
-    assert data_access.calls["registry"] == 6
-    assert all(r.one_pager_status == "Draft" for r in by_draft.rows)
+    # Then
+    assert calls["registry"] == 6
 
 
 @pytest.mark.unit
-def test__status_counts_and_use_cases_are_cached(
-    data_access: _CountingDataAccess,
+def test__filtered_registry_cached__read_again__cached_filtered_rows(
+    cache: ModuleType, mock_data_access: MockDataAccess, calls: dict[str, int]
 ) -> None:
+    """A cached filtered page is reused and still filtered."""
+    # Given
+    cache.get_registry(mock_data_access, RegistryFilter(op_status="Draft"), 1, 20)
+
+    # When
+    page = cache.get_registry(
+        mock_data_access, RegistryFilter(op_status="Draft"), 1, 20
+    )
+
+    # Then
+    assert calls["registry"] == 1
+    assert all(r.one_pager_status == "Draft" for r in page.rows)
+
+
+@pytest.mark.unit
+def test__repeated_counts_and_use_cases__cached_reads__one_query_per_key(
+    cache: ModuleType, mock_data_access: MockDataAccess, calls: dict[str, int]
+) -> None:
+    """Status counts and Use Case pages are cached too."""
+    # When
     for _ in range(2):
-        cache.get_registry_status_counts(data_access, RegistryFilter())
-        cache.get_use_cases(data_access, UseCaseFilter(), 1, 20)
-    cache.get_use_cases(data_access, UseCaseFilter(include_deprecated=True), 1, 20)
+        cache.get_registry_status_counts(mock_data_access, RegistryFilter())
+        cache.get_use_cases(mock_data_access, UseCaseFilter(), 1, 20)
+    cache.get_use_cases(mock_data_access, UseCaseFilter(include_deprecated=True), 1, 20)
 
-    assert data_access.calls["counts"] == 1
-    assert data_access.calls["use_cases"] == 2
+    # Then
+    assert (calls["counts"], calls["use_cases"]) == (1, 2)
 
 
 @pytest.mark.unit
-def test__writes_data__clears_every_list_cache(
-    data_access: _CountingDataAccess,
+def test__cached_lists__write_through_writes_data__every_list_read_again(
+    cache: ModuleType, mock_data_access: MockDataAccess, calls: dict[str, int]
 ) -> None:
-    cache.get_registry(data_access, RegistryFilter(), 1, 20)
-    cache.get_registry_status_counts(data_access, RegistryFilter())
-    cache.get_use_cases(data_access, UseCaseFilter(), 1, 20)
+    """A write clears every list cache, so the change shows at once."""
+    # Given
+    cache.get_registry(mock_data_access, RegistryFilter(), 1, 20)
+    cache.get_registry_status_counts(mock_data_access, RegistryFilter())
+    cache.get_use_cases(mock_data_access, UseCaseFilter(), 1, 20)
 
+    # When
     with cache.writes_data():
-        data_access._status_rows["OP-0002"].product_name = "Renamed Product"
+        mock_data_access._status_rows["OP-0002"].product_name = "Renamed Product"
 
-    page = cache.get_registry(data_access, RegistryFilter(), 1, 20)
-    cache.get_registry_status_counts(data_access, RegistryFilter())
-    cache.get_use_cases(data_access, UseCaseFilter(), 1, 20)
-
-    assert data_access.calls == {"registry": 2, "counts": 2, "use_cases": 2}
+    # Then
+    page = cache.get_registry(mock_data_access, RegistryFilter(), 1, 20)
+    cache.get_registry_status_counts(mock_data_access, RegistryFilter())
+    cache.get_use_cases(mock_data_access, UseCaseFilter(), 1, 20)
+    assert calls == {"registry": 2, "counts": 2, "use_cases": 2}
     assert "Renamed Product" in [r.product_name for r in page.rows]
 
 
-def _failing_write() -> None:
-    message = "write failed half way"
-    raise RuntimeError(message)
-
-
 @pytest.mark.unit
-def test__writes_data__clears_the_caches_when_the_write_fails(
-    data_access: _CountingDataAccess,
+def test__cached_registry__failing_write__cache_cleared_anyway(
+    cache: ModuleType, mock_data_access: MockDataAccess, calls: dict[str, int]
 ) -> None:
-    cache.get_registry(data_access, RegistryFilter(), 1, 20)
+    """A write that fails half way also clears the caches."""
+    # Given
+    cache.get_registry(mock_data_access, RegistryFilter(), 1, 20)
 
+    # When
     with pytest.raises(RuntimeError), cache.writes_data():
-        _failing_write()
+        raise RuntimeError
 
-    cache.get_registry(data_access, RegistryFilter(), 1, 20)
-    assert data_access.calls["registry"] == 2
+    # Then
+    cache.get_registry(mock_data_access, RegistryFilter(), 1, 20)
+    assert calls["registry"] == 2
 
 
 @pytest.mark.unit
-def test__separate_mock_instances_do_not_share_cached_lists(tmp_path: Path) -> None:
-    store = OnePagerDocumentStore(FIXTURES_DIR, write_path=tmp_path)
-    one, other = _CountingDataAccess(store), _CountingDataAccess(store)
+def test__two_mock_instances__get_registry__caches_not_shared(
+    cache: ModuleType, tmp_path: Path
+) -> None:
+    """Each mock instance has its own cache scope."""
+    # Given
+    one, other = mock_data_access(tmp_path), mock_data_access(tmp_path)
     other._status_rows.pop("OP-0002")
 
+    # When
+    one_rows = cache.get_registry(one, RegistryFilter(), 1, 20).total_rows
+    other_rows = cache.get_registry(other, RegistryFilter(), 1, 20).total_rows
+
+    # Then
     assert one.cache_scope != other.cache_scope
-    assert one.cache_scope == one.cache_scope
-    assert cache.get_registry(one, RegistryFilter(), 1, 20).total_rows == 2
-    assert cache.get_registry(other, RegistryFilter(), 1, 20).total_rows == 1
+    assert (one_rows, other_rows) == (2, 1)
 
 
 @pytest.mark.unit
-def test__lakehouse_sessions_share_one_cache_scope(
+def test__two_lakehouse_sessions__cache_scope__shared(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """All sessions on the Lakehouse share one cache."""
+    # Given
     monkeypatch.setattr(lakehouse, "DatabricksConnection", lambda _config: object())
     config = AppConfig(ONE_PAGER_APP_VOLUME_PATH=str(tmp_path))
     store = OnePagerDocumentStore(tmp_path)
 
+    # When
     first = lakehouse.LakehouseAccess(config, store)
     second = lakehouse.LakehouseAccess(config, store)
 
+    # Then
     assert first.cache_scope == second.cache_scope
     assert first.cache_scope.startswith("lakehouse:")
 
@@ -188,56 +202,59 @@ def test__lakehouse_sessions_share_one_cache_scope(
 # ============================================================================
 
 
-def _app(page: str, data_access: MockDataAccess) -> AppTest:
-    user = make_user("ABR", "Alice Brown")
-    at = AppTest.from_file(str(APP_DIR / "views" / page), default_timeout=30)
-    for key, value in {
-        "services_initialized": True,
-        "data_access": data_access,
-        "document_store": data_access._document_store,
-        "current_user": user.username,
-        "current_user_info": user,
-        "current_user_roles": CREATOR_ROLES,
-    }.items():
-        at.session_state[key] = value
-    return at
+@pytest.mark.unit
+def test__registry_page_shown__rerun__no_new_queries(
+    cache: ModuleType, mock_data_access: MockDataAccess, calls: dict[str, int]
+) -> None:
+    """Reruns of the Registry page use the cache."""
+    # Given
+    at = page_app("registry.py", mock_data_access).run()
+    assert not at.exception
+    after_first_run = dict(calls)
+
+    # When
+    at.run()
+
+    # Then
+    assert calls == after_first_run
 
 
 @pytest.mark.unit
-def test__registry_page__reruns_use_the_cache_until_a_write(
-    data_access: _CountingDataAccess, monkeypatch: pytest.MonkeyPatch
+def test__registry_page_shown__write_then_rerun__registry_read_again(
+    cache: ModuleType, mock_data_access: MockDataAccess, calls: dict[str, int]
 ) -> None:
-    monkeypatch.syspath_prepend(str(APP_DIR))
-    at = _app("registry.py", data_access).run()
-    assert not at.exception
-    calls_after_first_run = dict(data_access.calls)
+    """After a write the Registry shows the change."""
+    # Given
+    at = page_app("registry.py", mock_data_access).run()
+    registry_queries = calls["registry"]
 
-    at.run()
-
-    assert data_access.calls == calls_after_first_run
-
+    # When
     with cache.writes_data():
-        data_access._status_rows["OP-0001"].one_pager_status = "Draft Update"
+        mock_data_access._status_rows["OP-0001"].one_pager_status = "Draft Update"
     at.run()
 
-    assert data_access.calls["registry"] == calls_after_first_run["registry"] + 1
+    # Then
+    assert calls["registry"] == registry_queries + 1
     assert "Draft Update" in [m.value for m in at.markdown]
 
 
 @pytest.mark.unit
-def test__use_cases_page__lists_a_restored_use_case_at_once(
-    data_access: _CountingDataAccess, monkeypatch: pytest.MonkeyPatch
+def test__deprecated_use_case_shown__restore_and_hide_deprecated__listed_at_once(
+    cache: ModuleType, mock_data_access: MockDataAccess
 ) -> None:
-    monkeypatch.syspath_prepend(str(APP_DIR))
-    at = _app("use_cases.py", data_access).run()
+    """A restored Use Case is counted among the active ones straight away."""
+    # Given
+    at = page_app("use_cases.py", mock_data_access).run()
     assert not at.exception
-    active = data_access.get_use_cases(UseCaseFilter(), 1, 100).total_rows
+    active = mock_data_access.get_use_cases(UseCaseFilter(), 1, 100).total_rows
     assert any(f"of {active} Use Cases" in m.value for m in at.markdown)
-
     at.checkbox(key="uc_filter_show_deprecated").check().run()
     at.button(key="uc_details_UC-005").click().run()
+
+    # When
     at.button(key="uc_restore").click().run()
     at.checkbox(key="uc_filter_show_deprecated").uncheck().run()
 
+    # Then
     assert not at.exception
     assert any(f"of {active + 1} Use Cases" in m.value for m in at.markdown)

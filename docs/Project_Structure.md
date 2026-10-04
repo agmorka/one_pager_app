@@ -125,9 +125,12 @@ OnePagerApp/
 │           └── mock_seed.py        # Seed data of MockDataAccess (matches the test fixtures)
 ├── tests/
 │   ├── __init__.py
-│   ├── unit/                       # Pure pytest — no Streamlit or Databricks dependency
+│   ├── conftest.py                 # Shared pytest fixtures (mock data, new Draft, fakes, pages)
+│   ├── helpers.py                  # Shared constants, users, builders and fakes (no fixtures)
+│   ├── fixtures/sample_one_pagers/ # Read-only sample YAML documents
+│   ├── unit/                       # pytest with mocks and fakes — no live Databricks
 │   │   ├── __init__.py
-│   │   └── test_sample_unit_test.py
+│   │   └── test_*.py
 │   └── integration/                # Tests requiring a live Databricks connection or Streamlit AppTest
 │       ├── __init__.py
 │       └── test_sample_integration_test.py
@@ -150,6 +153,7 @@ OnePagerApp/
 - Views in `app/views/` only import from `onepagerapp` (config, data_access) — no direct Delta table access, volume I/O, or Git operations in views.
 - `app.py` is the composition root: it instantiates shared services (config, data access) once at startup, stores them in `st.session_state`, and wraps view dispatch in a global error boundary that shows user-friendly messages and logs exceptions.
 - `resources/schemas/` is the single location for JSON Schema files; validation always reads from here.
+- Unit tests are plain functions (no test classes) named `test__<given>__<when>__<then>`, each with a docstring and `# Given` / `# When` / `# Then` sections. Shared fixtures live in `tests/conftest.py`; shared constants, builders and fakes in `tests/helpers.py`. Faults are injected by patching single methods of a `MockDataAccess` instance (`monkeypatch.setattr(data_access, "...", failing())`), not by subclassing.
 
 ## 2b. Separation of Core Logic and UI Code
 
@@ -173,7 +177,7 @@ OnePagerApp/
 - Core logic in `src/onepagerapp/` can be unit-tested with `pytest` — **no Streamlit runtime required**
 - Data access implementations can be tested with in-memory mocks via the `MockDataAccess` class
 - No need for Streamlit's `@st.cache` or `st.session_state` fixtures in unit tests
-- Example: [tests/unit/test_sample_unit_test.py](../tests/unit/test_sample_unit_test.py) imports from `onepagerapp.config` and `onepagerapp.data_access` without starting a Streamlit app
+- Example: [tests/unit/test_config.py](../tests/unit/test_config.py) imports from `onepagerapp.config` and `onepagerapp.data_access` without starting a Streamlit app
 
 **2. Reusability and Independence**
 - The `onepagerapp` core package can be imported by other tools or services:
@@ -247,7 +251,7 @@ Each environment has its own:
 - **Unity Catalog catalog** — a dedicated catalog per environment (e.g. `dev_one_pager`, `prd_one_pager`), providing full isolation of schemas, tables, and volumes from other applications. Actual naming follows BEC's catalog naming convention.
 - **Unity Catalog schema** within that catalog (e.g. `app`) for all Delta tables.
 - **Unity Catalog external volume** for in-progress YAML files.
-- **Entra ID role groups** for Owner/SME, Approver and Admin, available in Databricks through automatic identity management. Names are app settings with an `{env}` placeholder; until dedicated groups exist, all three use `BEC_BECOC001_LHX_{env}_DataPlatEng` (Architecture §4).
+- **Entra ID role groups** for Owner/SME, Approver and Admin, available in Databricks through automatic identity management. Names are app settings with an `{env}` placeholder; until dedicated groups exist, all three use `PAG-BEC-LHX-{env}-DataPlatEng-Base` (Architecture §4).
 - **Databricks App deployment** (separate app instance per workspace).
 
 The Databricks Asset Bundle (`databricks.yml`) defines targets for each environment, parameterizing catalog/schema/volume names and app configuration so the same codebase deploys to any environment without code changes.
@@ -368,7 +372,7 @@ A live Databricks workspace connection (DEV) is required even for local developm
 | # | Item | Notes |
 |---|---|---|
 | 1 | Actual catalog/schema/volume names per environment | Must follow BEC's Unity Catalog naming convention. |
-| 2 | Actual role group names per environment | Interim: `BEC_BECOC001_LHX_{env}_DataPlatEng` for all roles. Dedicated Entra ID groups to be requested; switching is a configuration change (Architecture §4, open item #3). |
+| 2 | Actual role group names per environment | Interim: `PAG-BEC-LHX-{env}-DataPlatEng-Base` for all roles. Dedicated Entra ID groups to be requested; switching is a configuration change (Architecture §4, open item #3). |
 | 3 | Service principal setup: CI/CD pipeline deployment | Separate from the app's runtime identity. Needed for `databricks bundle deploy`. |
 | 4 | Service principal setup: app runtime identity | The app's own identity for **writes** to Delta, the volume and Git at runtime (`bp-spn-lhx-opa-{env}-001`). Delta reads run as the user. See Architecture §8 and One_Pager_App_Infrastructure_Setup.md. |
 | 5 | Git PAT or service connection for PR creation | The app needs credentials to create PRs in the One Pager registry repo on approval. Stored in a Databricks secret scope. |

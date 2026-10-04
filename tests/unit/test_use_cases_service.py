@@ -3,11 +3,10 @@
 Identity plan Phase 3, step 3.
 """
 
-import logging
+from collections.abc import Callable
 
 import pytest
 
-from onepagerapp.audit import AUDIT_LOGGER_NAME
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.models import CurrentUser, UseCaseInput
 from onepagerapp.permissions import PermissionDeniedError
@@ -16,7 +15,14 @@ from onepagerapp.use_cases import (
     set_use_case_deprecated,
     update_use_case,
 )
-from tests.users import CREATOR_ROLES, make_user
+from tests.helpers import (
+    CREATOR_ROLES,
+    UNRECOGNISED,
+    audit_messages,
+    capture_audit,
+    failing,
+    make_user,
+)
 
 X0W = make_user("X0W")
 DATA = UseCaseInput(
@@ -26,72 +32,118 @@ DATA = UseCaseInput(
     decision_enabled="Retention budget",
     priority="High",
 )
-
-
-class _BrokenWrites(MockDataAccess):
-    def update_use_case(self, *_: object) -> None:
-        msg = "warehouse unavailable"
-        raise RuntimeError(msg)
+WRITES: dict[str, Callable[[MockDataAccess, CurrentUser | None], object]] = {
+    "create": lambda da, user: create_use_case(da, DATA, user, roles=CREATOR_ROLES),
+    "update": lambda da, user: update_use_case(
+        da, "UC-001", DATA, user, roles=CREATOR_ROLES
+    ),
+    "deprecate": lambda da, user: set_use_case_deprecated(
+        da, "UC-001", deprecated=True, user=user, roles=CREATOR_ROLES
+    ),
+}
 
 
 @pytest.mark.unit
-def test__use_case_writes__record_actor_and_log(
+def test__owner_sme__create_use_case__actor_recorded_and_logged(
     mock_data_access: MockDataAccess, caplog: pytest.LogCaptureFixture
 ) -> None:
-    with caplog.at_level(logging.INFO, logger=AUDIT_LOGGER_NAME):
-        use_case_id = create_use_case(mock_data_access, DATA, X0W, roles=CREATOR_ROLES)
-        update_use_case(mock_data_access, "UC-001", DATA, X0W, roles=CREATOR_ROLES)
-        set_use_case_deprecated(
-            mock_data_access, "UC-002", deprecated=True, user=X0W, roles=CREATOR_ROLES
-        )
-        set_use_case_deprecated(
-            mock_data_access, "UC-002", deprecated=False, user=X0W, roles=CREATOR_ROLES
-        )
+    """A create stores the actor in both audit columns and logs an event."""
+    # Given
+    capture_audit(caplog)
 
+    # When
+    use_case_id = create_use_case(mock_data_access, DATA, X0W, roles=CREATOR_ROLES)
+
+    # Then
     created = mock_data_access.get_use_case(use_case_id)
-    assert created.created_by == "X0W"
-    assert created.last_updated_by == "X0W"
-    assert mock_data_access.get_use_case("UC-001").last_updated_by == "X0W"
-    assert mock_data_access.get_use_case("UC-002").last_updated_by == "X0W"
-    assert caplog.messages == [
-        f"action=create_use_case outcome=success user=X0W use_case_id={use_case_id}",
-        "action=update_use_case outcome=success user=X0W use_case_id=UC-001",
-        "action=deprecate_use_case outcome=success user=X0W use_case_id=UC-002",
-        "action=restore_use_case outcome=success user=X0W use_case_id=UC-002",
+    assert (created.created_by, created.last_updated_by) == ("X0W", "X0W")
+    assert audit_messages(caplog) == [
+        f"action=create_use_case outcome=success user=X0W use_case_id={use_case_id}"
     ]
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("user", [CurrentUser("guest@x.dk", "", "Guest"), None])
-def test__use_case_writes__refuse_unrecognised_user(
-    mock_data_access: MockDataAccess, user: CurrentUser | None
+def test__owner_sme__update_use_case__actor_recorded_and_logged(
+    mock_data_access: MockDataAccess, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """An update stores the actor and logs an event."""
+    # Given
+    capture_audit(caplog)
+
+    # When
+    update_use_case(mock_data_access, "UC-001", DATA, X0W, roles=CREATOR_ROLES)
+
+    # Then
+    assert mock_data_access.get_use_case("UC-001").last_updated_by == "X0W"
+    assert audit_messages(caplog) == [
+        "action=update_use_case outcome=success user=X0W use_case_id=UC-001"
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("deprecated", "action"), [(True, "deprecate"), (False, "restore")]
+)
+def test__owner_sme__set_use_case_deprecated__actor_recorded_and_logged(
+    mock_data_access: MockDataAccess,
+    caplog: pytest.LogCaptureFixture,
+    deprecated: bool,
+    action: str,
+) -> None:
+    """Deprecating and restoring store the actor and log their own action."""
+    # Given
+    capture_audit(caplog)
+
+    # When
+    set_use_case_deprecated(
+        mock_data_access,
+        "UC-002",
+        deprecated=deprecated,
+        user=X0W,
+        roles=CREATOR_ROLES,
+    )
+
+    # Then
+    assert mock_data_access.get_use_case("UC-002").last_updated_by == "X0W"
+    assert audit_messages(caplog) == [
+        f"action={action}_use_case outcome=success user=X0W use_case_id=UC-002"
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("user", [UNRECOGNISED, None], ids=["no-initials", "none"])
+@pytest.mark.parametrize("write", WRITES.values(), ids=WRITES.keys())
+def test__unrecognised_user__use_case_write__raises_and_changes_nothing(
+    mock_data_access: MockDataAccess,
+    user: CurrentUser | None,
+    write: Callable[[MockDataAccess, CurrentUser | None], object],
+) -> None:
+    """A user without initials cannot write Use Cases."""
+    # Given
     before = mock_data_access.get_use_case("UC-001")
 
+    # When / Then
     with pytest.raises(PermissionDeniedError):
-        create_use_case(mock_data_access, DATA, user, roles=CREATOR_ROLES)
-    with pytest.raises(PermissionDeniedError):
-        update_use_case(mock_data_access, "UC-001", DATA, user, roles=CREATOR_ROLES)
-    with pytest.raises(PermissionDeniedError):
-        set_use_case_deprecated(
-            mock_data_access, "UC-001", deprecated=True, user=user, roles=CREATOR_ROLES
-        )
-
+        write(mock_data_access, user)
     assert mock_data_access.get_use_case("UC-001") == before
 
 
 @pytest.mark.unit
-def test__use_case_write__failure_is_logged(
-    mock_data_access: MockDataAccess, caplog: pytest.LogCaptureFixture
+def test__warehouse_fails__update_use_case__failure_logged(
+    mock_data_access: MockDataAccess,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    broken = _BrokenWrites(mock_data_access._document_store)
+    """A failed write is logged as a failed security event."""
+    # Given
+    monkeypatch.setattr(
+        mock_data_access, "update_use_case", failing("warehouse unavailable")
+    )
+    capture_audit(caplog)
 
-    with (
-        caplog.at_level(logging.INFO, logger=AUDIT_LOGGER_NAME),
-        pytest.raises(RuntimeError),
-    ):
-        update_use_case(broken, "UC-001", DATA, X0W, roles=CREATOR_ROLES)
-
-    assert caplog.messages == [
+    # When / Then
+    with pytest.raises(RuntimeError):
+        update_use_case(mock_data_access, "UC-001", DATA, X0W, roles=CREATOR_ROLES)
+    assert audit_messages(caplog) == [
         "action=update_use_case outcome=failed user=X0W use_case_id=UC-001"
     ]

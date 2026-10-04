@@ -1,360 +1,33 @@
-"""LakehouseAccess create-flow SQL, verified against a recording fake connection."""
-
-from collections.abc import Callable
-from datetime import UTC, datetime
-from types import SimpleNamespace
-from typing import Any
+"""LakehouseAccess SQL, verified against a recording fake connection."""
 
 import pytest
 
-from onepagerapp.config import AppConfig, AppMode
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.data_access.connection import Identity, StatementFailedError
-from onepagerapp.data_access.lakehouse import LakehouseAccess
-from onepagerapp.models import (
-    AuthorizedUser,
-    ChangeLogEntry,
-    LockInfo,
-    OnePagerStatusRow,
-    ReviewComment,
-    UseCaseInput,
+from onepagerapp.models import AuthorizedUser
+from tests.helpers import (
+    ACTOR,
+    LAKEHOUSE_ACTOR_WRITES,
+    LAKEHOUSE_OTHER_WRITES,
+    NASTY,
+    NOW,
+    affected_rows,
+    answer_every_statement,
+    assert_not_interpolated,
+    change_log_entry,
+    fake_connection,
+    is_write,
+    lakehouse_access,
+    make_lock,
+    review_comment,
+    statement_response,
+    status_row,
 )
 
-NASTY = "x'); DROP TABLE one_pager_status; --"
-NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
+CONFLICT = StatementFailedError("SQL statement FAILED: ConcurrentAppendException")
 
-
-def _response(columns: list[str], rows: list[list]) -> SimpleNamespace:
-    return SimpleNamespace(
-        manifest=SimpleNamespace(
-            schema=SimpleNamespace(columns=[SimpleNamespace(name=c) for c in columns])
-        ),
-        result=SimpleNamespace(data_array=rows),
-    )
-
-
-class _FakeConnection:
-    def __init__(
-        self,
-        responses: list[SimpleNamespace] | None = None,
-        error: Exception | None = None,
-        group_names: dict[str, list[str]] | None = None,
-    ) -> None:
-        self.group_names = group_names or {}
-        self.calls: list[tuple[str, dict]] = []
-        self.identities: list[Identity] = []
-        self.responses = list(responses or [])
-        self.error = error
-
-    def execute_statement(
-        self,
-        statement: str,
-        parameters: dict[str, Any] | None = None,
-        *,
-        identity: Identity,
-    ) -> SimpleNamespace:
-        self.calls.append((statement, dict(parameters or {})))
-        self.identities.append(identity)
-        if self.error:
-            raise self.error
-        return self.responses.pop(0) if self.responses else _response([], [])
-
-    def find_group_names(self, name: str) -> list[str]:
-        return self.group_names.get(name, [])
-
-
-def _access(connection: _FakeConnection) -> LakehouseAccess:
-    access = LakehouseAccess.__new__(LakehouseAccess)
-    access._config = AppConfig(
-        APP_MODE=AppMode.LOCAL_INTEGRATION,
-        ONE_PAGER_APP_VOLUME_PATH="/Volumes/x",
-        ONE_PAGER_APP_DATABRICKS_CATALOG="cat",
-        ONE_PAGER_APP_DATABRICKS_SCHEMA="sch",
-    )
-    access._connection = connection
-    access._document_store = None
-    return access
-
-
-def _assert_not_interpolated(statement: str) -> None:
-    assert NASTY not in statement
-    assert "DROP TABLE" not in statement
-
-
-@pytest.mark.unit
-def test__compare_and_set__uses_num_affected_rows() -> None:
-    conn = _FakeConnection([_response(["num_affected_rows"], [["1"]])])
-    assert _access(conn).compare_and_set_sequence("OP", 6, 7) is True
-    statement, params = conn.calls[0]
-    assert "UPDATE cat.sch.id_sequences" in statement
-    assert "last_value = :current_value" in statement
-    assert params == {"id_type": "OP", "new_value": 7, "current_value": 6}
-
-    conn = _FakeConnection([_response(["num_affected_rows"], [["0"]])])
-    assert _access(conn).compare_and_set_sequence("OP", 6, 7) is False
-
-
-@pytest.mark.unit
-def test__compare_and_set__concurrent_conflict_is_retryable() -> None:
-    conn = _FakeConnection(
-        error=StatementFailedError("SQL statement FAILED: ConcurrentAppendException")
-    )
-    assert _access(conn).compare_and_set_sequence("OP", 6, 7) is False
-
-
-@pytest.mark.unit
-def test__get_sequence_value__missing_row_raises() -> None:
-    conn = _FakeConnection([_response(["last_value"], [])])
-    with pytest.raises(RuntimeError, match="no row for id_type 'OP'"):
-        _access(conn).get_sequence_value("OP")
-
-
-@pytest.mark.unit
-def test__insert_one_pager_status__binds_every_column() -> None:
-    conn = _FakeConnection()
-    row = OnePagerStatusRow(
-        one_pager_id="OP-0007",
-        data_product="customer_master",
-        product_name=NASTY,
-        business_domain="Customer",
-        data_product_type="Foundational",
-        one_pager_status="Draft",
-        data_product_status="In Definition",
-        version="0.1.0",
-        owner_name="A",
-        owner_initials="ABR",
-        owner_email="a@b.dk",
-        owner_team=None,
-        created_by="ABR",
-        created_at=NOW,
-        last_updated_at=NOW,
-        last_updated_by="ABR",
-        structure_definition="structure_one_pager_v_1.json",
-    )
-    _access(conn).insert_one_pager_status(row)
-    statement, params = conn.calls[0]
-    _assert_not_interpolated(statement)
-    assert "INSERT INTO cat.sch.one_pager_status" in statement
-    assert "CAST(:reviewed_at AS TIMESTAMP)" in statement
-    assert params["product_name"] == NASTY
-    assert params["pending_pr"] is False
-    assert params["reviewed_at"] is None
-    assert len(params) == 20
-
-
-@pytest.mark.unit
-def test__insert_authorized_users__multi_row_parameters() -> None:
-    conn = _FakeConnection()
-    _access(conn).insert_authorized_users(
-        [
-            AuthorizedUser("OP-0007", "ABR", NASTY, "a@b.dk", "owner"),
-            AuthorizedUser("OP-0007", "CDA", "C D", "c@d.dk", "sme", "Team"),
-        ]
-    )
-    statement, params = conn.calls[0]
-    _assert_not_interpolated(statement)
-    assert ":role_1" in statement
-    assert params["name_0"] == NASTY
-    assert params["role_1"] == "sme"
-
-
-@pytest.mark.unit
-def test__insert_authorized_users__empty_is_noop() -> None:
-    conn = _FakeConnection()
-    _access(conn).insert_authorized_users([])
-    assert conn.calls == []
-
-
-@pytest.mark.unit
-def test__append_change_log__omits_identity_column() -> None:
-    conn = _FakeConnection()
-    _access(conn).append_change_log(
-        ChangeLogEntry(
-            id=0,
-            one_pager_id="OP-0007",
-            version="0.1.0",
-            event_type="creation",
-            author_initials="ABR",
-            author_name="A B",
-            summary=NASTY,
-            created_at=NOW,
-        )
-    )
-    statement, params = conn.calls[0]
-    _assert_not_interpolated(statement)
-    assert "(one_pager_id, version" in statement
-    assert "(id," not in statement
-    assert params["summary"] == NASTY
-    assert params["from_status"] is None
-
-
-@pytest.mark.unit
-def test__delete_one_pager_records__status_row_first() -> None:
-    conn = _FakeConnection()
-    _access(conn).delete_one_pager_records("OP-0007")
-    tables = [call[0].split("FROM ")[1].split(" ")[0] for call in conn.calls]
-    assert tables == [
-        "cat.sch.one_pager_status",
-        "cat.sch.one_pager_authorized_users",
-        "cat.sch.change_log",
-    ]
-    assert all(call[1] == {"one_pager_id": "OP-0007"} for call in conn.calls)
-
-
-@pytest.mark.unit
-def test__get_one_pager_status__parses_timestamps() -> None:
-    columns = [
-        "one_pager_id",
-        "product_name",
-        "owner_name",
-        "owner_initials",
-        "owner_email",
-        "version",
-        "one_pager_status",
-        "data_product_status",
-        "created_at",
-        "last_updated_at",
-        "last_updated_by",
-    ]
-    conn = _FakeConnection(
-        [
-            _response(
-                columns,
-                [
-                    [
-                        "OP-0007",
-                        "P",
-                        "A",
-                        "ABR",
-                        "a@b.dk",
-                        "0.1.0",
-                        "Draft",
-                        "In Definition",
-                        "2026-09-29T10:00:00Z",
-                        "2026-09-29T10:00:00.000Z",
-                        "ABR",
-                    ]
-                ],
-            )
-        ]
-    )
-    header = _access(conn).get_one_pager_status("OP-0007")
-    assert header.created_at == NOW
-    assert conn.calls[0][1] == {"one_pager_id": "OP-0007"}
-    assert ":one_pager_id" in conn.calls[0][0]
-
-
-def _lock(holder: str = NASTY) -> LockInfo:
-    return LockInfo(
-        one_pager_id="OP-0001",
-        locked_by_initials=holder,
-        locked_by_name=holder,
-        session_id=holder,
-        acquired_at=NOW,
-        last_heartbeat=NOW,
-        expires_at=NOW,
-    )
-
-
-@pytest.mark.unit
-def test__write_lock__single_guarded_merge_with_bound_parameters() -> None:
-    conn = _FakeConnection([_response(["num_affected_rows"], [["1"]])])
-    assert _access(conn).write_lock(_lock(), now=NOW) is True
-
-    statement, params = conn.calls[0]
-    assert len(conn.calls) == 1
-    assert statement.startswith("MERGE INTO cat.sch.locks")
-    assert "WHEN MATCHED AND (t.expires_at <= :now" in statement
-    assert "t.session_id = :session_id" in statement
-    assert "WHEN NOT MATCHED THEN INSERT" in statement
-    _assert_not_interpolated(statement)
-    assert params["locked_by_initials"] == NASTY
-    assert params["now"] == NOW
-
-    conn = _FakeConnection([_response(["num_affected_rows"], [["0"]])])
-    assert _access(conn).write_lock(_lock("ABR"), now=NOW) is False
-
-
-@pytest.mark.unit
-def test__write_lock__concurrent_conflict_is_not_acquired() -> None:
-    conn = _FakeConnection(
-        error=StatementFailedError("SQL statement FAILED: ConcurrentAppendException")
-    )
-    assert _access(conn).write_lock(_lock("ABR"), now=NOW) is False
-
-
-@pytest.mark.unit
-def test__refresh_lock__updates_only_the_holders_session() -> None:
-    conn = _FakeConnection([_response(["num_affected_rows"], [["1"]])])
-    assert _access(conn).refresh_lock(
-        "OP-0001",
-        locked_by_initials=NASTY,
-        session_id=NASTY,
-        last_heartbeat=NOW,
-        expires_at=NOW,
-    )
-    statement, params = conn.calls[0]
-    assert statement.startswith("UPDATE cat.sch.locks SET last_heartbeat")
-    assert "locked_by_initials = :locked_by_initials" in statement
-    assert "session_id = :session_id" in statement
-    _assert_not_interpolated(statement)
-    assert params["session_id"] == NASTY
-
-    conn = _FakeConnection([_response(["num_affected_rows"], [["0"]])])
-    assert not _access(conn).refresh_lock(
-        "OP-0001",
-        locked_by_initials="ABR",
-        session_id="s1",
-        last_heartbeat=NOW,
-        expires_at=NOW,
-    )
-
-
-@pytest.mark.unit
-def test__delete_lock__only_the_holders_row() -> None:
-    conn = _FakeConnection([_response(["num_affected_rows"], [["1"]])])
-    assert _access(conn).delete_lock("OP-0001", locked_by_initials=NASTY)
-    statement, params = conn.calls[0]
-    assert statement.startswith("DELETE FROM cat.sch.locks WHERE one_pager_id")
-    assert "locked_by_initials = :locked_by_initials" in statement
-    _assert_not_interpolated(statement)
-    assert params == {"one_pager_id": "OP-0001", "locked_by_initials": NASTY}
-
-
-@pytest.mark.unit
-def test__get_locks__one_parameterized_in_query() -> None:
-    columns = [
-        "one_pager_id",
-        "locked_by_initials",
-        "locked_by_name",
-        "session_id",
-        "acquired_at",
-        "last_heartbeat",
-        "expires_at",
-    ]
-    ts = "2026-09-29T10:00:00.000Z"
-    conn = _FakeConnection(
-        [_response(columns, [["OP-0001", "ABR", "Alice", "s1", ts, ts, ts]])]
-    )
-
-    locks = _access(conn).get_locks(["OP-0001", NASTY])
-
-    statement, params = conn.calls[0]
-    assert "FROM cat.sch.locks WHERE one_pager_id IN (:id_0, :id_1)" in statement
-    _assert_not_interpolated(statement)
-    assert params == {"id_0": "OP-0001", "id_1": NASTY}
-    assert [lock.locked_by_initials for lock in locks] == ["ABR"]
-    assert locks[0].expires_at == NOW
-
-
-@pytest.mark.unit
-def test__get_locks__empty_page_runs_no_query() -> None:
-    conn = _FakeConnection()
-    assert _access(conn).get_locks([]) == []
-    assert conn.calls == []
-
-
-_STATUS_ROW_VALUES = {
+# A status row as the Statement API returns it: every value a string.
+STATUS_ROW_VALUES = {
     "one_pager_id": "OP-0007",
     "data_product": "p",
     "product_name": "P",
@@ -376,38 +49,407 @@ _STATUS_ROW_VALUES = {
     "structure_definition": "structure_one_pager_v_2.json",
     "pending_pr": "false",
 }
+STATUS_ROW_RESPONSE = statement_response(
+    list(STATUS_ROW_VALUES), [list(STATUS_ROW_VALUES.values())]
+)
+
+
+# ============================================================================
+# ID sequences
+# ============================================================================
 
 
 @pytest.mark.unit
-def test__get_one_pager_status_row__parses_full_row() -> None:
-    conn = _FakeConnection(
-        [_response(list(_STATUS_ROW_VALUES), [list(_STATUS_ROW_VALUES.values())])]
-    )
-    row = _access(conn).get_one_pager_status_row(NASTY)
+def test__one_row_affected__compare_and_set_sequence__true_with_bound_values() -> None:
+    """The counter moves with a conditional UPDATE on the current value."""
+    # Given
+    conn = fake_connection([affected_rows(1)])
 
-    assert row.version == "0.2.0"
-    assert row.created_at == NOW
-    assert row.reviewed_at is None
-    assert row.pending_pr is False
+    # When
+    moved = lakehouse_access(conn).compare_and_set_sequence("OP", 6, 7)
+
+    # Then
+    assert moved is True
     statement, params = conn.calls[0]
-    _assert_not_interpolated(statement)
+    assert "UPDATE cat.sch.id_sequences" in statement
+    assert "last_value = :current_value" in statement
+    assert params == {"id_type": "OP", "new_value": 7, "current_value": 6}
+
+
+@pytest.mark.unit
+def test__no_row_affected__compare_and_set_sequence__false() -> None:
+    """Another writer moved the counter first."""
+    # Given
+    conn = fake_connection([affected_rows(0)])
+
+    # When
+    moved = lakehouse_access(conn).compare_and_set_sequence("OP", 6, 7)
+
+    # Then
+    assert moved is False
+
+
+@pytest.mark.unit
+def test__concurrent_append_conflict__compare_and_set_sequence__false() -> None:
+    """A Delta write conflict is retryable, not an error."""
+    # Given
+    conn = fake_connection(error=CONFLICT)
+
+    # When
+    moved = lakehouse_access(conn).compare_and_set_sequence("OP", 6, 7)
+
+    # Then
+    assert moved is False
+
+
+@pytest.mark.unit
+def test__no_sequence_row__get_sequence_value__raises() -> None:
+    """A missing counter row is a configuration error."""
+    # Given
+    conn = fake_connection([statement_response(["last_value"], [])])
+
+    # When / Then
+    with pytest.raises(RuntimeError, match="no row for id_type 'OP'"):
+        lakehouse_access(conn).get_sequence_value("OP")
+
+
+# ============================================================================
+# Create flow
+# ============================================================================
+
+
+@pytest.mark.unit
+def test__status_row__insert_one_pager_status__binds_every_column() -> None:
+    """Every column is a bound parameter."""
+    # Given
+    conn = fake_connection()
+    row = status_row(
+        product_name=NASTY,
+        version="0.1.0",
+        structure_definition="structure_one_pager_v_1.json",
+    )
+
+    # When
+    lakehouse_access(conn).insert_one_pager_status(row)
+
+    # Then
+    statement, params = conn.calls[0]
+    assert_not_interpolated(statement)
+    assert "INSERT INTO cat.sch.one_pager_status" in statement
+    assert "CAST(:reviewed_at AS TIMESTAMP)" in statement
+    assert params["product_name"] == NASTY
+    assert (params["pending_pr"], params["reviewed_at"]) == (False, None)
+    assert len(params) == 20
+
+
+@pytest.mark.unit
+def test__two_users__insert_authorized_users__one_multi_row_insert() -> None:
+    """Each row gets numbered parameters."""
+    # Given
+    conn = fake_connection()
+    users = [
+        AuthorizedUser("OP-0007", "ABR", NASTY, "a@b.dk", "owner"),
+        AuthorizedUser("OP-0007", "CDA", "C D", "c@d.dk", "sme", "Team"),
+    ]
+
+    # When
+    lakehouse_access(conn).insert_authorized_users(users)
+
+    # Then
+    statement, params = conn.calls[0]
+    assert_not_interpolated(statement)
+    assert ":role_1" in statement
+    assert (params["name_0"], params["role_1"]) == (NASTY, "sme")
+
+
+@pytest.mark.unit
+def test__no_users__insert_authorized_users__runs_no_statement() -> None:
+    """An empty list is a no-op."""
+    # Given
+    conn = fake_connection()
+
+    # When
+    lakehouse_access(conn).insert_authorized_users([])
+
+    # Then
+    assert conn.calls == []
+
+
+@pytest.mark.unit
+def test__entry__append_change_log__omits_identity_column() -> None:
+    """The id column is generated by Delta and not inserted."""
+    # Given
+    conn = fake_connection()
+
+    # When
+    lakehouse_access(conn).append_change_log(change_log_entry(summary=NASTY))
+
+    # Then
+    statement, params = conn.calls[0]
+    assert_not_interpolated(statement)
+    assert "(one_pager_id, version" in statement
+    assert "(id," not in statement
+    assert (params["summary"], params["from_status"]) == (NASTY, None)
+
+
+@pytest.mark.unit
+def test__one_pager__delete_one_pager_records__status_row_first() -> None:
+    """Compensation removes the status row before the dependent rows."""
+    # Given
+    conn = fake_connection()
+
+    # When
+    lakehouse_access(conn).delete_one_pager_records("OP-0007")
+
+    # Then
+    tables = [call[0].split("FROM ")[1].split(" ")[0] for call in conn.calls]
+    assert tables == [
+        "cat.sch.one_pager_status",
+        "cat.sch.one_pager_authorized_users",
+        "cat.sch.change_log",
+    ]
+    assert all(call[1] == {"one_pager_id": "OP-0007"} for call in conn.calls)
+
+
+@pytest.mark.unit
+def test__iso_timestamps__get_one_pager_status__parsed_as_utc() -> None:
+    """Timestamps with and without milliseconds are parsed."""
+    # Given
+    columns = [
+        "one_pager_id",
+        "product_name",
+        "owner_name",
+        "owner_initials",
+        "owner_email",
+        "version",
+        "one_pager_status",
+        "data_product_status",
+        "created_at",
+        "last_updated_at",
+        "last_updated_by",
+    ]
+    values = [
+        "OP-0007",
+        "P",
+        "A",
+        "ABR",
+        "a@b.dk",
+        "0.1.0",
+        "Draft",
+        "In Definition",
+        "2026-09-29T10:00:00Z",
+        "2026-09-29T10:00:00.000Z",
+        "ABR",
+    ]
+    conn = fake_connection([statement_response(columns, [values])])
+
+    # When
+    header = lakehouse_access(conn).get_one_pager_status("OP-0007")
+
+    # Then
+    assert header.created_at == NOW
+    assert ":one_pager_id" in conn.calls[0][0]
+    assert conn.calls[0][1] == {"one_pager_id": "OP-0007"}
+
+
+# ============================================================================
+# Locks
+# ============================================================================
+
+
+@pytest.mark.unit
+def test__lock__write_lock__single_guarded_merge_with_bound_parameters() -> None:
+    """The lock is written by one MERGE that only replaces an expired/own lock."""
+    # Given
+    conn = fake_connection([affected_rows(1)])
+    lock = make_lock(holder=NASTY, session_id=NASTY)
+
+    # When
+    written = lakehouse_access(conn).write_lock(lock, now=NOW)
+
+    # Then
+    assert written is True
+    [(statement, params)] = conn.calls
+    assert statement.startswith("MERGE INTO cat.sch.locks")
+    assert "WHEN MATCHED AND (t.expires_at <= :now" in statement
+    assert "t.session_id = :session_id" in statement
+    assert "WHEN NOT MATCHED THEN INSERT" in statement
+    assert_not_interpolated(statement)
+    assert (params["locked_by_initials"], params["now"]) == (NASTY, NOW)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "conn_kwargs",
+    [{"responses": [affected_rows(0)]}, {"error": CONFLICT}],
+    ids=["no-row-affected", "write-conflict"],
+)
+def test__lock_held_or_conflict__write_lock__not_acquired(conn_kwargs: dict) -> None:
+    """Losing to another writer reports the lock as not written."""
+    # Given
+    conn = fake_connection(**conn_kwargs)
+
+    # When
+    written = lakehouse_access(conn).write_lock(make_lock(), now=NOW)
+
+    # Then
+    assert written is False
+
+
+@pytest.mark.unit
+def test__holders_session__refresh_lock__conditional_update() -> None:
+    """Only the holder's session row is refreshed."""
+    # Given
+    conn = fake_connection([affected_rows(1)])
+
+    # When
+    refreshed = lakehouse_access(conn).refresh_lock(
+        "OP-0001",
+        locked_by_initials=NASTY,
+        session_id=NASTY,
+        last_heartbeat=NOW,
+        expires_at=NOW,
+    )
+
+    # Then
+    assert refreshed
+    statement, params = conn.calls[0]
+    assert statement.startswith("UPDATE cat.sch.locks SET last_heartbeat")
+    assert "locked_by_initials = :locked_by_initials" in statement
+    assert "session_id = :session_id" in statement
+    assert_not_interpolated(statement)
+    assert params["session_id"] == NASTY
+
+
+@pytest.mark.unit
+def test__no_row_affected__refresh_lock__false() -> None:
+    """A lock that is no longer held is not refreshed."""
+    # Given
+    conn = fake_connection([affected_rows(0)])
+
+    # When
+    refreshed = lakehouse_access(conn).refresh_lock(
+        "OP-0001",
+        locked_by_initials="ABR",
+        session_id="s1",
+        last_heartbeat=NOW,
+        expires_at=NOW,
+    )
+
+    # Then
+    assert not refreshed
+
+
+@pytest.mark.unit
+def test__holder__delete_lock__deletes_only_the_holders_row() -> None:
+    """The DELETE is conditional on the holder."""
+    # Given
+    conn = fake_connection([affected_rows(1)])
+
+    # When
+    deleted = lakehouse_access(conn).delete_lock("OP-0001", locked_by_initials=NASTY)
+
+    # Then
+    assert deleted
+    statement, params = conn.calls[0]
+    assert statement.startswith("DELETE FROM cat.sch.locks WHERE one_pager_id")
+    assert "locked_by_initials = :locked_by_initials" in statement
+    assert_not_interpolated(statement)
+    assert params == {"one_pager_id": "OP-0001", "locked_by_initials": NASTY}
+
+
+@pytest.mark.unit
+def test__two_ids__get_locks__one_parameterized_in_query() -> None:
+    """The locks of a page are read in one query with an IN list."""
+    # Given
+    columns = [
+        "one_pager_id",
+        "locked_by_initials",
+        "locked_by_name",
+        "session_id",
+        "acquired_at",
+        "last_heartbeat",
+        "expires_at",
+    ]
+    ts = "2026-09-29T10:00:00.000Z"
+    row = ["OP-0001", "ABR", "Alice", "s1", ts, ts, ts]
+    conn = fake_connection([statement_response(columns, [row])])
+
+    # When
+    locks = lakehouse_access(conn).get_locks(["OP-0001", NASTY])
+
+    # Then
+    statement, params = conn.calls[0]
+    assert "FROM cat.sch.locks WHERE one_pager_id IN (:id_0, :id_1)" in statement
+    assert_not_interpolated(statement)
+    assert params == {"id_0": "OP-0001", "id_1": NASTY}
+    assert [lock.locked_by_initials for lock in locks] == ["ABR"]
+    assert locks[0].expires_at == NOW
+
+
+@pytest.mark.unit
+def test__no_ids__get_locks__runs_no_query() -> None:
+    """An empty page needs no lock query."""
+    # Given
+    conn = fake_connection()
+
+    # When
+    locks = lakehouse_access(conn).get_locks([])
+
+    # Then
+    assert locks == []
+    assert conn.calls == []
+
+
+# ============================================================================
+# Status rows and editing
+# ============================================================================
+
+
+@pytest.mark.unit
+def test__stored_row__get_one_pager_status_row__parses_every_column() -> None:
+    """String values are parsed into types; the ID is bound."""
+    # Given
+    conn = fake_connection([STATUS_ROW_RESPONSE])
+
+    # When
+    row = lakehouse_access(conn).get_one_pager_status_row(NASTY)
+
+    # Then
+    assert (row.version, row.created_at) == ("0.2.0", NOW)
+    assert (row.reviewed_at, row.pending_pr) == (None, False)
+    statement, params = conn.calls[0]
+    assert_not_interpolated(statement)
     assert params == {"one_pager_id": NASTY}
 
-    assert _access(_FakeConnection()).get_one_pager_status_row("OP-1") is None
+
+@pytest.mark.unit
+def test__no_row__get_one_pager_status_row__none() -> None:
+    """An unknown ID reads as None."""
+    # Given
+    conn = fake_connection()
+
+    # When
+    row = lakehouse_access(conn).get_one_pager_status_row("OP-1")
+
+    # Then
+    assert row is None
 
 
 @pytest.mark.unit
-def test__update_one_pager_status__conditional_update_with_bound_parameters() -> None:
-    conn = _FakeConnection(
-        [_response(list(_STATUS_ROW_VALUES), [list(_STATUS_ROW_VALUES.values())])]
-    )
-    row = _access(conn).get_one_pager_status_row("OP-0007")
-    row.product_name = NASTY
+def test__row__update_one_pager_status__conditional_update_of_mutable_columns() -> None:
+    """The UPDATE checks version and status and never touches immutable columns."""
+    # Given
+    conn = fake_connection([affected_rows(1)])
+    row = status_row(product_name=NASTY)
 
-    conn = _FakeConnection([_response(["num_affected_rows"], [["1"]])])
-    assert _access(conn).update_one_pager_status(
+    # When
+    updated = lakehouse_access(conn).update_one_pager_status(
         row, expected_version="0.1.0", expected_status="Draft"
     )
+
+    # Then
+    assert updated
     statement, params = conn.calls[0]
     assert statement.startswith("UPDATE cat.sch.one_pager_status SET ")
     assert "version = :expected_version" in statement
@@ -415,145 +457,165 @@ def test__update_one_pager_status__conditional_update_with_bound_parameters() ->
     assert "reviewed_at = CAST(:reviewed_at AS TIMESTAMP)" in statement
     for immutable in ("data_product =", "created_by =", "created_at ="):
         assert immutable not in statement
-    _assert_not_interpolated(statement)
-    assert params["product_name"] == NASTY
-    assert params["expected_version"] == "0.1.0"
-
-    conn = _FakeConnection([_response(["num_affected_rows"], [["0"]])])
-    assert not _access(conn).update_one_pager_status(
-        row, expected_version="0.1.0", expected_status="Draft"
-    )
+    assert_not_interpolated(statement)
+    assert (params["product_name"], params["expected_version"]) == (NASTY, "0.1.0")
 
 
 @pytest.mark.unit
-def test__authorized_users_update_and_delete__bound_parameters() -> None:
-    conn = _FakeConnection()
-    access = _access(conn)
-    access.update_authorized_users(
-        [AuthorizedUser("OP-0001", NASTY, NASTY, "a@b.dk", "sme")]
+def test__row_changed_meanwhile__update_one_pager_status__false() -> None:
+    """No row matched the expected version and status."""
+    # Given
+    conn = fake_connection([affected_rows(0)])
+
+    # When
+    updated = lakehouse_access(conn).update_one_pager_status(
+        status_row(), expected_version="0.1.0", expected_status="Draft"
     )
+
+    # Then
+    assert not updated
+
+
+@pytest.mark.unit
+def test__changed_users__update_authorized_users__bound_parameters() -> None:
+    """User rows are updated with bound values."""
+    # Given
+    conn = fake_connection()
+    user = AuthorizedUser("OP-0001", NASTY, NASTY, "a@b.dk", "sme")
+
+    # When
+    lakehouse_access(conn).update_authorized_users([user])
+
+    # Then
+    [(statement, params)] = conn.calls
+    assert statement.startswith("UPDATE cat.sch.one_pager_authorized_users SET")
+    assert_not_interpolated(statement)
+    assert params["user_initials"] == NASTY
+
+
+@pytest.mark.unit
+def test__removed_users__delete_authorized_users__one_in_list_delete() -> None:
+    """Removed users are deleted in one statement; none means no statement."""
+    # Given
+    conn = fake_connection()
+    access = lakehouse_access(conn)
+
+    # When
     access.delete_authorized_users("OP-0001", ["ABR", NASTY])
     access.delete_authorized_users("OP-0001", [])
 
-    assert len(conn.calls) == 2
-    update, params = conn.calls[0]
-    assert update.startswith("UPDATE cat.sch.one_pager_authorized_users SET")
-    assert params["user_initials"] == NASTY
-    delete, params = conn.calls[1]
-    assert "user_initials IN (:initials_0, :initials_1)" in delete
+    # Then
+    [(statement, params)] = conn.calls
+    assert "user_initials IN (:initials_0, :initials_1)" in statement
+    assert_not_interpolated(statement)
     assert params == {
         "initials_0": "ABR",
         "initials_1": NASTY,
         "one_pager_id": "OP-0001",
     }
-    for statement, _ in conn.calls:
-        _assert_not_interpolated(statement)
 
 
 @pytest.mark.unit
-def test__use_case_reference_writes__bound_parameters() -> None:
-    conn = _FakeConnection([_response(["use_case_id"], [["UC-001"], ["UC-002"]])])
-    access = _access(conn)
-    assert access.get_linked_use_case_ids(NASTY) == ["UC-001", "UC-002"]
+def test__references__read_add_remove_use_case_links__bound_parameters() -> None:
+    """Use Case links are read, merged and deleted with bound values."""
+    # Given
+    conn = fake_connection(
+        [statement_response(["use_case_id"], [["UC-001"], ["UC-002"]])]
+    )
+    access = lakehouse_access(conn)
+
+    # When
+    linked = access.get_linked_use_case_ids(NASTY)
     access.add_use_case_reference(NASTY, "UC-003")
     access.remove_use_case_reference(NASTY, "UC-001")
 
+    # Then
+    assert linked == ["UC-001", "UC-002"]
     merge, params = conn.calls[1]
     assert merge.startswith("MERGE INTO cat.sch.use_case_references t")
     assert "WHEN NOT MATCHED THEN INSERT" in merge
     assert params == {"one_pager_id": NASTY, "use_case_id": "UC-003"}
-    delete, _ = conn.calls[2]
-    assert delete.startswith("DELETE FROM cat.sch.use_case_references")
+    assert conn.calls[2][0].startswith("DELETE FROM cat.sch.use_case_references")
     for statement, _ in conn.calls:
-        _assert_not_interpolated(statement)
+        assert_not_interpolated(statement)
 
 
 @pytest.mark.unit
-def test__append_change_log_entries__single_insert() -> None:
-    conn = _FakeConnection()
+def test__two_entries__append_change_log_entries__single_insert() -> None:
+    """Several entries go in one INSERT; none means no statement."""
+    # Given
+    conn = fake_connection()
     entries = [
-        ChangeLogEntry(
-            0,
-            "OP-1",
-            "0.1.0",
-            "status_transition",
-            "ABR",
-            "A",
-            NASTY,
-            NOW,
-            "Draft",
-            "Ready for Review",
-            "one_pager_status",
-        ),
-        ChangeLogEntry(
-            0,
-            "OP-1",
-            "0.1.0",
-            "status_transition",
-            "ABR",
-            "A",
-            "s",
-            NOW,
-            "Ready for Review",
-            "In Review",
-            "one_pager_status",
-        ),
+        change_log_entry(event_type="status_transition", summary=NASTY),
+        change_log_entry(event_type="status_transition"),
     ]
-    _access(conn).append_change_log_entries(entries)
-    _access(conn).append_change_log_entries([])
 
+    # When
+    lakehouse_access(conn).append_change_log_entries(entries)
+    lakehouse_access(conn).append_change_log_entries([])
+
+    # Then
     [(statement, params)] = conn.calls
     assert statement.startswith("INSERT INTO cat.sch.change_log")
     assert ":summary_0" in statement
     assert ":summary_1" in statement
     assert params["summary_0"] == NASTY
-    _assert_not_interpolated(statement)
+    assert_not_interpolated(statement)
 
 
 @pytest.mark.unit
-def test__get_one_pager_status_rows__filters_by_status_oldest_first() -> None:
-    conn = _FakeConnection(
-        [_response(list(_STATUS_ROW_VALUES), [list(_STATUS_ROW_VALUES.values())])]
-    )
-    rows = _access(conn).get_one_pager_status_rows(NASTY)
+def test__status__get_one_pager_status_rows__filtered_oldest_first() -> None:
+    """The review queue reads one status, oldest change first."""
+    # Given
+    conn = fake_connection([STATUS_ROW_RESPONSE])
 
+    # When
+    rows = lakehouse_access(conn).get_one_pager_status_rows(NASTY)
+
+    # Then
     assert [r.one_pager_id for r in rows] == ["OP-0007"]
     statement, params = conn.calls[0]
-    _assert_not_interpolated(statement)
+    assert_not_interpolated(statement)
     assert "WHERE one_pager_status = :one_pager_status" in statement
     assert "ORDER BY last_updated_at ASC" in statement
     assert params == {"one_pager_status": NASTY}
 
 
+# ============================================================================
+# Review comments
+# ============================================================================
+
+
 @pytest.mark.unit
-def test__review_comment_writes__bound_parameters() -> None:
-    from onepagerapp.models import ReviewComment  # noqa: PLC0415
+def test__comment__add_review_comment__insert_without_identity_column() -> None:
+    """A comment is inserted with bound values; Delta generates the id."""
+    # Given
+    conn = fake_connection()
 
-    comment = ReviewComment(
-        id=0,
-        one_pager_id="OP-0002",
-        version="0.3.0",
-        section=None,
-        reviewer_initials="CJO",
-        reviewer_name="Cjo",
-        comment=NASTY,
-        resolved=False,
-        created_at=NOW,
-    )
-    conn = _FakeConnection()
-    access = _access(conn)
-    access.add_review_comment(comment)
-    access.delete_review_comment(comment)
+    # When
+    lakehouse_access(conn).add_review_comment(review_comment(comment=NASTY))
 
-    insert, params = conn.calls[0]
-    _assert_not_interpolated(insert)
-    assert "INSERT INTO cat.sch.review_comments" in insert
-    assert insert.split("(", 1)[1].startswith("one_pager_id,")
-    assert "CAST(:resolved_at AS TIMESTAMP)" in insert
-    assert params["comment"] == NASTY
-    assert params["resolved"] is False
-    delete, params = conn.calls[1]
-    assert "DELETE FROM cat.sch.review_comments" in delete
+    # Then
+    statement, params = conn.calls[0]
+    assert_not_interpolated(statement)
+    assert "INSERT INTO cat.sch.review_comments" in statement
+    assert statement.split("(", 1)[1].startswith("one_pager_id,")
+    assert "CAST(:resolved_at AS TIMESTAMP)" in statement
+    assert (params["comment"], params["resolved"]) == (NASTY, False)
+
+
+@pytest.mark.unit
+def test__comment__delete_review_comment__by_one_pager_reviewer_and_time() -> None:
+    """Compensation finds the comment by its natural key."""
+    # Given
+    conn = fake_connection()
+
+    # When
+    lakehouse_access(conn).delete_review_comment(review_comment())
+
+    # Then
+    statement, params = conn.calls[0]
+    assert "DELETE FROM cat.sch.review_comments" in statement
     assert params == {
         "one_pager_id": "OP-0002",
         "reviewer_initials": "CJO",
@@ -562,36 +624,45 @@ def test__review_comment_writes__bound_parameters() -> None:
 
 
 @pytest.mark.unit
-def test__get_review_comments__parses_string_booleans() -> None:
+def test__string_booleans__get_review_comments__parsed() -> None:
+    """``"false"`` reads as False (``bool("false")`` would be True)."""
+    # Given
     columns = [
         "id", "one_pager_id", "version", "section", "reviewer_initials",
         "reviewer_name", "comment", "resolved", "resolved_by", "created_at",
         "resolved_at",
-    ]
+    ]  # fmt: skip
     rows = [
         ["1", "OP-1", "0.1.0", None, "CJ", "C", "x", "false", None,
          "2026-09-29T10:00:00Z", None],
         ["2", "OP-1", "0.1.0", "dataSources", "CJ", "C", "y", "true", "ABR",
          "2026-09-29T10:00:00Z", "2026-09-29T10:00:00Z"],
-    ]
-    conn = _FakeConnection([_response(columns, rows)])
+    ]  # fmt: skip
+    conn = fake_connection([statement_response(columns, rows)])
 
-    comments = _access(conn).get_review_comments("OP-1")
+    # When
+    comments = lakehouse_access(conn).get_review_comments("OP-1")
 
+    # Then
     assert [c.resolved for c in comments] == [False, True]
     assert comments[1].resolved_at == NOW
 
 
 @pytest.mark.unit
-def test__resolve_review_comment__conditional_update() -> None:
-    conn = _FakeConnection([_response(["num_affected_rows"], [["1"]])])
-    resolved = _access(conn).resolve_review_comment(
+def test__open_comment__resolve_review_comment__conditional_update() -> None:
+    """Only an unresolved comment of that One Pager is resolved."""
+    # Given
+    conn = fake_connection([affected_rows(1)])
+
+    # When
+    resolved = lakehouse_access(conn).resolve_review_comment(
         NASTY, 7, resolved_by="BSM", resolved_at=NOW
     )
 
+    # Then
     assert resolved is True
     statement, params = conn.calls[0]
-    _assert_not_interpolated(statement)
+    assert_not_interpolated(statement)
     assert "UPDATE cat.sch.review_comments SET resolved = true" in statement
     assert "AND resolved = false" in statement
     assert params == {
@@ -601,13 +672,20 @@ def test__resolve_review_comment__conditional_update() -> None:
         "resolved_at": NOW,
     }
 
-    conn = _FakeConnection([_response(["num_affected_rows"], [["0"]])])
-    assert (
-        _access(conn).resolve_review_comment(
-            "OP-1", 7, resolved_by="BSM", resolved_at=NOW
-        )
-        is False
+
+@pytest.mark.unit
+def test__resolved_comment__resolve_review_comment__false() -> None:
+    """Resolving twice changes nothing."""
+    # Given
+    conn = fake_connection([affected_rows(0)])
+
+    # When
+    resolved = lakehouse_access(conn).resolve_review_comment(
+        "OP-1", 7, resolved_by="BSM", resolved_at=NOW
     )
+
+    # Then
+    assert resolved is False
 
 
 # ============================================================================
@@ -617,164 +695,25 @@ def test__resolve_review_comment__conditional_update() -> None:
 # a change. Every write statement must therefore bind the acting user's
 # initials, unless the table is documented as covered another way.
 
-ACTOR = "Q9Z"
-_WRITE_KEYWORDS = ("INSERT", "UPDATE", "DELETE", "MERGE")
-
-
-class _ActorConnection(_FakeConnection):
-    """Answers every statement: sequence reads with 4, writes with 1 row."""
-
-    def execute_statement(
-        self,
-        statement: str,
-        parameters: dict[str, Any] | None = None,
-        *,
-        identity: Identity,
-    ) -> SimpleNamespace:
-        self.calls.append((statement, dict(parameters or {})))
-        self.identities.append(identity)
-        if statement.startswith("SELECT last_value"):
-            return _response(["last_value"], [["4"]])
-        return _response(["num_affected_rows"], [["1"]])
-
-
-def _actor_status_row() -> OnePagerStatusRow:
-    return OnePagerStatusRow(
-        one_pager_id="OP-0007",
-        data_product="p",
-        product_name="P",
-        business_domain="Customer",
-        data_product_type="Foundational",
-        one_pager_status="Draft",
-        data_product_status="In Definition",
-        version="0.2.0",
-        owner_name="A",
-        owner_initials="ABR",
-        owner_email="a@b.dk",
-        owner_team=None,
-        created_by="ABR",
-        created_at=NOW,
-        last_updated_at=NOW,
-        last_updated_by=ACTOR,
-        structure_definition="structure_one_pager_v_2.json",
-    )
-
-
-def _actor_entry() -> ChangeLogEntry:
-    return ChangeLogEntry(
-        id=0,
-        one_pager_id="OP-0007",
-        version="0.2.0",
-        event_type="edit",
-        author_initials=ACTOR,
-        author_name="Q",
-        summary="s",
-        created_at=NOW,
-    )
-
-
-def _actor_comment() -> ReviewComment:
-    return ReviewComment(
-        id=0,
-        one_pager_id="OP-0002",
-        version="0.3.0",
-        section=None,
-        reviewer_initials=ACTOR,
-        reviewer_name="Q",
-        comment="c",
-        resolved=False,
-        created_at=NOW,
-    )
-
-
-_USE_CASE = UseCaseInput("p", "g", "s", "d", "High")
-
-# Write method -> call that makes it write on behalf of ACTOR.
-ACTOR_WRITES: dict[str, Callable[[LakehouseAccess], object]] = {
-    "insert_reference_value": lambda a: a.insert_reference_value(
-        "ref_business_domains", "HR", sort_order=1, active=True, user_initials=ACTOR
-    ),
-    "update_reference_value": lambda a: a.update_reference_value(
-        "ref_business_domains", "HR", sort_order=1, active=True, user_initials=ACTOR
-    ),
-    "update_status_definition": lambda a: a.update_status_definition(
-        "ref_op_status",
-        "Draft",
-        display_label="Draft",
-        sort_order=1,
-        badge_color="#808080",
-        user_initials=ACTOR,
-    ),
-    "write_lock": lambda a: a.write_lock(_lock(ACTOR), now=NOW),
-    "refresh_lock": lambda a: a.refresh_lock(
-        "OP-0001",
-        locked_by_initials=ACTOR,
-        session_id="s1",
-        last_heartbeat=NOW,
-        expires_at=NOW,
-    ),
-    "delete_lock": lambda a: a.delete_lock("OP-0001", locked_by_initials=ACTOR),
-    "append_change_log": lambda a: a.append_change_log(_actor_entry()),
-    "append_change_log_entries": lambda a: a.append_change_log_entries(
-        [_actor_entry(), _actor_entry()]
-    ),
-    "insert_one_pager_status": lambda a: a.insert_one_pager_status(
-        _actor_status_row()
-    ),
-    "update_one_pager_status": lambda a: a.update_one_pager_status(
-        _actor_status_row(), expected_version="0.1.0", expected_status="Draft"
-    ),
-    "add_review_comment": lambda a: a.add_review_comment(_actor_comment()),
-    "resolve_review_comment": lambda a: a.resolve_review_comment(
-        "OP-0002", 1, resolved_by=ACTOR, resolved_at=NOW
-    ),
-    "create_use_case": lambda a: a.create_use_case(_USE_CASE, ACTOR),
-    "update_use_case": lambda a: a.update_use_case("UC-001", _USE_CASE, ACTOR),
-    "set_use_case_deprecated": lambda a: a.set_use_case_deprecated(
-        "UC-001", deprecated=True, user_initials=ACTOR
-    ),
-}
-
-# Writes without an actor column, and why (Data_Model.md §5).
-WRITES_WITHOUT_ACTOR = {
-    # Changed only by create and save; the change_log entry of that operation
-    # records the author.
-    "insert_authorized_users": "covered by change_log",
-    "update_authorized_users": "covered by change_log",
-    "delete_authorized_users": "covered by change_log",
-    "add_use_case_reference": "covered by change_log",
-    "remove_use_case_reference": "covered by change_log",
-    # No row is left; the Admin service logs a security event.
-    "delete_reference_value": "security event",
-    # Compensation removing the app's own partial writes (logged as failure).
-    "delete_one_pager_records": "compensation",
-    "delete_review_comment": "compensation",
-    # System counter.
-    "compare_and_set_sequence": "system",
-}
-
-
-def _write_statements(conn: _FakeConnection) -> list[tuple[str, dict]]:
-    """Write statements, without the id_sequences counter (a system table)."""
-    return [
-        (statement, params)
-        for statement, params in conn.calls
-        if statement.lstrip().upper().startswith(_WRITE_KEYWORDS)
-        and ".id_sequences" not in statement
-    ]
-
 
 @pytest.mark.unit
-@pytest.mark.parametrize("method", sorted(ACTOR_WRITES))
-def test__write__binds_the_actor(method: str) -> None:
-    conn = _ActorConnection()
+@pytest.mark.parametrize("method", sorted(LAKEHOUSE_ACTOR_WRITES))
+def test__write_on_behalf_of_user__call__actor_bound_as_parameter(method: str) -> None:
+    """Every write binds the actor and runs as the service principal."""
+    # Given
+    conn = fake_connection(handler=answer_every_statement)
 
-    ACTOR_WRITES[method](_access(conn))
+    # When
+    LAKEHOUSE_ACTOR_WRITES[method](lakehouse_access(conn))
 
-    writes = _write_statements(conn)
+    # Then
+    writes = [
+        (statement, params)
+        for statement, params in conn.calls
+        if is_write(statement) and ".id_sequences" not in statement
+    ]
     assert writes, f"{method} sent no write statement"
-    # Writes, and the ID-sequence read that is part of a write, run as the
-    # service principal (identity plan Phase 4).
+    # The ID-sequence read that is part of a write runs as the app as well.
     assert set(conn.identities) == {Identity.APP}, f"{method} ran as the user"
     for statement, params in writes:
         assert ACTOR in params.values(), f"{method}: actor not bound in {statement}"
@@ -782,17 +721,20 @@ def test__write__binds_the_actor(method: str) -> None:
 
 
 @pytest.mark.unit
-def test__every_write_method_is_covered() -> None:
+def test__data_access_interface__write_methods__each_binds_actor_or_has_reason() -> (
+    None
+):
     """A new write method must bind the actor or be listed with a reason."""
+    # When
     write_methods = {
         name
         for name in DataAccess.__abstractmethods__
         if not name.startswith(("get_", "read_"))
     }
 
-    assert write_methods == set(ACTOR_WRITES) | set(WRITES_WITHOUT_ACTOR)
-    assert not set(ACTOR_WRITES) & set(WRITES_WITHOUT_ACTOR)
-
+    # Then
+    assert write_methods == set(LAKEHOUSE_ACTOR_WRITES) | set(LAKEHOUSE_OTHER_WRITES)
+    assert not set(LAKEHOUSE_ACTOR_WRITES) & set(LAKEHOUSE_OTHER_WRITES)
 
 
 # ============================================================================
@@ -801,17 +743,25 @@ def test__every_write_method_is_covered() -> None:
 
 
 @pytest.mark.unit
-def test__get_group_memberships__one_statement_with_bound_group_names() -> None:
-    conn = _FakeConnection(
-        [_response(["member_0", "member_1", "member_2"], [["true", "false", "true"]])]
+def test__three_groups__get_group_memberships__one_statement_as_the_user() -> None:
+    """All groups are checked in one bound statement, run as the user."""
+    # Given
+    conn = fake_connection(
+        [
+            statement_response(
+                ["member_0", "member_1", "member_2"], [["true", "false", "true"]]
+            )
+        ]
     )
     groups = {"owner_sme": NASTY, "approver": "OPA-Approver", "admin": "OPA-Admin"}
 
-    result = _access(conn).get_group_memberships(groups)
+    # When
+    result = lakehouse_access(conn).get_group_memberships(groups)
 
+    # Then
     assert result == {"owner_sme": True, "approver": False, "admin": True}
     [(statement, params)] = conn.calls
-    _assert_not_interpolated(statement)
+    assert_not_interpolated(statement)
     assert "is_member(:group_0) OR is_account_group_member(:group_0)" in statement
     assert params == {
         "group_0": NASTY,
@@ -822,35 +772,48 @@ def test__get_group_memberships__one_statement_with_bound_group_names() -> None:
 
 
 @pytest.mark.unit
-def test__get_group_memberships__checks_the_real_spelling_too() -> None:
-    conn = _FakeConnection(
-        [_response(["member_0", "member_1"], [["false", "true"]])],
-        group_names={
-            "BEC_BECOC001_LHX_DEV_DataPlatEng": ["BEC_BECOC001_LHX_dev_DataPlatEng"]
-        },
+def test__group_with_other_spelling__get_group_memberships__real_spelling_checked() -> (
+    None
+):
+    """The directory's spelling of a group name is checked too, once each."""
+    # Given
+    group = "PAG-BEC-LHX-DEV-DataPlatEng-Base"
+    conn = fake_connection(
+        [statement_response(["member_0", "member_1"], [["false", "true"]])],
+        group_names={group: ["PAG-BEC-LHX-dev-DataPlatEng-Base"]},
     )
-    group = "BEC_BECOC001_LHX_DEV_DataPlatEng"
 
-    result = _access(conn).get_group_memberships(
+    # When
+    result = lakehouse_access(conn).get_group_memberships(
         {"owner_sme": group, "approver": group, "admin": group}
     )
 
+    # Then
     assert result == {"owner_sme": True, "approver": True, "admin": True}
-    [(_, params)] = conn.calls  # each distinct spelling once
+    [(_, params)] = conn.calls
     assert params == {
-        "group_0": "BEC_BECOC001_LHX_DEV_DataPlatEng",
-        "group_1": "BEC_BECOC001_LHX_dev_DataPlatEng",
+        "group_0": "PAG-BEC-LHX-DEV-DataPlatEng-Base",
+        "group_1": "PAG-BEC-LHX-dev-DataPlatEng-Base",
     }
 
 
 @pytest.mark.unit
-def test__get_group_memberships__no_row_raises() -> None:
+def test__no_result_row__get_group_memberships__raises() -> None:
+    """A missing result row is an error, not "member of nothing"."""
+    # When / Then
     with pytest.raises(RuntimeError, match="no row"):
-        _access(_FakeConnection()).get_group_memberships({"admin": "G"})
+        lakehouse_access(fake_connection()).get_group_memberships({"admin": "G"})
 
 
 @pytest.mark.unit
-def test__get_group_memberships__nothing_to_check_runs_no_query() -> None:
-    conn = _FakeConnection()
-    assert _access(conn).get_group_memberships({}) == {}
+def test__no_groups__get_group_memberships__runs_no_query() -> None:
+    """Nothing to check, no statement."""
+    # Given
+    conn = fake_connection()
+
+    # When
+    result = lakehouse_access(conn).get_group_memberships({})
+
+    # Then
+    assert result == {}
     assert conn.calls == []

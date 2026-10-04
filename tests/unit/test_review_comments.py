@@ -1,8 +1,5 @@
 """Section-level review comments and resolving them (Backend_Design.md §13)."""
 
-from dataclasses import replace
-from datetime import UTC, datetime
-
 import pytest
 
 from onepagerapp.data_access.mock import MockDataAccess
@@ -14,40 +11,90 @@ from onepagerapp.review import (
     resolve_review_comment,
     section_label,
 )
-from onepagerapp.state_machine import Actor, InvalidTransitionError
+from onepagerapp.state_machine import InvalidTransitionError
 from onepagerapp.workflow import reject_one_pager
-from tests.users import make_user
+from tests.helpers import (
+    ALICE,
+    APPROVED_ID,
+    APPROVER,
+    APPROVER_ROLES,
+    BOB,
+    DIANA,
+    IN_REVIEW_ID,
+    NOW,
+    update_status_row,
+)
 
-NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
-APPROVER = make_user("CJO")
-OWNER = make_user("BSM", "Bob Smith")  # Owner of OP-0002
-SME = make_user("DPI", "Diana Prince")  # SME of OP-0002
-ROLES = frozenset({Actor.APPROVER})
-OP = "OP-0002"  # seeded In Review, v0.3.0
+OP = IN_REVIEW_ID  # seeded In Review, v0.3.0; Owner BOB, SME DIANA
+
+
+@pytest.fixture
+def comment_ids(mock_data_access: MockDataAccess) -> list[int]:
+    """Comment on Use Cases, reject with a reason; return both comment IDs."""
+    add_review_comment(
+        mock_data_access,
+        OP,
+        APPROVER,
+        "useCases",
+        "Link UC-001",
+        roles=APPROVER_ROLES,
+        now=NOW,
+    )
+    reject_one_pager(
+        mock_data_access,
+        OP,
+        APPROVER,
+        "See comments",
+        roles=APPROVER_ROLES,
+        now=NOW.replace(minute=5),
+    )
+    return [c.id for c in mock_data_access.get_review_comments(OP)]
 
 
 @pytest.mark.unit
-def test__section_labels_cover_every_editor_section() -> None:
-    assert section_label(None) == "Whole document"
-    assert section_label("dataSources") == "Data Sources"
-    assert section_label("somethingNew") == "somethingNew"
+@pytest.mark.parametrize(
+    ("section", "label"),
+    [
+        (None, "Whole document"),
+        ("dataSources", "Data Sources"),
+        ("somethingNew", "somethingNew"),
+    ],
+)
+def test__section_key__section_label__readable_label(
+    section: str | None, label: str
+) -> None:
+    """Known sections get their label; unknown keys are shown as they are."""
+    # When
+    result = section_label(section)
+
+    # Then
+    assert result == label
+
+
+@pytest.mark.unit
+def test__editor_sections__section_labels__cover_the_problem_statement() -> None:
+    """Every editor section can be commented on."""
+    # When / Then
     assert "businessProblemStatement" in SECTION_LABELS
 
 
 @pytest.mark.unit
-def test__add_comment__stored_unresolved_on_the_section(
+def test__approver__add_comment_on_section__stored_unresolved(
     mock_data_access: MockDataAccess,
 ) -> None:
+    """A comment is sanitized and stored on its section; the status stays."""
+    # When
     comment = add_review_comment(
         mock_data_access,
         OP,
         APPROVER,
         "dataSources",
         "  Add the <i>refresh</i> frequency ",
-        roles=ROLES,
+        roles=APPROVER_ROLES,
         now=NOW,
     )
 
+    # Then
     assert comment.comment == "Add the refresh frequency"
     [stored] = mock_data_access.get_review_comments(OP)
     assert (stored.section, stored.version, stored.resolved) == (
@@ -62,79 +109,111 @@ def test__add_comment__stored_unresolved_on_the_section(
 
 
 @pytest.mark.unit
-def test__add_comment__guards(mock_data_access: MockDataAccess) -> None:
-    with pytest.raises(PermissionDeniedError):
-        add_review_comment(mock_data_access, OP, APPROVER, None, "x", roles=set())
-    with pytest.raises(PermissionDeniedError, match="Owner or SME"):
-        add_review_comment(mock_data_access, OP, SME, None, "x", roles=ROLES)
-    with pytest.raises(ValueError, match="Unknown section"):
-        add_review_comment(mock_data_access, OP, APPROVER, "nope", "x", roles=ROLES)
-    with pytest.raises(ValueError, match="Write a comment"):
-        add_review_comment(mock_data_access, OP, APPROVER, None, " ", roles=ROLES)
-    with pytest.raises(InvalidTransitionError):
+@pytest.mark.parametrize(
+    ("one_pager_id", "user", "roles", "section", "text", "error", "match"),
+    [
+        (OP, APPROVER, set(), None, "x", PermissionDeniedError, ""),
+        (OP, DIANA, APPROVER_ROLES, None, "x", PermissionDeniedError, "Owner or SME"),
+        (OP, APPROVER, APPROVER_ROLES, "nope", "x", ValueError, "Unknown section"),
+        (OP, APPROVER, APPROVER_ROLES, None, " ", ValueError, "Write a comment"),
+        (APPROVED_ID, APPROVER, APPROVER_ROLES, None, "x", InvalidTransitionError, ""),
+    ],
+    ids=["not-approver", "own-one-pager", "unknown-section", "blank", "not-in-review"],
+)
+def test__guard_violated__add_comment__refused_and_nothing_stored(
+    mock_data_access: MockDataAccess,
+    one_pager_id: str,
+    user: object,
+    roles: object,
+    section: str | None,
+    text: str,
+    error: type[Exception],
+    match: str,
+) -> None:
+    """Only Approvers comment on others' One Pagers In Review, on known sections."""
+    # When / Then
+    with pytest.raises(error, match=match):
         add_review_comment(
-            mock_data_access, "OP-0001", APPROVER, None, "x", roles=ROLES
+            mock_data_access, one_pager_id, user, section, text, roles=roles
         )
     assert mock_data_access.get_review_comments(OP) == []
 
 
-def _rejected_with_comments(data_access: MockDataAccess) -> list[int]:
-    add_review_comment(
-        data_access, OP, APPROVER, "useCases", "Link UC-001", roles=ROLES, now=NOW
-    )
-    reject_one_pager(
-        data_access,
-        OP,
-        APPROVER,
-        "See comments",
-        roles=ROLES,
-        now=NOW.replace(minute=5),
-    )
-    return [c.id for c in data_access.get_review_comments(OP)]
-
-
 @pytest.mark.unit
-def test__resolve__by_owner_or_sme_while_draft(
-    mock_data_access: MockDataAccess,
+def test__rejected_one_pager__owner_and_sme_resolve__both_resolved(
+    mock_data_access: MockDataAccess, comment_ids: list[int]
 ) -> None:
-    first, second = _rejected_with_comments(mock_data_access)
+    """The Owner and the SME resolve comments while the One Pager is a Draft."""
+    # Given
+    first, second = comment_ids
 
-    resolve_review_comment(mock_data_access, OP, first, OWNER, now=NOW)
-    resolve_review_comment(mock_data_access, OP, second, SME, now=NOW)
+    # When
+    resolve_review_comment(mock_data_access, OP, first, BOB, now=NOW)
+    resolve_review_comment(mock_data_access, OP, second, DIANA, now=NOW)
 
+    # Then
     comments = mock_data_access.get_review_comments(OP)
     assert [(c.resolved, c.resolved_by, c.resolved_at) for c in comments] == [
         (True, "BSM", NOW),
         (True, "DPI", NOW),
     ]
-    with pytest.raises(CommentError, match="already resolved"):
-        resolve_review_comment(mock_data_access, OP, first, OWNER)
 
 
 @pytest.mark.unit
-def test__resolve__guards(mock_data_access: MockDataAccess) -> None:
-    [first, _] = _rejected_with_comments(mock_data_access)
-
-    with pytest.raises(PermissionDeniedError, match="Owner or an SME"):
-        resolve_review_comment(mock_data_access, OP, first, APPROVER)
-    with pytest.raises(CommentError):
-        resolve_review_comment(mock_data_access, OP, 999, OWNER)
-
-    rows = mock_data_access._status_rows
-    rows[OP] = replace(rows[OP], one_pager_status="In Review")
-    with pytest.raises(PermissionDeniedError, match="reworked"):
-        resolve_review_comment(mock_data_access, OP, first, OWNER)
-
-
-@pytest.mark.unit
-def test__resolve__only_comments_of_that_one_pager(
-    mock_data_access: MockDataAccess,
+def test__resolved_comment__resolve_again__raises(
+    mock_data_access: MockDataAccess, comment_ids: list[int]
 ) -> None:
-    [first, _] = _rejected_with_comments(mock_data_access)
-    rows = mock_data_access._status_rows
-    rows["OP-0001"] = replace(rows["OP-0001"], one_pager_status="Draft Update")
-    alice = make_user("ABR", "Alice Brown")  # Owner of OP-0001
+    """A comment is resolved once."""
+    # Given
+    resolve_review_comment(mock_data_access, OP, comment_ids[0], BOB, now=NOW)
 
+    # When / Then
+    with pytest.raises(CommentError, match="already resolved"):
+        resolve_review_comment(mock_data_access, OP, comment_ids[0], BOB)
+
+
+@pytest.mark.unit
+def test__approver__resolve__raises_permission_denied(
+    mock_data_access: MockDataAccess, comment_ids: list[int]
+) -> None:
+    """Only the Owner or an SME resolves comments."""
+    # When / Then
+    with pytest.raises(PermissionDeniedError, match="Owner or an SME"):
+        resolve_review_comment(mock_data_access, OP, comment_ids[0], APPROVER)
+
+
+@pytest.mark.unit
+def test__unknown_comment_id__resolve__raises(
+    mock_data_access: MockDataAccess, comment_ids: list[int]
+) -> None:
+    """An unknown comment cannot be resolved."""
+    # When / Then
     with pytest.raises(CommentError):
-        resolve_review_comment(mock_data_access, "OP-0001", first, alice)
+        resolve_review_comment(mock_data_access, OP, 999, BOB)
+
+
+@pytest.mark.unit
+def test__one_pager_back_in_review__resolve__raises_permission_denied(
+    mock_data_access: MockDataAccess, comment_ids: list[int]
+) -> None:
+    """Comments are resolved while reworking, not during the next review."""
+    # Given
+    update_status_row(mock_data_access, OP, one_pager_status="In Review")
+
+    # When / Then
+    with pytest.raises(PermissionDeniedError, match="reworked"):
+        resolve_review_comment(mock_data_access, OP, comment_ids[0], BOB)
+
+
+@pytest.mark.unit
+def test__comment_of_other_one_pager__resolve__raises_and_unchanged(
+    mock_data_access: MockDataAccess, comment_ids: list[int]
+) -> None:
+    """A comment can only be resolved through its own One Pager."""
+    # Given Alice owns OP-0001, which is being reworked
+    update_status_row(mock_data_access, APPROVED_ID, one_pager_status="Draft Update")
+
+    # When / Then
+    with pytest.raises(CommentError):
+        resolve_review_comment(mock_data_access, APPROVED_ID, comment_ids[0], ALICE)
     assert not mock_data_access.get_review_comments(OP)[0].resolved

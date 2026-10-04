@@ -1,34 +1,37 @@
 """Validation badges and summary: field paths → editor tabs."""
 
-from datetime import UTC, datetime
-from pathlib import Path
+from collections.abc import Callable
 from types import ModuleType
 
 import pytest
 
 from onepagerapp.data_access.mock import MockDataAccess
-from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.editing import submission_issues
-from onepagerapp.models import (
-    CurrentUser,
-    NewOnePagerInput,
-    OnePagerStatusRow,
-    ValidationError,
-)
+from onepagerapp.models import OnePagerDocument, OnePagerStatusRow, ValidationError
 from onepagerapp.validation import CURRENT_STRUCTURE_DEFINITION
-from onepagerapp.workflow import create_one_pager
-from tests.unit.test_editing_links import fill_all_sections
-from tests.users import CREATOR_ROLES
-
-APP_DIR = Path(__file__).resolve().parents[2] / "app"
+from tests.helpers import NEW_ID, fill_all_sections, status_row
 
 
 @pytest.fixture
-def edit_mode(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
-    monkeypatch.syspath_prepend(str(APP_DIR))
-    from adapters import edit_mode  # noqa: PLC0415
+def edit_mode(import_app_module: Callable[[str], ModuleType]) -> ModuleType:
+    """Return ``adapters.edit_mode``."""
+    return import_app_module("adapters.edit_mode")
 
-    return edit_mode
+
+@pytest.fixture
+def row() -> OnePagerStatusRow:
+    """Return a v2 Draft status row of OP-0003, version 0.2.0."""
+    return status_row(
+        one_pager_id=NEW_ID,
+        owner_initials="MJO",
+        structure_definition=CURRENT_STRUCTURE_DEFINITION,
+    )
+
+
+@pytest.fixture
+def document(draft_id: str, mock_data_access: MockDataAccess) -> OnePagerDocument:
+    """Return the stored first version of the new Draft."""
+    return mock_data_access.read_document(draft_id, "0.1.0")
 
 
 @pytest.mark.unit
@@ -50,8 +53,15 @@ def edit_mode(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
         ("", None),
     ],
 )
-def test__tab_for_path(edit_mode: ModuleType, path: str, tab: str | None) -> None:
-    assert edit_mode.tab_for_path(path) == tab
+def test__field_path__tab_for_path__editor_tab_or_none(
+    edit_mode: ModuleType, path: str, tab: str | None
+) -> None:
+    """Each field path maps to the tab where it is edited."""
+    # When
+    result = edit_mode.tab_for_path(path)
+
+    # Then
+    assert result == tab
 
 
 @pytest.mark.unit
@@ -67,12 +77,23 @@ def test__tab_for_path(edit_mode: ModuleType, path: str, tab: str | None) -> Non
         ("dataProductOwner.email", "email"),
     ],
 )
-def test__describe_path(edit_mode: ModuleType, path: str, text: str) -> None:
-    assert edit_mode.describe_path(path) == text
+def test__field_path__describe_path__readable_location(
+    edit_mode: ModuleType, path: str, text: str
+) -> None:
+    """Paths are described within their tab, items counted from 1."""
+    # When
+    result = edit_mode.describe_path(path)
+
+    # Then
+    assert result == text
 
 
 @pytest.mark.unit
-def test__issues_by_tab__tab_order_and_form_group(edit_mode: ModuleType) -> None:
+def test__errors_on_several_tabs__issues_by_tab__tab_order_then_form(
+    edit_mode: ModuleType,
+) -> None:
+    """Issues are grouped in tab order; form-level ones come last."""
+    # When
     grouped = edit_mode.issues_by_tab(
         [
             ValidationError("changeSummary", "x"),
@@ -80,68 +101,67 @@ def test__issues_by_tab__tab_order_and_form_group(edit_mode: ModuleType) -> None
             ValidationError("productName", "z"),
         ]
     )
+
+    # Then
     assert list(grouped) == ["Basics", "Data Sources", "Form"]
-    assert edit_mode.tab_label("Basics", 2) == "Basics (2)"
-    assert edit_mode.tab_label("Basics", 0) == "Basics"
-
-
-def _row() -> OnePagerStatusRow:
-    now = datetime(2026, 9, 29, tzinfo=UTC)
-    return OnePagerStatusRow(
-        one_pager_id="OP-0003",
-        data_product="customer_master",
-        product_name="C",
-        business_domain="Customer",
-        data_product_type="Foundational",
-        one_pager_status="Draft",
-        data_product_status="In Definition",
-        version="0.2.0",
-        owner_name="M",
-        owner_initials="MJO",
-        owner_email="m@bec.dk",
-        owner_team=None,
-        created_by="MJO",
-        created_at=now,
-        last_updated_at=now,
-        last_updated_by="MJO",
-        structure_definition=CURRENT_STRUCTURE_DEFINITION,
-    )
 
 
 @pytest.mark.unit
-def test__submission_issues__lists_missing_sections(
-    mock_data_access: MockDataAccess,
-    valid_input: NewOnePagerInput,
-    creator: CurrentUser,
-    document_store: OnePagerDocumentStore,
+@pytest.mark.parametrize(("count", "label"), [(2, "Basics (2)"), (0, "Basics")])
+def test__issue_count__tab_label__count_only_when_issues(
+    edit_mode: ModuleType, count: int, label: str
 ) -> None:
-    create_one_pager(
-        valid_input, creator, mock_data_access, document_store, roles=CREATOR_ROLES
-    )
-    doc = mock_data_access.read_document("OP-0003", "0.1.0")
-    doc.version = "garbage"  # operational fields come from the row
+    """The tab label shows the number of issues, if any."""
+    # When
+    result = edit_mode.tab_label("Basics", count)
 
-    paths = {e.field_path for e in submission_issues(doc, _row())}
+    # Then
+    assert result == label
 
+
+@pytest.mark.unit
+def test__new_draft__submission_issues__missing_sections_listed(
+    document: OnePagerDocument, row: OnePagerStatusRow
+) -> None:
+    """Missing sections are listed; operational fields come from the row."""
+    # Given
+    document.version = "garbage"
+
+    # When
+    paths = {e.field_path for e in submission_issues(document, row)}
+
+    # Then
     assert {"useCases", "businessRequirements", "dataSources"} <= paths
     assert "dataClassification" in paths
     assert "version" not in paths
 
 
 @pytest.mark.unit
-def test__submission_issues__complete_document_has_none(
-    mock_data_access: MockDataAccess,
-    valid_input: NewOnePagerInput,
-    creator: CurrentUser,
-    document_store: OnePagerDocumentStore,
+def test__complete_document__submission_issues__none(
+    document: OnePagerDocument, row: OnePagerStatusRow
 ) -> None:
-    create_one_pager(
-        valid_input, creator, mock_data_access, document_store, roles=CREATOR_ROLES
-    )
-    doc = mock_data_access.read_document("OP-0003", "0.1.0")
-    fill_all_sections(doc)
-    assert submission_issues(doc, _row()) == []
-    doc.owner_email = "bad"
-    assert [e.field_path for e in submission_issues(doc, _row())] == [
-        "dataProductOwner.email"
-    ]
+    """A complete document is ready to submit."""
+    # Given
+    fill_all_sections(document)
+
+    # When
+    issues = submission_issues(document, row)
+
+    # Then
+    assert issues == []
+
+
+@pytest.mark.unit
+def test__complete_document_with_bad_email__submission_issues__only_that(
+    document: OnePagerDocument, row: OnePagerStatusRow
+) -> None:
+    """A single problem is reported on its own."""
+    # Given
+    fill_all_sections(document)
+    document.owner_email = "bad"
+
+    # When
+    issues = submission_issues(document, row)
+
+    # Then
+    assert [e.field_path for e in issues] == ["dataProductOwner.email"]

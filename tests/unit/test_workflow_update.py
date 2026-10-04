@@ -1,35 +1,42 @@
 """Update: Approved → Draft Update (Req §5, Backend §2, §6)."""
 
-from dataclasses import replace
-from datetime import UTC, datetime
-
 import pytest
 
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
-from onepagerapp.editing import open_for_edit, save_draft, working_copy
+from onepagerapp.editing import open_for_edit, working_copy
 from onepagerapp.permissions import PermissionDeniedError
-from onepagerapp.state_machine import Actor, InvalidTransitionError
+from onepagerapp.state_machine import InvalidTransitionError
 from onepagerapp.workflow import (
     ConfirmationRequiredError,
     TransitionError,
     approve_one_pager,
+    reject_one_pager,
     start_update,
     submit_for_review,
 )
-from tests.users import make_user
-
-NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
-ALICE = make_user("ABR", "Alice Brown")  # Owner of OP-0001
-APPROVED_ID = "OP-0001"  # seeded Approved / Ready for Development, v1.0.0
+from tests.helpers import (
+    ALICE,
+    APPROVED_ID,
+    APPROVER,
+    APPROVER_ROLES,
+    NOW,
+    SESSION_ID,
+    fill_all_sections,
+    save,
+    update_status_row,
+)
 
 
 @pytest.mark.unit
-def test__update__to_draft_update_keeping_version_and_dp(
+def test__approved_one_pager__confirmed_update__draft_update_keeps_version_and_dp(
     mock_data_access: MockDataAccess,
 ) -> None:
+    """Update reopens the One Pager without touching the version or DP status."""
+    # When
     row = start_update(mock_data_access, APPROVED_ID, ALICE, confirmed=True, now=NOW)
 
+    # Then
     assert (row.one_pager_status, row.data_product_status, row.version) == (
         "Draft Update",
         "Ready for Development",
@@ -41,83 +48,106 @@ def test__update__to_draft_update_keeping_version_and_dp(
         "Draft Update",
         "1.0.0",
     )
-    assert mock_data_access.get_lock(APPROVED_ID) is None  # taken in the Editor
 
 
 @pytest.mark.unit
-def test__update__needs_confirmation(mock_data_access: MockDataAccess) -> None:
+def test__approved_one_pager__confirmed_update__takes_no_lock(
+    mock_data_access: MockDataAccess,
+) -> None:
+    """The lock is taken later, when the Editor opens."""
+    # When
+    start_update(mock_data_access, APPROVED_ID, ALICE, confirmed=True, now=NOW)
+
+    # Then
+    assert mock_data_access.get_lock(APPROVED_ID) is None
+
+
+@pytest.mark.unit
+def test__approved_one_pager__unconfirmed_update__raises_and_keeps_status(
+    mock_data_access: MockDataAccess,
+) -> None:
+    """Update needs an explicit confirmation."""
+    # When / Then
     with pytest.raises(ConfirmationRequiredError):
         start_update(mock_data_access, APPROVED_ID, ALICE)
-    assert mock_data_access.get_one_pager_status_row(APPROVED_ID).one_pager_status == (
-        "Approved"
-    )
+    row = mock_data_access.get_one_pager_status_row(APPROVED_ID)
+    assert row.one_pager_status == "Approved"
 
 
 @pytest.mark.unit
-def test__update__owner_or_sme_only(mock_data_access: MockDataAccess) -> None:
-    other = make_user("CJO")
+def test__user_not_owner_or_sme__update__raises_permission_denied(
+    mock_data_access: MockDataAccess,
+) -> None:
+    """Only the Owner or an SME can start an update."""
+    # When / Then
     with pytest.raises(PermissionDeniedError):
-        start_update(mock_data_access, APPROVED_ID, other, confirmed=True)
+        start_update(mock_data_access, APPROVED_ID, APPROVER, confirmed=True)
 
 
 @pytest.mark.unit
-def test__update__only_when_approved(mock_data_access: MockDataAccess) -> None:
+def test__one_pager_in_draft_update__update_again__raises_invalid_transition(
+    mock_data_access: MockDataAccess,
+) -> None:
+    """Update is only possible from Approved."""
+    # Given
     start_update(mock_data_access, APPROVED_ID, ALICE, confirmed=True)
+
+    # When / Then
     with pytest.raises(InvalidTransitionError):
         start_update(mock_data_access, APPROVED_ID, ALICE, confirmed=True)
 
 
 @pytest.mark.unit
-def test__update__approved_document_must_exist(
+def test__approved_document_missing__update__raises_and_keeps_status(
     mock_data_access: MockDataAccess,
 ) -> None:
-    rows = mock_data_access._status_rows
-    rows[APPROVED_ID] = replace(rows[APPROVED_ID], version="3.0.0")
+    """The Approved version file must exist to be copied for editing."""
+    # Given
+    update_status_row(mock_data_access, APPROVED_ID, version="3.0.0")
 
+    # When / Then
     with pytest.raises(TransitionError, match="could not be found"):
         start_update(mock_data_access, APPROVED_ID, ALICE, confirmed=True)
-    assert mock_data_access.get_one_pager_status_row(APPROVED_ID).one_pager_status == (
-        "Approved"
-    )
+    row = mock_data_access.get_one_pager_status_row(APPROVED_ID)
+    assert row.one_pager_status == "Approved"
 
 
 @pytest.mark.unit
-def test__full_update_cycle_ends_in_the_next_major(
+def test__draft_update_saved_and_submitted__approve__next_major_in_enhancement(
     mock_data_access: MockDataAccess, document_store: OnePagerDocumentStore
 ) -> None:
-    from tests.unit.test_editing_links import fill_all_sections  # noqa: PLC0415
-
+    """A full update cycle ends in the next MAJOR version and keeps the old file."""
+    # Given an update that is edited, saved and submitted
     start_update(mock_data_access, APPROVED_ID, ALICE, confirmed=True, now=NOW)
-    doc = working_copy(
-        open_for_edit(mock_data_access, APPROVED_ID, ALICE, "s1", now=NOW).document
-    )
+    session = open_for_edit(mock_data_access, APPROVED_ID, ALICE, SESSION_ID, now=NOW)
+    doc = working_copy(session.document)
     fill_all_sections(doc)
-    saved = save_draft(
+    saved = save(
         mock_data_access,
         document_store,
-        APPROVED_ID,
         doc,
-        "Refreshed",
         ALICE,
-        "s1",
-        allowed_domains=["Customer"],
-        allowed_types=["Foundational"],
+        one_pager_id=APPROVED_ID,
         now=NOW,
     )
     assert saved.ok, saved.errors
     assert saved.version == "1.1.0"
-    submitted = submit_for_review(mock_data_access, APPROVED_ID, ALICE, "s1", now=NOW)
+    submitted = submit_for_review(
+        mock_data_access, APPROVED_ID, ALICE, SESSION_ID, now=NOW
+    )
     assert submitted.ok, submitted.errors
 
+    # When
     row = approve_one_pager(
         mock_data_access,
         document_store,
         APPROVED_ID,
-        make_user("CJO"),
-        roles={Actor.APPROVER},
+        APPROVER,
+        roles=APPROVER_ROLES,
         now=NOW,
     )
 
+    # Then
     assert (row.one_pager_status, row.data_product_status, row.version) == (
         "Approved",
         "In Enhancement",
@@ -128,25 +158,29 @@ def test__full_update_cycle_ends_in_the_next_major(
 
 
 @pytest.mark.unit
-def test__rejected_update_returns_to_draft_update(
+def test__update_in_review__reject__returns_to_draft_update(
     mock_data_access: MockDataAccess,
 ) -> None:
-    from onepagerapp.workflow import reject_one_pager  # noqa: PLC0415
-
-    rows = mock_data_access._status_rows
-    rows[APPROVED_ID] = replace(
-        rows[APPROVED_ID], one_pager_status="In Review", data_product_status="Active"
+    """A rejected update goes back to Draft Update and keeps the DP status."""
+    # Given
+    update_status_row(
+        mock_data_access,
+        APPROVED_ID,
+        one_pager_status="In Review",
+        data_product_status="Active",
     )
 
+    # When
     row = reject_one_pager(
         mock_data_access,
         APPROVED_ID,
-        make_user("CJO"),
+        APPROVER,
         "Keep the old lineage",
-        roles={Actor.APPROVER},
+        roles=APPROVER_ROLES,
         now=NOW,
     )
 
+    # Then
     assert (row.one_pager_status, row.data_product_status) == ("Draft Update", "Active")
     entry = mock_data_access.get_change_log(APPROVED_ID)[0]
     assert entry.summary == "Update rejected: Keep the old lineage"

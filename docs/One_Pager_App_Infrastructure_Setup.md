@@ -75,12 +75,12 @@ Application roles come from Entra ID groups (automatic identity management is en
 
 | Role | Setting | Current (interim) group |
 |---|---|---|
-| Owner/SME | `ONE_PAGER_APP_GROUP_OWNER_SME` | `BEC_BECOC001_LHX_{env}_DataPlatEng` |
-| Approver | `ONE_PAGER_APP_GROUP_APPROVER` | `BEC_BECOC001_LHX_{env}_DataPlatEng` |
-| Admin | `ONE_PAGER_APP_GROUP_ADMIN` | `BEC_BECOC001_LHX_{env}_DataPlatEng` |
+| Owner/SME | `ONE_PAGER_APP_GROUP_OWNER_SME` | `PAG-BEC-LHX-{env}-DataPlatEng-Base` |
+| Approver | `ONE_PAGER_APP_GROUP_APPROVER` | `PAG-BEC-LHX-{env}-DataPlatEng-Base` |
+| Admin | `ONE_PAGER_APP_GROUP_ADMIN` | `PAG-BEC-LHX-{env}-DataPlatEng-Base` |
 | Viewer | — | Every employee (no group) |
 
-`{env}` is `DEV`, `INT`, `UAT` or `PRD`. Group names are compared ignoring case, so `BEC_BECOC001_LHX_DEV_DataPlatEng` matches the real group `BEC_BECOC001_LHX_dev_DataPlatEng`. Dedicated groups per role will be requested by the Data Platform Engineering team, which also manages membership; switching to them is a change of the three settings. Each environment's `BEC_BECOC001_LHX_{env}_DataPlatEng` group must exist before the app is deployed there, otherwise every user is only a Viewer.
+`{env}` is `DEV`, `INT`, `UAT` or `PRD`. Group names are compared ignoring case, so `PAG-BEC-LHX-DEV-DataPlatEng-Base` matches the real group `PAG-BEC-LHX-dev-DataPlatEng-Base`. Dedicated groups per role will be requested by the Data Platform Engineering team, which also manages membership; switching to them is a change of the three settings. Each environment's `PAG-BEC-LHX-{env}-DataPlatEng-Base` group must exist before the app is deployed there, otherwise every user is only a Viewer.
 
 ## Required Changes
 
@@ -90,8 +90,8 @@ Changes to the Terraform configuration needed by the identity and access design 
 2. Grant `account users` `USE CATALOG`, `USE SCHEMA` and `SELECT` on the app tables, and `CAN_USE` on the warehouse.
 3. Confirm that no user group has `MODIFY` on the app tables or `WRITE VOLUME` on the registry volume.
 4. No change to app access: in UAT/PRD all users can already use the app (all employees are Viewers); DEV/INT/TST stay limited to the base groups.
-5. TST: the app's `Environment` setting knows TST (badge, and `BEC_BECOC001_LHX_TST_DataPlatEng` as the interim role group). Check that this group exists in the TST account.
-6. Before deploying to an environment, check that `BEC_BECOC001_LHX_<ENV>_DataPlatEng` exists in that environment's account (for example `SELECT is_account_group_member('BEC_BECOC001_LHX_DEV_DataPlatEng')` as a member returns `true`). A missing group means every user is only a Viewer.
+5. TST: the app's `Environment` setting knows TST (badge, and `PAG-BEC-LHX-TST-DataPlatEng-Base` as the interim role group). Check that this group exists in the TST account.
+6. Before deploying to an environment, check that `PAG-BEC-LHX-<ENV>-DataPlatEng-Base` exists in that environment's account (for example `SELECT is_account_group_member('PAG-BEC-LHX-DEV-DataPlatEng-Base')` as a member returns `true`). A missing group means every user is only a Viewer.
 
 ## App Settings per Environment
 
@@ -108,7 +108,7 @@ Order: DEV → INT → TST → UAT → PRD. Move on only when the previous envir
 
 1. **Terraform:** the `sql` and `iam.current-user:read` user API scopes on the app; the grants above (service principal: `SELECT`, `MODIFY`, `READ VOLUME`, `WRITE VOLUME`; `account users`: `SELECT`); `CAN_USE` on the warehouse.
 2. **Liquibase:** run the pipeline so `ddl/ref_audit_columns.sql` adds `last_updated_by` / `last_updated_at` to the `ref_*` tables **before** the new app version is deployed (Admin changes write these columns).
-3. **Groups:** check that `BEC_BECOC001_LHX_<ENV>_DataPlatEng` exists (Required Changes, item 6). Once dedicated role groups exist, add the `ONE_PAGER_APP_GROUP_*` settings to `app/app.yml` (with `{env}`, one value for every environment).
+3. **Groups:** check that `PAG-BEC-LHX-<ENV>-DataPlatEng-Base` exists (Required Changes, item 6). Once dedicated role groups exist, add the `ONE_PAGER_APP_GROUP_*` settings to `app/app.yml` (with `{env}`, one value for every environment).
 4. **Deploy** the app with the bundle target of the environment. `databricks.yml` has targets `dev`, `int`, `uat` and `prd`; a `tst` target (and its pipeline stage) must be added before deploying to TST.
 5. **Check the environment:** the sidebar badge shows the right environment (derived from the registry volume's catalog). A wrong badge means the role groups of the wrong environment are checked.
 6. **Smoke test:** run the identity and access smoke test ([Testing_Strategy.md](Testing_Strategy.md) §8) and record the result in the deployment ticket.

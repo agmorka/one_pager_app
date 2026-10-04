@@ -1,210 +1,36 @@
-"""AppTest smoke tests for the Editor in edit mode (local-mock mode).
+"""AppTest smoke tests for the Editor in edit mode and Preview actions.
 
-As in test_create_pages_smoke.py, each page script runs on its own with the
-services injected into session state, and st.switch_page is recorded.
+Each page script runs on its own with the services injected into session
+state, and st.switch_page is recorded (see ``tests.helpers.page_app``).
 """
 
-from datetime import UTC, datetime
-from pathlib import Path
-
 import pytest
-import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from onepagerapp.data_access.mock import MockDataAccess
-from onepagerapp.documents import OnePagerDocumentStore
-from onepagerapp.models import NewOnePagerInput, PersonRef
-from onepagerapp.workflow import create_one_pager
-from tests.conftest import FIXTURES_DIR
-from tests.users import CREATOR_ROLES, make_user
-
-APP_DIR = Path(__file__).resolve().parents[2] / "app"
-NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
-
-
-@pytest.fixture
-def switched(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    targets: list[str] = []
-    monkeypatch.setattr(st, "switch_page", targets.append)
-    monkeypatch.syspath_prepend(str(APP_DIR))
-    return targets
-
-
-@pytest.fixture
-def services(tmp_path: Path) -> dict:
-    store = OnePagerDocumentStore(FIXTURES_DIR, write_path=tmp_path)
-    data_access = MockDataAccess(store)
-    user = make_user("ABR", "Alice Brown")
-    result = create_one_pager(
-        NewOnePagerInput(
-            data_product="customer_master",
-            product_name="Customer Master",
-            business_domain="Customer",
-            data_product_type="Foundational",
-            description="Unified customer view",
-            owner=PersonRef("Alice Brown", "ABR", "alice.brown@company.com"),
-            smes=[PersonRef("Diana Prince", "DPR", "diana@bec.dk")],
-        ),
-        user,
-        data_access,
-        store,
-        now=NOW,
-        roles=CREATOR_ROLES,
-    )
-    assert result.one_pager_id == "OP-0003"
-    return {
-        "services_initialized": True,
-        "data_access": data_access,
-        "document_store": store,
-        "current_user": user.username,
-        "current_user_info": user,
-        "current_user_roles": CREATOR_ROLES,
-    }
-
-
-def _app(page: str, state: dict) -> AppTest:
-    at = AppTest.from_file(str(APP_DIR / "views" / page), default_timeout=30)
-    for key, value in state.items():
-        at.session_state[key] = value
-    return at
-
-
-def _editor(services: dict, one_pager_id: str = "OP-0003") -> AppTest:
-    return _app(
-        "editor.py",
-        {**services, "editor_mode": "edit", "editor_one_pager_id": one_pager_id},
-    )
-
-
-def _button(at: AppTest, label: str):  # noqa: ANN202
-    return next(b for b in at.button if b.label == label)
-
-
-@pytest.mark.unit
-def test__preview__edit_opens_editor_in_edit_mode(
-    services: dict, switched: list[str]
-) -> None:
-    at = _app("preview.py", {**services, "preview_one_pager_id": "OP-0003"}).run()
-    assert not at.exception
-    edit = at.button(key="preview_edit")
-    assert not edit.disabled
-
-    edit.click().run()
-
-    assert switched == ["views/editor.py"]
-    assert at.session_state["editor_mode"] == "edit"
-    assert at.session_state["editor_one_pager_id"] == "OP-0003"
-
-
-@pytest.mark.unit
-def test__preview__edit_hidden_for_non_owner(
-    services: dict, switched: list[str]
-) -> None:
-    # Alice is not Owner/SME of OP-0002 (and it is In Review).
-    at = _app("preview.py", {**services, "preview_one_pager_id": "OP-0002"}).run()
-    assert "preview_edit" not in {b.key for b in at.button}
-
-
-@pytest.mark.unit
-def test__editor__edit_mode_prefills_basics_and_locks(
-    services: dict, switched: list[str]
-) -> None:
-    at = _editor(services).run()
-
-    assert not at.exception
-    assert at.title[0].value == "Editing: Customer Master (OP-0003)"
-    assert at.text_input(key="edit_product_name").value == "Customer Master"
-    assert at.text_input(key="edit_owner_initials").value == "ABR"
-    assert at.text_area(key="edit_description").value == "Unified customer view"
-    lock = services["data_access"].get_lock("OP-0003")
-    assert lock.locked_by_initials == "ABR"
-
-
-@pytest.mark.unit
-def test__editor__switching_tabs_keeps_input(
-    services: dict, switched: list[str]
-) -> None:
-    at = _editor(services).run()
-    at.text_input(key="edit_product_name").input("Customer Master v2").run()
-
-    at.radio(key="edit_active_tab").set_value("Business Problem").run()
-    at.text_area(key="edit_problem").input("Scattered data").run()
-    at.radio(key="edit_active_tab").set_value("Basics").run()
-
-    assert not at.exception
-    assert at.text_input(key="edit_product_name").value == "Customer Master v2"
-    assert at.session_state["edit_document"].business_problem_statement == (
-        "Scattered data"
-    )
-
-
-@pytest.mark.unit
-def test__editor__lock_held_by_other_user_blocks_editing(
-    services: dict, switched: list[str]
-) -> None:
-    from onepagerapp.locking import acquire_lock  # noqa: PLC0415
-
-    sme = make_user("DPR")
-    acquire_lock(services["data_access"], "OP-0003", sme, "other-session")
-
-    at = _editor(services).run()
-
-    assert not at.exception
-    assert "Locked by DPR" in at.warning[0].value
-    assert "edit_document" not in at.session_state
-
-
-@pytest.mark.unit
-def test__editor__not_authorized_user_sees_error(
-    services: dict, switched: list[str]
-) -> None:
-    at = _editor(services, "OP-0002").run()
-    assert not at.exception
-    assert "Owner or an SME" in at.error[0].value
-
-
-@pytest.mark.unit
-def test__editor__close_releases_lock_and_opens_preview(
-    services: dict, switched: list[str]
-) -> None:
-    at = _editor(services).run()
-    _button(at, "Close editor").click().run()
-
-    assert switched == ["views/preview.py"]
-    assert services["data_access"].get_lock("OP-0003") is None
-    assert "edit_document" not in at.session_state
-
-
-@pytest.mark.unit
-def test__editor__save_draft_bumps_version(services: dict, switched: list[str]) -> None:
-    at = _editor(services).run()
-    at.text_input(key="edit_product_name").input("Customer Master v2")
-    at.text_input(key="edit_change_summary").input("Renamed the product")
-    at.run()
-
-    _button(at, "Save Draft").click().run()
-
-    assert not at.exception
-    assert "Saved as v0.2.0" in at.success[0].value
-    assert at.text_input(key="edit_change_summary").value == ""
-    row = services["data_access"].get_one_pager_status_row("OP-0003")
-    assert (row.version, row.product_name) == ("0.2.0", "Customer Master v2")
-    # Saving does not release the lock (Backend_Design.md §6).
-    assert services["data_access"].get_lock("OP-0003") is not None
-
-
-@pytest.mark.unit
-def test__editor__save_without_summary_shows_error(
-    services: dict, switched: list[str]
-) -> None:
-    at = _editor(services).run()
-    _button(at, "Save Draft").click().run()
-
-    assert not at.exception
-    assert any("Describe what you changed." in m.value for m in at.markdown)
-    row = services["data_access"].get_one_pager_status_row("OP-0003")
-    assert row.version == "0.1.0"
-
+from onepagerapp.locking import acquire_lock
+from onepagerapp.review import add_review_comment
+from onepagerapp.workflow import (
+    cancel_one_pager,
+    change_data_product_status,
+    reject_one_pager,
+    start_update,
+)
+from tests.helpers import (
+    ALICE,
+    APPROVED_ID,
+    APPROVER,
+    APPROVER_ROLES,
+    IN_REVIEW_ID,
+    NEW_ID,
+    button_labelled,
+    editor_page,
+    fill_all_sections,
+    make_user,
+    page_app,
+    switch_tab,
+    update_status_row,
+)
 
 TAB_NAMES = [
     "Basics",
@@ -220,29 +46,201 @@ TAB_NAMES = [
 ]
 
 
-def _tab(at: AppTest, name: str) -> AppTest:
-    return at.radio(key="edit_active_tab").set_value(name).run()
+def _preview(data_access: MockDataAccess, one_pager_id: str = NEW_ID) -> AppTest:
+    """Return the Preview of ``one_pager_id`` for Alice."""
+    return page_app("preview.py", data_access, preview_one_pager_id=one_pager_id)
+
+
+def _action_keys(at: AppTest) -> set[str]:
+    """Return the keys of the Preview action buttons."""
+    return {b.key for b in at.button if b.key and b.key.startswith("preview_")}
+
+
+def _needs_attention(at: AppTest) -> str:
+    """Return the Editor caption listing the tabs that need attention."""
+    return next(c.value for c in at.caption if "Needs attention" in c.value)
+
+
+def _complete_and_save(at: AppTest) -> None:
+    """Fill every section in the Editor and save the Draft."""
+    fill_all_sections(at.session_state["edit_document"])
+    at.text_input(key="edit_change_summary").input("Complete").run()
+    button_labelled(at, "Save Draft").click().run()
+
+
+def _rejected_with_comment(data_access: MockDataAccess) -> int:
+    """Send OP-0003 to review and reject it with one comment; return its ID."""
+    update_status_row(data_access, NEW_ID, one_pager_status="In Review")
+    add_review_comment(
+        data_access,
+        NEW_ID,
+        APPROVER,
+        "dataSources",
+        "Add sources",
+        roles=APPROVER_ROLES,
+    )
+    reject_one_pager(
+        data_access, NEW_ID, APPROVER, "See comments", roles=APPROVER_ROLES
+    )
+    return data_access.get_review_comments(NEW_ID)[0].id
+
+
+# ============================================================================
+# Opening the Editor
+# ============================================================================
 
 
 @pytest.mark.unit
-def test__editor__every_tab_renders(services: dict, switched: list[str]) -> None:
-    at = _editor(services).run()
+def test__owners_draft__click_edit_on_preview__editor_in_edit_mode(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """Edit on the Preview opens the Editor on that One Pager."""
+    # Given
+    at = _preview(alices_draft).run()
+    assert not at.exception
+    assert not at.button(key="preview_edit").disabled
+
+    # When
+    at.button(key="preview_edit").click().run()
+
+    # Then
+    assert switched == ["views/editor.py"]
+    assert at.session_state["editor_mode"] == "edit"
+    assert at.session_state["editor_one_pager_id"] == NEW_ID
+
+
+@pytest.mark.unit
+def test__one_pager_of_others_in_review__open_preview__no_edit(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """Alice is not Owner/SME of OP-0002 (and it is In Review)."""
+    # When
+    at = _preview(alices_draft, IN_REVIEW_ID).run()
+
+    # Then
+    assert "preview_edit" not in {b.key for b in at.button}
+
+
+@pytest.mark.unit
+def test__owners_draft__open_editor__basics_prefilled_and_locked(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """The Editor shows the stored values and takes the lock."""
+    # When
+    at = editor_page(alices_draft).run()
+
+    # Then
+    assert not at.exception
+    assert at.title[0].value == "Editing: Customer Master (OP-0003)"
+    assert at.text_input(key="edit_product_name").value == "Customer Master"
+    assert at.text_input(key="edit_owner_initials").value == "ABR"
+    assert at.text_area(key="edit_description").value == "Unified customer view"
+    assert alices_draft.get_lock(NEW_ID).locked_by_initials == "ABR"
+
+
+@pytest.mark.unit
+def test__draft_locked_by_sme__open_editor__warning_and_no_document(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """Another user's lock blocks editing."""
+    # Given
+    acquire_lock(alices_draft, NEW_ID, make_user("DPR"), "other-session")
+
+    # When
+    at = editor_page(alices_draft).run()
+
+    # Then
+    assert not at.exception
+    assert "Locked by DPR" in at.warning[0].value
+    assert "edit_document" not in at.session_state
+
+
+@pytest.mark.unit
+def test__one_pager_of_others__open_editor__permission_error(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """A user who is neither Owner nor SME cannot edit."""
+    # When
+    at = editor_page(alices_draft, IN_REVIEW_ID).run()
+
+    # Then
+    assert not at.exception
+    assert "Owner or an SME" in at.error[0].value
+
+
+@pytest.mark.unit
+def test__update_started__open_editor__approved_version_opened(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """After Update the Editor opens the Approved version with a lock."""
+    # Given
+    start_update(alices_draft, APPROVED_ID, ALICE, confirmed=True)
+
+    # When
+    at = editor_page(alices_draft, APPROVED_ID).run()
+
+    # Then
+    assert not at.exception
+    assert at.title[0].value == "Editing: Person Master Data (OP-0001)"
+    assert alices_draft.get_lock(APPROVED_ID).locked_by_initials == "ABR"
+
+
+# ============================================================================
+# Editing
+# ============================================================================
+
+
+@pytest.mark.unit
+def test__changed_product_name__switch_tabs_and_back__input_kept(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """Switching tabs keeps what was typed on each tab."""
+    # Given
+    at = editor_page(alices_draft).run()
+    at.text_input(key="edit_product_name").input("Customer Master v2").run()
+    switch_tab(at, "Business Problem")
+    at.text_area(key="edit_problem").input("Scattered data").run()
+
+    # When
+    switch_tab(at, "Basics")
+
+    # Then
+    assert not at.exception
+    assert at.text_input(key="edit_product_name").value == "Customer Master v2"
+    document = at.session_state["edit_document"]
+    assert document.business_problem_statement == "Scattered data"
+
+
+@pytest.mark.unit
+def test__open_editor__visit_every_tab__each_renders(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """All tabs exist in order and render without errors."""
+    # Given
+    at = editor_page(alices_draft).run()
     assert list(at.radio(key="edit_active_tab").options) == TAB_NAMES
+
+    # When / Then
     for name in TAB_NAMES:
-        _tab(at, name)
+        switch_tab(at, name)
         assert not at.exception, name
 
 
 @pytest.mark.unit
-def test__editor__add_requirement_gets_br_id(
-    services: dict, switched: list[str]
+def test__requirement_form_filled__click_ok__requirement_gets_br_id(
+    alices_draft: MockDataAccess, switched: list[str]
 ) -> None:
-    at = _tab(_editor(services).run(), "Business Requirements")
+    """A new business requirement gets the next BR ID."""
+    # Given
+    at = switch_tab(editor_page(alices_draft).run(), "Business Requirements")
     at.button(key="edit_br_add").click().run()
     at.text_area(key="edit_br_f_requirement").input("Daily refresh")
     at.selectbox(key="edit_br_f_priority").select("High")
+
+    # When
     at.button(key="edit_br_form_ok").click().run()
 
+    # Then
     assert not at.exception
     assert at.session_state["edit_document"].business_requirements == [
         {"id": "BR-001", "requirement": "Daily refresh", "priority": "High"}
@@ -250,61 +248,97 @@ def test__editor__add_requirement_gets_br_id(
 
 
 @pytest.mark.unit
-def test__editor__link_use_case_and_save(services: dict, switched: list[str]) -> None:
-    at = _tab(_editor(services).run(), "Use Cases")
+def test__use_case_linked__save_draft__reference_stored(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """A linked Use Case is stored as a reference on save."""
+    # Given
+    at = switch_tab(editor_page(alices_draft).run(), "Use Cases")
     at.selectbox(key="edit_uc_pick").select("UC-001")
     at.button(key="edit_uc_link").click().run()
     assert at.session_state["edit_document"].use_case_ids == ["UC-001"]
-
     at.text_input(key="edit_change_summary").input("Linked UC-001").run()
-    _button(at, "Save Draft").click().run()
 
+    # When
+    button_labelled(at, "Save Draft").click().run()
+
+    # Then
     assert not at.exception
-    data_access = services["data_access"]
-    assert data_access.get_linked_use_case_ids("OP-0003") == ["UC-001"]
+    assert alices_draft.get_linked_use_case_ids(NEW_ID) == ["UC-001"]
 
+
+@pytest.mark.unit
+def test__linked_use_case__click_unlink__removed_from_document(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """Unlinking removes the Use Case from the working copy."""
+    # Given
+    at = switch_tab(editor_page(alices_draft).run(), "Use Cases")
+    at.selectbox(key="edit_uc_pick").select("UC-001")
+    at.button(key="edit_uc_link").click().run()
+
+    # When
     at.button(key="edit_uc_unlink_UC-001").click().run()
+
+    # Then
     assert at.session_state["edit_document"].use_case_ids == []
 
 
 @pytest.mark.unit
-def test__editor__create_use_case_inline(services: dict, switched: list[str]) -> None:
-    at = _tab(_editor(services).run(), "Use Cases")
+def test__new_use_case_form_filled__click_create__created_and_linked(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """A Use Case can be created inline and is linked at once."""
+    # Given
+    at = switch_tab(editor_page(alices_draft).run(), "Use Cases")
     for name in ("persona", "goal", "scenario", "decision_enabled"):
         at.text_area(key=f"edit_uc_new_{name}").input(f"New {name}")
     at.selectbox(key="edit_uc_new_priority").select("High")
+
+    # When
     at.button(key="edit_uc_create").click().run()
 
+    # Then
     assert not at.exception
     [use_case_id] = at.session_state["edit_document"].use_case_ids
-    assert services["data_access"].get_use_case(use_case_id).persona == "New persona"
+    assert alices_draft.get_use_case(use_case_id).persona == "New persona"
 
 
 @pytest.mark.unit
-def test__editor__non_cde_element_drops_cde_fields(
-    services: dict, switched: list[str]
+def test__non_cde_element_with_tier__click_ok__cde_fields_dropped(
+    alices_draft: MockDataAccess, switched: list[str]
 ) -> None:
-    at = _tab(_editor(services).run(), "Data Product Preview")
+    """CDE-only fields are not kept on a non-CDE element."""
+    # Given
+    at = switch_tab(editor_page(alices_draft).run(), "Data Product Preview")
     at.button(key="edit_dpp_add").click().run()
     at.text_input(key="edit_dpp_f_elementName").input("segment")
     at.text_input(key="edit_dpp_f_dataType").input("STRING")
     at.text_area(key="edit_dpp_f_description").input("Segment")
     at.text_input(key="edit_dpp_f_cdeCriticalityTiering").input("Tier 1")
+
+    # When
     at.button(key="edit_dpp_form_ok").click().run()
 
+    # Then
     [element] = at.session_state["edit_document"].data_product_preview
     assert element["isCriticalDataElement"] is False
     assert "cdeCriticalityTiering" not in element
 
 
 @pytest.mark.unit
-def test__editor__classification_updates_document(
-    services: dict, switched: list[str]
+def test__classification_tab__choose_level_and_pii__document_updated(
+    alices_draft: MockDataAccess, switched: list[str]
 ) -> None:
-    at = _tab(_editor(services).run(), "Classification")
+    """Classification inputs update the document; retention is then required."""
+    # Given
+    at = switch_tab(editor_page(alices_draft).run(), "Classification")
     at.selectbox(key="edit_class_level").select("Internal")
+
+    # When
     at.checkbox(key="edit_class_pii").check().run()
 
+    # Then
     assert not at.exception
     assert at.session_state["edit_document"].data_classification == {
         "classificationLevel": "Internal",
@@ -315,126 +349,333 @@ def test__editor__classification_updates_document(
 
 
 @pytest.mark.unit
-def test__editor__badges_and_summary_link_to_tabs(
-    services: dict, switched: list[str]
+def test__incomplete_draft__open_editor__badges_list_tabs_with_issues(
+    alices_draft: MockDataAccess, switched: list[str]
 ) -> None:
-    at = _editor(services).run()
+    """Tabs with issues are named with their count; Basics is fine."""
+    # When
+    at = editor_page(alices_draft).run()
 
-    badges = next(c.value for c in at.caption if "Needs attention" in c.value)
+    # Then
+    badges = _needs_attention(at)
     assert "Use Cases (1)" in badges
     assert "Basics" not in badges
+
+
+@pytest.mark.unit
+def test__issue_in_summary__click_it__its_tab_opened(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """Each issue in the summary links to its tab."""
+    # Given
+    at = editor_page(alices_draft).run()
     issue = next(b for b in at.button if b.key.startswith("edit_issue_submit_Data S"))
     assert issue.label == "This field is required."
 
+    # When
     issue.click().run()
 
+    # Then
     assert at.radio(key="edit_active_tab").value == "Data Sources"
     assert at.button(key="edit_ds_add")
 
 
 @pytest.mark.unit
-def test__editor__badges_follow_input(services: dict, switched: list[str]) -> None:
-    at = _tab(_editor(services).run(), "Business Problem")
-    at.text_area(key="edit_problem").input("Scattered data").run()
-    badges = next(c.value for c in at.caption if "Needs attention" in c.value)
-    assert "Business Problem" not in badges
-
-
-def _action_keys(at: AppTest) -> set[str]:
-    return {b.key for b in at.button if b.key and b.key.startswith("preview_")}
-
-
-@pytest.mark.unit
-def test__preview__actions_follow_role_and_status(
-    services: dict, switched: list[str]
+def test__problem_statement_missing__type_it__badge_cleared(
+    alices_draft: MockDataAccess, switched: list[str]
 ) -> None:
-    owner_draft = _app(
-        "preview.py", {**services, "preview_one_pager_id": "OP-0003"}
-    ).run()
-    assert {"preview_edit", "preview_cancel", "preview_export_pdf"} <= _action_keys(
-        owner_draft
-    )
-    assert "preview_approve" not in _action_keys(owner_draft)
+    """Badges follow the input without saving."""
+    # Given
+    at = switch_tab(editor_page(alices_draft).run(), "Business Problem")
 
-    # Alice is not Owner/SME of OP-0002 (In Review): read-only.
-    viewer = _app("preview.py", {**services, "preview_one_pager_id": "OP-0002"}).run()
-    assert not viewer.exception
-    assert _action_keys(viewer) == {"preview_export_pdf"}
-    assert any("Waiting for an Approver" in c.value for c in viewer.caption)
+    # When
+    at.text_area(key="edit_problem").input("Scattered data").run()
+
+    # Then
+    assert "Business Problem" not in _needs_attention(at)
+
+
+# ============================================================================
+# Saving, closing and submitting
+# ============================================================================
 
 
 @pytest.mark.unit
-def test__editor__submit_for_review(services: dict, switched: list[str]) -> None:
-    from tests.unit.test_editing_links import fill_all_sections  # noqa: PLC0415
+def test__renamed_with_summary__click_save_draft__new_version_lock_kept(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """Save Draft bumps the version, clears the summary and keeps the lock."""
+    # Given
+    at = editor_page(alices_draft).run()
+    at.text_input(key="edit_product_name").input("Customer Master v2")
+    at.text_input(key="edit_change_summary").input("Renamed the product")
+    at.run()
 
-    at = _editor(services).run()
+    # When
+    button_labelled(at, "Save Draft").click().run()
+
+    # Then
+    assert not at.exception
+    assert "Saved as v0.2.0" in at.success[0].value
+    assert at.text_input(key="edit_change_summary").value == ""
+    row = alices_draft.get_one_pager_status_row(NEW_ID)
+    assert (row.version, row.product_name) == ("0.2.0", "Customer Master v2")
+    assert alices_draft.get_lock(NEW_ID) is not None
+
+
+@pytest.mark.unit
+def test__no_summary__click_save_draft__summary_error_no_version(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """A save without a change summary is refused."""
+    # Given
+    at = editor_page(alices_draft).run()
+
+    # When
+    button_labelled(at, "Save Draft").click().run()
+
+    # Then
+    assert not at.exception
+    assert any("Describe what you changed." in m.value for m in at.markdown)
+    assert alices_draft.get_one_pager_status_row(NEW_ID).version == "0.1.0"
+
+
+@pytest.mark.unit
+def test__clean_editor__click_close__lock_released_preview_opened(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """Closing releases the lock and returns to the Preview."""
+    # Given
+    at = editor_page(alices_draft).run()
+
+    # When
+    button_labelled(at, "Close editor").click().run()
+
+    # Then
+    assert switched == ["views/preview.py"]
+    assert alices_draft.get_lock(NEW_ID) is None
+    assert "edit_document" not in at.session_state
+
+
+@pytest.mark.unit
+def test__unsaved_complete_document__open_editor__submit_disabled_until_saved(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """Submit waits until the changes are saved."""
+    # Given
+    at = editor_page(alices_draft).run()
     fill_all_sections(at.session_state["edit_document"])
     at.text_input(key="edit_change_summary").input("Complete").run()
-    assert at.button(key="edit_submit").disabled  # unsaved changes
-    _button(at, "Save Draft").click().run()
+    assert at.button(key="edit_submit").disabled
+
+    # When
+    button_labelled(at, "Save Draft").click().run()
+
+    # Then
     assert not at.button(key="edit_submit").disabled
 
+
+@pytest.mark.unit
+def test__saved_complete_draft__click_submit__in_review_lock_released(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """Submit moves the One Pager to In Review and returns to the Preview."""
+    # Given
+    at = editor_page(alices_draft).run()
+    _complete_and_save(at)
+
+    # When
     at.button(key="edit_submit").click().run()
 
+    # Then
     assert not at.exception
     assert switched == ["views/preview.py"]
     assert "now In Review" in at.session_state["preview_flash"]
-    row = services["data_access"].get_one_pager_status_row("OP-0003")
+    row = alices_draft.get_one_pager_status_row(NEW_ID)
     assert row.one_pager_status == "In Review"
-    assert services["data_access"].get_lock("OP-0003") is None
+    assert alices_draft.get_lock(NEW_ID) is None
 
 
 @pytest.mark.unit
-def test__editor__submit_blocked_by_validation(
-    services: dict, switched: list[str]
+def test__incomplete_draft__click_submit__blocked_with_error(
+    alices_draft: MockDataAccess, switched: list[str]
 ) -> None:
-    at = _editor(services).run()
+    """Strict validation errors block the submit."""
+    # Given
+    at = editor_page(alices_draft).run()
+
+    # When
     at.button(key="edit_submit").click().run()
 
+    # Then
     assert not at.exception
     assert switched == []
     assert "Submit for Review is blocked" in at.error[0].value
 
 
+# ============================================================================
+# Review tab
+# ============================================================================
+
+
 @pytest.mark.unit
-def test__preview__cancel_asks_for_confirmation(
-    services: dict, switched: list[str]
+def test__incomplete_draft__open_review_tab__checklist_and_submit_disabled(
+    alices_draft: MockDataAccess, switched: list[str]
 ) -> None:
-    at = _app("preview.py", {**services, "preview_one_pager_id": "OP-0003"}).run()
+    """The Review tab lists the sections and blocks the submit."""
+    # When
+    at = switch_tab(editor_page(alices_draft).run(), "Review")
+
+    # Then
+    assert not at.exception
+    assert any(m.value == "Basics: no issues" for m in at.markdown)
+    assert "issue(s)" in at.button(key="edit_review_check_Data Sources").label
+    assert at.button(key="edit_review_submit").disabled
+    assert "No review comments." in [c.value for c in at.caption]
+
+
+@pytest.mark.unit
+def test__review_tab__click_section_check__its_tab_opened(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """A checklist entry links to its tab."""
+    # Given
+    at = switch_tab(editor_page(alices_draft).run(), "Review")
+
+    # When
+    at.button(key="edit_review_check_Data Sources").click().run()
+
+    # Then
+    assert at.radio(key="edit_active_tab").value == "Data Sources"
+
+
+@pytest.mark.unit
+def test__rejected_with_comment__click_resolve_on_review_tab__resolved(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """The Owner resolves review comments on the Review tab."""
+    # Given
+    comment_id = _rejected_with_comment(alices_draft)
+    at = switch_tab(editor_page(alices_draft).run(), "Review")
+    assert any("Data Sources" in m.value for m in at.markdown)
+
+    # When
+    at.button(key=f"edit_resolve_{comment_id}").click().run()
+
+    # Then
+    assert not at.exception
+    comment = alices_draft.get_review_comments(NEW_ID)[0]
+    assert (comment.resolved, comment.resolved_by) == (True, "ABR")
+    assert "The comment was marked as resolved." in [s.value for s in at.success]
+    assert f"edit_resolve_{comment_id}" not in {b.key for b in at.button}
+
+
+@pytest.mark.unit
+def test__saved_complete_draft__submit_on_review_tab__in_review(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """The Review tab submits once the complete document is saved."""
+    # Given
+    at = editor_page(alices_draft).run()
+    fill_all_sections(at.session_state["edit_document"])
+    at.text_input(key="edit_change_summary").input("Complete").run()
+    switch_tab(at, "Review")
+    assert at.button(key="edit_review_submit").disabled
+    button_labelled(at, "Save Draft").click().run()
+    assert not at.button(key="edit_review_submit").disabled
+
+    # When
+    at.button(key="edit_review_submit").click().run()
+
+    # Then
+    assert not at.exception
+    assert switched == ["views/preview.py"]
+    row = alices_draft.get_one_pager_status_row(NEW_ID)
+    assert row.one_pager_status == "In Review"
+
+
+# ============================================================================
+# Preview actions
+# ============================================================================
+
+
+@pytest.mark.unit
+def test__owners_draft__open_preview__edit_cancel_export_no_approve(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """The Owner of a Draft can edit, cancel and export."""
+    # When
+    at = _preview(alices_draft).run()
+
+    # Then
+    keys = _action_keys(at)
+    assert {"preview_edit", "preview_cancel", "preview_export_pdf"} <= keys
+    assert "preview_approve" not in keys
+
+
+@pytest.mark.unit
+def test__one_pager_of_others_in_review__open_preview__read_only_with_hint(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """Somebody else's One Pager In Review can only be exported."""
+    # When
+    at = _preview(alices_draft, IN_REVIEW_ID).run()
+
+    # Then
+    assert not at.exception
+    assert _action_keys(at) == {"preview_export_pdf"}
+    assert any("Waiting for an Approver" in c.value for c in at.caption)
+
+
+@pytest.mark.unit
+def test__owners_draft__click_cancel__asks_for_reason_first(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """Cancel opens a dialog; nothing changes before confirming."""
+    # Given
+    at = _preview(alices_draft).run()
+
+    # When
     at.button(key="preview_cancel").click().run()
 
+    # Then
     assert not at.exception
-    assert at.text_area(key="preview_cancel_reason")  # the dialog is open
-    row = services["data_access"].get_one_pager_status_row("OP-0003")
-    assert row.one_pager_status == "Draft"
+    assert at.text_area(key="preview_cancel_reason")
+    assert alices_draft.get_one_pager_status_row(NEW_ID).one_pager_status == "Draft"
 
 
 @pytest.mark.unit
-def test__preview__cancelled_one_pager_is_read_only(
-    services: dict, switched: list[str]
+def test__cancelled_one_pager__open_preview__read_only(
+    alices_draft: MockDataAccess, switched: list[str]
 ) -> None:
-    from onepagerapp.workflow import cancel_one_pager  # noqa: PLC0415
+    """A cancelled One Pager can only be exported."""
+    # Given
+    cancel_one_pager(alices_draft, NEW_ID, ALICE)
 
-    cancel_one_pager(services["data_access"], "OP-0003", services["current_user_info"])
-    at = _app("preview.py", {**services, "preview_one_pager_id": "OP-0003"}).run()
+    # When
+    at = _preview(alices_draft).run()
 
+    # Then
     assert not at.exception
     assert _action_keys(at) == {"preview_export_pdf"}
     assert any("cancelled (read-only)" in c.value for c in at.caption)
 
 
 @pytest.mark.unit
-def test__preview__change_dp_status_opens_menu(
-    services: dict, switched: list[str]
+def test__owners_approved_one_pager__click_change_dp_status__menu_offers_next(
+    alices_draft: MockDataAccess, switched: list[str]
 ) -> None:
-    # OP-0001: Approved / Ready for Development, owned by Alice.
-    at = _app("preview.py", {**services, "preview_one_pager_id": "OP-0001"}).run()
+    """OP-0001 (Ready for Development) offers to start development."""
+    # Given
+    at = _preview(alices_draft, APPROVED_ID).run()
     assert {"preview_update", "preview_change_dp_status"} <= _action_keys(at)
     assert not at.button(key="preview_change_dp_status").disabled
     assert not at.button(key="preview_update").disabled
 
+    # When
     at.button(key="preview_change_dp_status").click().run()
 
+    # Then
     assert not at.exception
     assert list(at.selectbox(key="preview_dp_target").options) == [
         "Start development → In Development"
@@ -442,124 +683,34 @@ def test__preview__change_dp_status_opens_menu(
 
 
 @pytest.mark.unit
-def test__preview__renders_after_transition_on_seeded_one_pager(
-    services: dict, switched: list[str]
+def test__seeded_one_pager_after_transition__open_preview__change_log_renders(
+    alices_draft: MockDataAccess, switched: list[str]
 ) -> None:
     """Seeded change-log rows are naive, new ones UTC-aware; both must sort."""
-    from onepagerapp.workflow import change_data_product_status  # noqa: PLC0415
+    # Given
+    change_data_product_status(alices_draft, APPROVED_ID, "In Development", ALICE)
 
-    change_data_product_status(
-        services["data_access"],
-        "OP-0001",
-        "In Development",
-        services["current_user_info"],
-    )
-    at = _app("preview.py", {**services, "preview_one_pager_id": "OP-0001"}).run()
+    # When
+    at = _preview(alices_draft, APPROVED_ID).run()
 
+    # Then
     assert not at.exception
     assert any("Development started" in m.value for m in at.markdown)
 
 
-def _reject_with_comment(services: dict) -> int:
-    """Send OP-0003 through review and back (rejected with one comment)."""
-    from onepagerapp.review import add_review_comment  # noqa: PLC0415
-    from onepagerapp.state_machine import Actor  # noqa: PLC0415
-    from onepagerapp.workflow import reject_one_pager  # noqa: PLC0415
-
-    data_access = services["data_access"]
-    rows = data_access._status_rows
-    rows["OP-0003"].one_pager_status = "In Review"
-    approver = make_user("CJO")
-    roles = {Actor.APPROVER}
-    add_review_comment(
-        data_access, "OP-0003", approver, "dataSources", "Add sources", roles=roles
-    )
-    reject_one_pager(data_access, "OP-0003", approver, "See comments", roles=roles)
-    return data_access.get_review_comments("OP-0003")[0].id
-
-
 @pytest.mark.unit
-def test__editor__review_tab_checklist_and_blocked_submit(
-    services: dict, switched: list[str]
+def test__owners_approved_one_pager__click_update__asks_first(
+    alices_draft: MockDataAccess, switched: list[str]
 ) -> None:
-    at = _tab(_editor(services).run(), "Review")
+    """Update explains the working copy; nothing happens before Confirm."""
+    # Given
+    at = _preview(alices_draft, APPROVED_ID).run()
 
-    assert not at.exception
-    assert any(m.value == "Basics: no issues" for m in at.markdown)
-    check = at.button(key="edit_review_check_Data Sources")
-    assert "issue(s)" in check.label
-    assert at.button(key="edit_review_submit").disabled
-    assert "No review comments." in [c.value for c in at.caption]
-
-    check.click().run()
-    assert at.radio(key="edit_active_tab").value == "Data Sources"
-
-
-@pytest.mark.unit
-def test__editor__review_tab_resolves_comments(
-    services: dict, switched: list[str]
-) -> None:
-    comment_id = _reject_with_comment(services)
-    at = _tab(_editor(services).run(), "Review")
-
-    assert not at.exception
-    assert any("Data Sources" in m.value for m in at.markdown)
-    at.button(key=f"edit_resolve_{comment_id}").click().run()
-
-    assert not at.exception
-    comment = services["data_access"].get_review_comments("OP-0003")[0]
-    assert (comment.resolved, comment.resolved_by) == (True, "ABR")
-    assert "The comment was marked as resolved." in [s.value for s in at.success]
-    assert f"edit_resolve_{comment_id}" not in {b.key for b in at.button}
-
-
-@pytest.mark.unit
-def test__editor__review_tab_submits_when_complete(
-    services: dict, switched: list[str]
-) -> None:
-    from tests.unit.test_editing_links import fill_all_sections  # noqa: PLC0415
-
-    at = _editor(services).run()
-    fill_all_sections(at.session_state["edit_document"])
-    at.text_input(key="edit_change_summary").input("Complete").run()
-    _tab(at, "Review")
-    assert at.button(key="edit_review_submit").disabled  # unsaved changes
-    _button(at, "Save Draft").click().run()
-    assert not at.button(key="edit_review_submit").disabled
-
-    at.button(key="edit_review_submit").click().run()
-
-    assert not at.exception
-    assert switched == ["views/preview.py"]
-    row = services["data_access"].get_one_pager_status_row("OP-0003")
-    assert row.one_pager_status == "In Review"
-
-
-@pytest.mark.unit
-def test__preview__update_asks_for_confirmation(
-    services: dict, switched: list[str]
-) -> None:
-    # OP-0001: Approved / Ready for Development, owned by Alice.
-    at = _app("preview.py", {**services, "preview_one_pager_id": "OP-0001"}).run()
+    # When
     at.button(key="preview_update").click().run()
 
+    # Then
     assert not at.exception
     assert any("working copy for editing" in m.value for m in at.markdown)
-    row = services["data_access"].get_one_pager_status_row("OP-0001")
-    assert row.one_pager_status == "Approved"  # nothing happens before Confirm
-
-
-@pytest.mark.unit
-def test__editor__opens_approved_version_after_update(
-    services: dict, switched: list[str]
-) -> None:
-    from onepagerapp.workflow import start_update  # noqa: PLC0415
-
-    alice = services["current_user_info"]
-    start_update(services["data_access"], "OP-0001", alice, confirmed=True)
-
-    at = _editor(services, "OP-0001").run()
-
-    assert not at.exception
-    assert at.title[0].value == "Editing: Person Master Data (OP-0001)"
-    assert services["data_access"].get_lock("OP-0001").locked_by_initials == "ABR"
+    row = alices_draft.get_one_pager_status_row(APPROVED_ID)
+    assert row.one_pager_status == "Approved"

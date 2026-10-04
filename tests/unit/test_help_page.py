@@ -1,15 +1,12 @@
 """Help page (UI_Design.md §4.6): content service and AppTest smoke tests."""
 
-from pathlib import Path
-from typing import NoReturn
+from collections.abc import Callable
+from types import ModuleType
 
 import pandas as pd
 import pytest
-import streamlit as st
-from streamlit.testing.v1 import AppTest
 
 from onepagerapp.data_access.mock import MockDataAccess
-from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.help_content import (
     DEFAULT_NODE_COLOR,
     QUICK_REFERENCE,
@@ -24,15 +21,9 @@ from onepagerapp.help_content import (
 )
 from onepagerapp.state_machine import DP_STATUSES, OP_STATUSES, TRANSITIONS, Actor
 from onepagerapp.workflow import get_workflow_reference
-from tests.conftest import FIXTURES_DIR
-from tests.users import make_user
+from tests.helpers import ADMIN_ROLES, APPROVER_ROLES, failing, make_user, page_app
 
-APP_DIR = Path(__file__).resolve().parents[2] / "app"
-
-
-@pytest.fixture
-def data_access(tmp_path: Path) -> MockDataAccess:
-    return MockDataAccess(OnePagerDocumentStore(FIXTURES_DIR, write_path=tmp_path))
+VIEWER = make_user("ZVI", "Zoe Viewer")
 
 
 # ============================================================================
@@ -41,48 +32,75 @@ def data_access(tmp_path: Path) -> MockDataAccess:
 
 
 @pytest.mark.unit
-def test__legend__uses_the_reference_table(data_access: MockDataAccess) -> None:
-    legend = op_legend(data_access.get_ref_op_status())
+def test__reference_table__op_legend__statuses_in_order_with_colors(
+    mock_data_access: MockDataAccess,
+) -> None:
+    """The One Pager legend uses the reference colours; Cancelled is terminal."""
+    # When
+    legend = op_legend(mock_data_access.get_ref_op_status())
 
+    # Then
     assert [b.status for b in legend] == list(OP_STATUSES)
     approved = next(b for b in legend if b.status == "Approved")
     assert approved.color == "#65B676"
     assert [b.status for b in legend if b.is_terminal] == ["Cancelled"]
-    dp_badges = dp_legend(data_access.get_ref_dp_status())
-    assert {b.status for b in dp_badges if b.is_terminal} == {"Deprecated", "Cancelled"}
 
 
 @pytest.mark.unit
-def test__legend__complete_without_reference_data() -> None:
+def test__reference_table__dp_legend__terminal_statuses_flagged(
+    mock_data_access: MockDataAccess,
+) -> None:
+    """Deprecated and Cancelled are the terminal Data Product statuses."""
+    # When
+    legend = dp_legend(mock_data_access.get_ref_dp_status())
+
+    # Then
+    assert {b.status for b in legend if b.is_terminal} == {"Deprecated", "Cancelled"}
+
+
+@pytest.mark.unit
+def test__no_reference_data__dp_legend__complete_with_default_color() -> None:
+    """Without reference data every status is still listed."""
+    # When
     legend = dp_legend(pd.DataFrame())
 
+    # Then
     assert [b.status for b in legend] == list(DP_STATUSES)
     assert {b.color for b in legend} == {DEFAULT_NODE_COLOR}
 
 
 @pytest.mark.unit
-def test__legend__orders_by_sort_order_and_uses_display_labels() -> None:
+def test__sort_order_and_labels__op_legend__ordered_and_labelled() -> None:
+    """The reference sort order and display labels are used."""
+    # Given
     ref = pd.DataFrame(
         [
             {"status": "Draft", "display_label": "Draft", "sort_order": 2},
             {"status": "Approved", "display_label": "Approved ✓", "sort_order": 1},
         ]
     )
+
+    # When
     legend = op_legend(ref)
 
+    # Then
     assert [b.status for b in legend][:2] == ["Approved", "Draft"]
     assert legend[0].label == "Approved ✓"
 
 
 @pytest.mark.unit
-def test__state_diagram__has_every_status_and_transition(
-    data_access: MockDataAccess,
+def test__op_transitions__state_diagram_dot__every_status_and_transition(
+    mock_data_access: MockDataAccess,
 ) -> None:
+    """The DOT graph has a node per status and an edge per transition."""
+    # Given
     reference = get_workflow_reference()
-    dot = state_diagram_dot(
-        reference["one_pager_transitions"], op_legend(data_access.get_ref_op_status())
-    )
+    legend = op_legend(mock_data_access.get_ref_op_status())
 
+    # When
+    dot = state_diagram_dot(reference["one_pager_transitions"], legend)
+
+    # Then
     assert dot.startswith("digraph {")
     for status in OP_STATUSES:
         assert f'"{status}" [label=' in dot
@@ -94,11 +112,14 @@ def test__state_diagram__has_every_status_and_transition(
 
 
 @pytest.mark.unit
-def test__state_diagram__system_transitions_are_dashed() -> None:
+def test__dp_transitions__state_diagram_dot__system_transitions_dashed() -> None:
+    """Automatic transitions are dashed; owner transitions are solid."""
+    # When
     dot = state_diagram_dot(
         get_workflow_reference()["data_product_transitions"], dp_legend(pd.DataFrame())
     )
 
+    # Then
     assert (
         '"In Definition" -> "Ready for Development" [label="First approval", '
         'style="dashed"]' in dot
@@ -107,8 +128,12 @@ def test__state_diagram__system_transitions_are_dashed() -> None:
 
 
 @pytest.mark.unit
-def test__transition_table__covers_every_rule() -> None:
+def test__all_transitions__transition_table__one_row_per_rule() -> None:
+    """The table lists who may do each transition and when."""
+    # Given
     reference = get_workflow_reference()
+
+    # When
     table = pd.concat(
         [
             transition_table(reference["one_pager_transitions"]),
@@ -116,6 +141,7 @@ def test__transition_table__covers_every_rule() -> None:
         ]
     )
 
+    # Then
     assert len(table) == len(TRANSITIONS)
     approve = table[(table["From"] == "In Review") & (table["To"] == "Approved")]
     assert approve.iloc[0]["Who"] == "Approver"
@@ -125,18 +151,25 @@ def test__transition_table__covers_every_rule() -> None:
 
 
 @pytest.mark.unit
-def test__combinations_table__one_row_per_op_status() -> None:
+def test__valid_combinations__combinations_table__one_row_per_op_status() -> None:
+    """Each One Pager status lists its valid Data Product statuses."""
+    # When
     table = combinations_table(get_workflow_reference()["valid_combinations"])
 
+    # Then
     assert list(table["One Pager status"]) == list(OP_STATUSES)
     draft = table[table["One Pager status"] == "Draft"].iloc[0]
     assert draft["Valid Data Product statuses"] == "In Definition"
 
 
 @pytest.mark.unit
-def test__static_content__roles_and_quick_reference() -> None:
-    assert [r.role for r in ROLES] == ["Owner / SME", "Approver", "Admin", "Viewer"]
+def test__static_content__roles_and_quick_reference__complete() -> None:
+    """Roles, quick reference steps and the role request are present."""
+    # When
     titles = [q.title for q in QUICK_REFERENCE]
+
+    # Then
+    assert [r.role for r in ROLES] == ["Owner / SME", "Approver", "Admin", "Viewer"]
     assert "Create a One Pager" in titles
     assert "Review (Approvers)" in titles
     assert all(q.steps for q in QUICK_REFERENCE)
@@ -153,8 +186,15 @@ def test__static_content__roles_and_quick_reference() -> None:
         ("bad", "#FFFFFF"),
     ],
 )
-def test__text_color__readable_on_badge(background: str, expected: str) -> None:
-    assert text_color(background) == expected
+def test__badge_background__text_color__readable(
+    background: str, expected: str
+) -> None:
+    """Light backgrounds get dark text, others (and bad values) white."""
+    # When
+    color = text_color(background)
+
+    # Then
+    assert color == expected
 
 
 # ============================================================================
@@ -162,66 +202,49 @@ def test__text_color__readable_on_badge(background: str, expected: str) -> None:
 # ============================================================================
 
 
-class _NoRefData(MockDataAccess):
-    def get_ref_op_status(self) -> NoReturn:
-        msg = "table missing: secret internals"
-        raise RuntimeError(msg)
-
-
-@pytest.fixture
-def switched(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    targets: list[str] = []
-    monkeypatch.setattr(st, "switch_page", targets.append)
-    monkeypatch.syspath_prepend(str(APP_DIR))
-    return targets
-
-
-def _app(data_access: MockDataAccess) -> AppTest:
-    user = make_user("ZVI", "Zoe Viewer")
-    at = AppTest.from_file(str(APP_DIR / "views" / "help.py"), default_timeout=30)
-    state = {
-        "services_initialized": True,
-        "data_access": data_access,
-        "current_user": user.username,
-        "current_user_info": user,
-        "current_user_roles": frozenset(),
-    }
-    for key, value in state.items():
-        at.session_state[key] = value
-    return at
-
-
 @pytest.mark.unit
-def test__help_page__renders_every_section(
-    data_access: MockDataAccess, switched: list[str]
+def test__viewer__open_help_page__every_section_rendered(
+    mock_data_access: MockDataAccess, switched: list[str]
 ) -> None:
-    at = _app(data_access).run()
+    """The page has the lifecycle, roles, quick reference and badges."""
+    # When
+    at = page_app("help.py", mock_data_access, VIEWER, frozenset()).run()
 
+    # Then
     assert not at.exception
     assert not at.warning
     assert at.title[0].value == "Help"
-    headers = [h.value for h in at.header]
-    assert headers == [
+    assert [h.value for h in at.header] == [
         "The two-status lifecycle",
         "Roles and responsibilities",
         "Workflow quick reference",
         "Status badges",
     ]
-    subheaders = [s.value for s in at.subheader]
     expected = {"One Pager status", "Data Product status", "Valid status combinations"}
-    assert expected <= set(subheaders)
+    assert expected <= {s.value for s in at.subheader}
     assert len(at.get("graphviz_chart")) == 2
     assert len(at.expander) == 3 + len(QUICK_REFERENCE)
     assert ROLE_REQUEST.title in [e.label for e in at.expander]
 
 
 @pytest.mark.unit
-def test__help_page__without_reference_data_warns_and_still_renders(
-    tmp_path: Path, switched: list[str]
+def test__reference_data_fails__open_help_page__warning_and_still_rendered(
+    mock_data_access: MockDataAccess,
+    switched: list[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    store = OnePagerDocumentStore(FIXTURES_DIR, write_path=tmp_path)
-    at = _app(_NoRefData(store)).run()
+    """Without status colours the page warns, offers a retry and still draws."""
+    # Given
+    monkeypatch.setattr(
+        mock_data_access,
+        "get_ref_op_status",
+        failing("table missing: secret internals"),
+    )
 
+    # When
+    at = page_app("help.py", mock_data_access, VIEWER, frozenset()).run()
+
+    # Then
     assert not at.exception
     assert "Couldn't load the status colors" in at.warning[0].value
     assert "secret" not in at.warning[0].value
@@ -230,8 +253,20 @@ def test__help_page__without_reference_data_warns_and_still_renders(
 
 
 @pytest.mark.unit
-def test__navigation__help_page_for_everyone(switched: list[str]) -> None:
-    from app import navigation_entries  # noqa: PLC0415 - needs app/ on sys.path
+@pytest.mark.parametrize(
+    "roles",
+    [frozenset(), APPROVER_ROLES, ADMIN_ROLES],
+    ids=["viewer", "approver", "admin"],
+)
+def test__any_roles__navigation_entries__help_page_listed(
+    import_app_module: Callable[[str], ModuleType], roles: frozenset[Actor]
+) -> None:
+    """Everyone sees the Help page."""
+    # Given
+    app = import_app_module("app")
 
-    for roles in (frozenset(), frozenset({Actor.APPROVER}), frozenset({Actor.ADMIN})):
-        assert ("views/help.py", "Help") in navigation_entries(roles)
+    # When
+    entries = app.navigation_entries(roles)
+
+    # Then
+    assert ("views/help.py", "Help") in entries
