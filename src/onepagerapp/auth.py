@@ -147,28 +147,51 @@ _GROUP_ROLES = {
 
 
 def resolve_roles(
-    user: CurrentUser | None, config: AppConfig, data_access: "DataAccess"
+    user: CurrentUser | None,
+    config: AppConfig,
+    data_access: "DataAccess",
+    directory_groups: Iterable[str] = (),
 ) -> frozenset[Actor]:
     """Group roles of the user: Owner/SME group, Approver, Admin.
 
-    Membership of the groups in ``AppConfig.role_groups`` is checked once, as
-    the user (``DataAccess.get_group_memberships``). Every recognised user is
-    also a Viewer, which needs no role. Owner/SME of a specific One Pager is
-    per record (``one_pager_authorized_users``) and never returned here.
+    A role applies when the user is a member of its group
+    (``AppConfig.role_groups``). Group names are compared **ignoring case**
+    (``BEC_BECOC001_LHX_DEV_DataPlatEng`` matches the real group
+    ``BEC_BECOC001_LHX_dev_DataPlatEng``). Membership is:
 
-    Fails closed: if the check fails, the user gets no role (Viewer only) and
-    the error is logged; the app still opens.
+    - checked once, as the user, in SQL (``DataAccess.get_group_memberships``,
+      which finds the real spelling of the name; covers nested groups), or
+    - listed in the user's own directory entry (``directory_groups``, SCIM
+      ``Me`` read with the user's token; direct memberships).
+
+    Every recognised user is also a Viewer, which needs no role. Owner/SME of
+    a specific One Pager is per record (``one_pager_authorized_users``) and
+    never returned here.
+
+    Fails closed: if the SQL check fails, only the directory groups count
+    (Viewer only without them) and the error is logged; the app still opens.
     """
     if not (user and user.initials):
         return frozenset()
+    groups = config.role_groups
+    member_of = {g.casefold() for g in directory_groups if g}
     try:
-        memberships = data_access.get_group_memberships(config.role_groups)
+        memberships = data_access.get_group_memberships(groups)
     except Exception:
         logger.exception(
-            "Group membership check failed; %s gets the Viewer role only",
+            "Group membership check failed for %s; only the directory groups count",
             user.initials,
         )
-        return frozenset()
-    return frozenset(
-        role for key, role in _GROUP_ROLES.items() if memberships.get(key) is True
+        memberships = {}
+    roles = frozenset(
+        role
+        for key, role in _GROUP_ROLES.items()
+        if memberships.get(key) is True or groups[key].casefold() in member_of
     )
+    logger.info(
+        "Roles of %s: %s (groups: %s)",
+        user.initials,
+        ", ".join(sorted(r.value for r in roles)) or "Viewer only",
+        ", ".join(sorted(set(groups.values()))),
+    )
+    return roles

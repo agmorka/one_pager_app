@@ -174,15 +174,18 @@ def resolve_user() -> CurrentUser | None:
 def resolve_session_roles() -> frozenset[Actor]:
     """Group roles of the user, checked once per session (needs the data access).
 
-    A role change applies from the next session. A failed check gives the
-    Viewer role only (``auth.resolve_roles``).
+    A role change applies from the next session. Group names are compared
+    ignoring case; a failed check gives the Viewer role only, unless the
+    directory lists the group (``auth.resolve_roles``).
     """
     roles: frozenset[Actor] | None = st.session_state.get("current_user_roles")
     if roles is None:
+        directory_user = st.session_state.get("current_user_directory")
         roles = resolve_roles(
             st.session_state.current_user_info,
             st.session_state.config,
             st.session_state.data_access,
+            directory_user.groups if directory_user else (),
         )
         st.session_state.current_user_roles = roles
     return roles

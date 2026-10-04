@@ -80,7 +80,7 @@ Application roles come from Entra ID groups (automatic identity management is en
 | Admin | `ONE_PAGER_APP_GROUP_ADMIN` | `BEC_BECOC001_LHX_{env}_DataPlatEng` |
 | Viewer | — | Every employee (no group) |
 
-`{env}` is `DEV`, `INT`, `UAT` or `PRD`. Dedicated groups per role will be requested by the Data Platform Engineering team, which also manages membership; switching to them is a change of the three settings. Each environment's `BEC_BECOC001_LHX_{env}_DataPlatEng` group must exist before the app is deployed there, otherwise every user is only a Viewer.
+`{env}` is `DEV`, `INT`, `UAT` or `PRD`. Group names are compared ignoring case, so `BEC_BECOC001_LHX_DEV_DataPlatEng` matches the real group `BEC_BECOC001_LHX_dev_DataPlatEng`. Dedicated groups per role will be requested by the Data Platform Engineering team, which also manages membership; switching to them is a change of the three settings. Each environment's `BEC_BECOC001_LHX_{env}_DataPlatEng` group must exist before the app is deployed there, otherwise every user is only a Viewer.
 
 ## Required Changes
 

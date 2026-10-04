@@ -274,6 +274,24 @@ class DatabricksConnection:
         self._config = config
         self._ws = service_client(config)
 
+    def find_group_names(self, name: str) -> list[str]:
+        """Real names of the workspace groups called ``name``, ignoring case.
+
+        Read with the service principal (users' tokens have no group scope);
+        the result only gives the spelling, membership is still checked as
+        the user. A failed lookup is logged and gives [].
+        """
+        escaped = name.replace("\\", "\\\\").replace('"', '\\"')
+        try:
+            found = self._ws.groups.list(
+                filter=f'displayName eq "{escaped}"', attributes="displayName"
+            )
+            names = [g.display_name for g in found if g.display_name]
+        except Exception:  # noqa: BLE001 - the configured spelling is still checked
+            logger.warning("Looking up the group %s failed", name, exc_info=True)
+            return []
+        return [n for n in names if n.casefold() == name.casefold()]
+
     def _client(self, identity: Identity) -> WorkspaceClient:
         """Return the workspace client that runs statements as ``identity``.
 

@@ -38,7 +38,9 @@ class _FakeConnection:
         self,
         responses: list[SimpleNamespace] | None = None,
         error: Exception | None = None,
+        group_names: dict[str, list[str]] | None = None,
     ) -> None:
+        self.group_names = group_names or {}
         self.calls: list[tuple[str, dict]] = []
         self.identities: list[Identity] = []
         self.responses = list(responses or [])
@@ -56,6 +58,9 @@ class _FakeConnection:
         if self.error:
             raise self.error
         return self.responses.pop(0) if self.responses else _response([], [])
+
+    def find_group_names(self, name: str) -> list[str]:
+        return self.group_names.get(name, [])
 
 
 def _access(connection: _FakeConnection) -> LakehouseAccess:
@@ -814,6 +819,28 @@ def test__get_group_memberships__one_statement_with_bound_group_names() -> None:
         "group_2": "OPA-Admin",
     }
     assert conn.identities == [Identity.USER]
+
+
+@pytest.mark.unit
+def test__get_group_memberships__checks_the_real_spelling_too() -> None:
+    conn = _FakeConnection(
+        [_response(["member_0", "member_1"], [["false", "true"]])],
+        group_names={
+            "BEC_BECOC001_LHX_DEV_DataPlatEng": ["BEC_BECOC001_LHX_dev_DataPlatEng"]
+        },
+    )
+    group = "BEC_BECOC001_LHX_DEV_DataPlatEng"
+
+    result = _access(conn).get_group_memberships(
+        {"owner_sme": group, "approver": group, "admin": group}
+    )
+
+    assert result == {"owner_sme": True, "approver": True, "admin": True}
+    [(_, params)] = conn.calls  # each distinct spelling once
+    assert params == {
+        "group_0": "BEC_BECOC001_LHX_DEV_DataPlatEng",
+        "group_1": "BEC_BECOC001_LHX_dev_DataPlatEng",
+    }
 
 
 @pytest.mark.unit

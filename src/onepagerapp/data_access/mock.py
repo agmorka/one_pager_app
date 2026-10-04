@@ -119,8 +119,9 @@ class MockDataAccess(DataAccess):
         return self._current_user
 
     def get_group_memberships(self, groups: dict[str, str]) -> dict[str, bool]:
-        """Membership from ONE_PAGER_APP_MOCK_GROUPS (``groups`` of __init__)."""
-        return {key: name in self._groups for key, name in groups.items()}
+        """Membership from ONE_PAGER_APP_MOCK_GROUPS, ignoring case."""
+        member_of = {g.casefold() for g in self._groups}
+        return {key: name.casefold() in member_of for key, name in groups.items()}
 
     def read_table(self, table_name: str) -> pd.DataFrame:  # noqa: ARG002
         return pd.DataFrame()
