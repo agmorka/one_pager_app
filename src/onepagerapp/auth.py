@@ -156,8 +156,8 @@ def resolve_roles(
 
     A role applies when the user is a member of its group
     (``AppConfig.role_groups``). Group names are compared **ignoring case**
-    (``BEC_BECOC001_LHX_DEV_DataPlatEng`` matches the real group
-    ``BEC_BECOC001_LHX_dev_DataPlatEng``). Membership is:
+    (``PAG-BEC-LHX-DEV-DataPlatEng-Base`` matches the real group
+    ``PAG-BEC-LHX-dev-DataPlatEng-Base``). Membership is:
 
     - checked once, as the user, in SQL (``DataAccess.get_group_memberships``,
       which finds the real spelling of the name; covers nested groups), or

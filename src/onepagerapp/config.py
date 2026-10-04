@@ -25,7 +25,7 @@ class Environment(str, Enum):
 # Interim group for every role until the dedicated role groups exist
 # (User_Identity_And_Access_Plan.md §4.1, Decision_Log §21). ``{env}`` is
 # replaced with the environment (DEV, INT, TST, UAT, PRD).
-INTERIM_ROLE_GROUP = "BEC_BECOC001_LHX_{env}_DataPlatEng"
+INTERIM_ROLE_GROUP = "PAG-BEC-LHX-{env}-DataPlatEng-Base"
 ROLE_GROUP_SETTINGS = (
     "ONE_PAGER_APP_GROUP_OWNER_SME",
     "ONE_PAGER_APP_GROUP_APPROVER",

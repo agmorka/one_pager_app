@@ -77,7 +77,7 @@ A user may hold several roles (e.g. Approver in general and Owner of one One Pag
 
 **Group names are settings** (`ONE_PAGER_APP_GROUP_OWNER_SME`, `ONE_PAGER_APP_GROUP_APPROVER`, `ONE_PAGER_APP_GROUP_ADMIN`). A `{env}` placeholder is replaced with the environment (`DEV`, `INT`, `TST`, `UAT`, `PRD`). In `local-mock` mode the memberships come from `ONE_PAGER_APP_MOCK_GROUPS` (default: the interim group, i.e. every role).
 
-> **Interim groups.** The three role groups have not been created yet. Until they are, every role uses the Data Platform Engineering group of the environment, `BEC_BECOC001_LHX_{env}_DataPlatEng` (the default of all three settings). Members of that group act as Owner/SME, Approver and Admin; all other employees are Viewers. The app logs a warning and, outside DEV, shows an "interim roles" notice in the sidebar while the default is in use. Switching to the real groups is a configuration change only.
+> **Interim groups.** The three role groups have not been created yet. Until they are, every role uses the Data Platform Engineering group of the environment, `PAG-BEC-LHX-{env}-DataPlatEng-Base` (the default of all three settings). Members of that group act as Owner/SME, Approver and Admin; all other employees are Viewers. The app logs a warning and, outside DEV, shows an "interim roles" notice in the sidebar while the default is in use. Switching to the real groups is a configuration change only.
 >
 > **Group membership** is managed in Entra ID by the owning team (for now the Data Platform Engineering team), not in the app.
 
@@ -302,7 +302,7 @@ Notifications are a future-release feature (requirements doc §12); no channel d
 |---|---|---|
 | 1 | Exact branch-protection rules on the target Git repository | Needed to confirm whether PR auto-merge (§6) is possible, or a human merge step is required. |
 | 2 | Expected scale (number of One Pagers, concurrent users) | Not yet specified; affects Delta table indexing/partitioning choices in Step 4. |
-| 3 | Actual Entra ID group names for Owner/SME, Approver, and Admin (§4) | Groups to be requested by the Data Platform Engineering team. Until then all three roles use `BEC_BECOC001_LHX_{env}_DataPlatEng`. Switching is a configuration change (`ONE_PAGER_APP_GROUP_*`). |
+| 3 | Actual Entra ID group names for Owner/SME, Approver, and Admin (§4) | Groups to be requested by the Data Platform Engineering team. Until then all three roles use `PAG-BEC-LHX-{env}-DataPlatEng-Base`. Switching is a configuration change (`ONE_PAGER_APP_GROUP_*`). |
 | 4 | ~~PATCH version usage~~ | **Resolved:** reserved/unused in the current phase. If activated in the future, PATCH must be determined automatically by the application, never by user self-selection (requirements doc §7). |
 | 5 | Schema evolution strategy (v1 → v2) | How the app handles documents written against an older schema version; whether validation is pinned to the `structureDefinition` field; migration approach. To be resolved in Step 4 (data model). |
 | 6 | ~~Admin reference-data administration~~ | **Resolved:** reference data includes business domain list, data product types, and source systems. These are managed in-app via the Admin page (requirements doc §2), stored in dedicated Delta reference tables, and seeded via Liquibase. See data model doc for table definitions. |

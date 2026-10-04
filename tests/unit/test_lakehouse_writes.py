@@ -777,10 +777,10 @@ def test__group_with_other_spelling__get_group_memberships__real_spelling_checke
 ):
     """The directory's spelling of a group name is checked too, once each."""
     # Given
-    group = "BEC_BECOC001_LHX_DEV_DataPlatEng"
+    group = "PAG-BEC-LHX-DEV-DataPlatEng-Base"
     conn = fake_connection(
         [statement_response(["member_0", "member_1"], [["false", "true"]])],
-        group_names={group: ["BEC_BECOC001_LHX_dev_DataPlatEng"]},
+        group_names={group: ["PAG-BEC-LHX-dev-DataPlatEng-Base"]},
     )
 
     # When
@@ -792,8 +792,8 @@ def test__group_with_other_spelling__get_group_memberships__real_spelling_checke
     assert result == {"owner_sme": True, "approver": True, "admin": True}
     [(_, params)] = conn.calls
     assert params == {
-        "group_0": "BEC_BECOC001_LHX_DEV_DataPlatEng",
-        "group_1": "BEC_BECOC001_LHX_dev_DataPlatEng",
+        "group_0": "PAG-BEC-LHX-DEV-DataPlatEng-Base",
+        "group_1": "PAG-BEC-LHX-dev-DataPlatEng-Base",
     }
 
 

@@ -125,7 +125,7 @@ The UAT environment is for stakeholder validation. Key scenarios that require ma
 
 ### Identity and access smoke test (DEV, then each environment)
 
-Run after deploying the identity and access changes (`..dev/User_Identity_And_Access_Plan.md` Phases 1–7), first in DEV. While the interim group is used, **member** means a member of `BEC_BECOC001_LHX_<ENV>_DataPlatEng` and **non-member** any other employee. Once the dedicated groups exist, repeat with a real Viewer, Owner/SME and Approver test user.
+Run after deploying the identity and access changes (`..dev/User_Identity_And_Access_Plan.md` Phases 1–7), first in DEV. While the interim group is used, **member** means a member of `PAG-BEC-LHX-<ENV>-DataPlatEng-Base` and **non-member** any other employee. Once the dedicated groups exist, repeat with a real Viewer, Owner/SME and Approver test user.
 
 Preparation: two members (A and B) and one non-member (C). A is the Owner of the One Pager created below; B is not Owner or SME of it.
 

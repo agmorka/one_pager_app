@@ -58,9 +58,9 @@ Roles come from group membership, checked once per session (see [docs/Architectu
 
 | Setting | Default | Role |
 |---|---|---|
-| `ONE_PAGER_APP_GROUP_OWNER_SME` | `BEC_BECOC001_LHX_{env}_DataPlatEng` | Owner/SME: may create One Pagers and manage Use Cases. |
-| `ONE_PAGER_APP_GROUP_APPROVER` | `BEC_BECOC001_LHX_{env}_DataPlatEng` | Approver: reviews One Pagers. |
-| `ONE_PAGER_APP_GROUP_ADMIN` | `BEC_BECOC001_LHX_{env}_DataPlatEng` | Admin: uses the Admin page. |
+| `ONE_PAGER_APP_GROUP_OWNER_SME` | `PAG-BEC-LHX-{env}-DataPlatEng-Base` | Owner/SME: may create One Pagers and manage Use Cases. |
+| `ONE_PAGER_APP_GROUP_APPROVER` | `PAG-BEC-LHX-{env}-DataPlatEng-Base` | Approver: reviews One Pagers. |
+| `ONE_PAGER_APP_GROUP_ADMIN` | `PAG-BEC-LHX-{env}-DataPlatEng-Base` | Admin: uses the Admin page. |
 
 The defaults are the interim Data Platform Engineering group until the dedicated role groups exist; switching is a configuration change only.
 

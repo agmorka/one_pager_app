@@ -34,7 +34,7 @@ UC_DENIED = (
     "SELECT on Table 'cat.sch.one_pager_status'."
 )
 SCHEMA_DENIED = "PERMISSION_DENIED: User does not have USE SCHEMA on Schema `cat`.`sch`"
-DIRECTORY_SPELLING = "BEC_BECOC001_LHX_dev_DataPlatEng"
+DIRECTORY_SPELLING = "PAG-BEC-LHX-dev-DataPlatEng-Base"
 
 
 def _status(state: StatementState, message: str | None = None) -> SimpleNamespace:
@@ -417,7 +417,7 @@ def test__group_in_other_case__find_group_names__real_spelling() -> None:
     )
 
     # When
-    names = conn.find_group_names("BEC_BECOC001_LHX_DEV_DataPlatEng")
+    names = conn.find_group_names("PAG-BEC-LHX-DEV-DataPlatEng-Base")
 
     # Then
     assert names == [DIRECTORY_SPELLING]
@@ -436,11 +436,11 @@ def test__name_with_quote__find_group_names__escaped_in_filter_no_match() -> Non
     conn = _groups_connection(list_groups)
 
     # When
-    names = conn.find_group_names('BEC_BECOC001_LHX_DEV_DataPlatEng"')
+    names = conn.find_group_names('PAG-BEC-LHX-DEV-DataPlatEng-Base"')
 
     # Then
     assert names == []
-    assert asked == ['displayName eq "BEC_BECOC001_LHX_DEV_DataPlatEng\\""']
+    assert asked == ['displayName eq "PAG-BEC-LHX-DEV-DataPlatEng-Base\\""']
 
 
 @pytest.mark.unit

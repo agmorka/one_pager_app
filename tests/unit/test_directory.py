@@ -39,7 +39,7 @@ def test__full_scim_user__directory_user_from_scim__names_emails_groups() -> Non
             ComplexValue(value="ak@other.dk"),
             ComplexValue(value="ak@bec.dk", primary=True),
         ],
-        groups=[ComplexValue(display="BEC_BECOC001_LHX_DEV_DataPlatEng")],
+        groups=[ComplexValue(display="PAG-BEC-LHX-DEV-DataPlatEng-Base")],
     )
 
     # When
@@ -51,7 +51,7 @@ def test__full_scim_user__directory_user_from_scim__names_emails_groups() -> Non
         given_name="Agnieszka",
         family_name="Kępkowska",
         emails=("ak@bec.dk", "ak@other.dk"),
-        groups=("BEC_BECOC001_LHX_DEV_DataPlatEng",),
+        groups=("PAG-BEC-LHX-DEV-DataPlatEng-Base",),
     )
     assert result.full_name == "Agnieszka Kępkowska"
     assert result.email == "ak@bec.dk"

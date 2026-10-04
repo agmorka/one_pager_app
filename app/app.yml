@@ -32,7 +32,7 @@ env:
   #   valueFrom: opa-spn-client-id
   # - name: ONE_PAGER_APP_SP_CLIENT_SECRET
   #   valueFrom: opa-spn-client-secret
-  # Role groups: unset while the interim BEC_BECOC001_LHX_{env}_DataPlatEng
+  # Role groups: unset while the interim PAG-BEC-LHX-{env}-DataPlatEng-Base
   # group is used. Once the dedicated groups exist, add for example:
   # - name: ONE_PAGER_APP_GROUP_APPROVER
   #   value: "OPA-Approver-{env}"

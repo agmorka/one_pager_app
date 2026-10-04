@@ -63,7 +63,7 @@ NEW_ID = "OP-0003"  # the next ID: the mock seeds OP-0001..OP-0002
 
 DOMAINS = ["Customer", "Sales"]
 TYPES = ["Foundational", "Integrated", "Augmented"]
-INTERIM_GROUP_DEV = "BEC_BECOC001_LHX_DEV_DataPlatEng"
+INTERIM_GROUP_DEV = "PAG-BEC-LHX-DEV-DataPlatEng-Base"
 
 # SQL injection probe: it must be bound as a parameter, never interpolated.
 NASTY = "x'); DROP TABLE one_pager_status; --"

@@ -92,7 +92,7 @@ def test__volume_in_environment_catalog__environment__from_volume_before_catalog
 
     # When / Then
     assert config.environment is expected
-    approver = f"BEC_BECOC001_LHX_{expected.value}_DataPlatEng"
+    approver = f"PAG-BEC-LHX-{expected.value}-DataPlatEng-Base"
     assert config.role_groups["approver"] == approver
 
 
@@ -240,7 +240,7 @@ def test__no_group_settings__role_groups__interim_group_of_environment(
     groups = _config(ONE_PAGER_APP_ENVIRONMENT=environment).role_groups
 
     # Then
-    expected = f"BEC_BECOC001_LHX_{environment}_DataPlatEng"
+    expected = f"PAG-BEC-LHX-{environment}-DataPlatEng-Base"
     assert groups == {"owner_sme": expected, "approver": expected, "admin": expected}
 
 
@@ -311,7 +311,7 @@ def test__group_settings__interim_roles__roles_still_on_the_interim_group(
     [
         (
             {"ONE_PAGER_APP_ENVIRONMENT": "INT"},
-            frozenset({"BEC_BECOC001_LHX_INT_DataPlatEng"}),
+            frozenset({"PAG-BEC-LHX-INT-DataPlatEng-Base"}),
         ),
         ({"ONE_PAGER_APP_MOCK_GROUPS": " A, B ,"}, frozenset({"A", "B"})),
         ({"ONE_PAGER_APP_MOCK_GROUPS": ""}, frozenset()),

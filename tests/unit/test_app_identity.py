@@ -484,7 +484,7 @@ def test__uat_on_interim_group__run_app__sidebar_notice_and_warning_logged(
     assert not at.exception
     assert any("Interim roles: DataPlatEng" in c.value for c in at.sidebar.caption)
     assert any(
-        "Interim role groups in use" in m and "BEC_BECOC001_LHX_UAT_DataPlatEng" in m
+        "Interim role groups in use" in m and "PAG-BEC-LHX-UAT-DataPlatEng-Base" in m
         for m in caplog.messages
     )
 

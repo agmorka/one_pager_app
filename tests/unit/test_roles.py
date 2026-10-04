@@ -33,7 +33,7 @@ from tests.helpers import (
 
 USER = make_user("X0W")
 DEV = config(ONE_PAGER_APP_ENVIRONMENT="DEV")
-DIRECTORY_SPELLING = "BEC_BECOC001_LHX_dev_DataPlatEng"
+DIRECTORY_SPELLING = "PAG-BEC-LHX-dev-DataPlatEng-Base"
 
 
 def _member_of(tmp_path: Path, *groups: str) -> MockDataAccess:
