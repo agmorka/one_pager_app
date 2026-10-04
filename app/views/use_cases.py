@@ -450,11 +450,11 @@ if use_case_page.rows:
     if use_case_page.total_pages > 1:
         _render_pagination(use_case_page.page, use_case_page.total_pages)
 elif has_active_filter:
-    st.warning("🔍 **No Use Cases match your filters.** Try adjusting your criteria.")
+    st.warning("**No Use Cases match your filters.** Try adjusting your criteria.")
     st.button("Clear all filters", on_click=_clear_filters, key="uc_clear_empty")
 else:
     st.info(
-        "📋 **No Use Cases yet.**"
+        "**No Use Cases yet.**"
         + (" Use **\\+ New Use Case** to create the first one." if can_manage else "")
     )
 

@@ -311,12 +311,12 @@ def render_sidebar_user(
     """
     group_roles = roles if group_roles is None else group_roles
     user_label = sidebar_user_label(st.session_state.current_user_info)
-    st.markdown(f"👤 **{_escape_markdown(user_label)}**")
+    st.markdown(f"**{_escape_markdown(user_label)}**")
     st.markdown(role_badges(role_names(roles)), unsafe_allow_html=True)
     render_view_as(group_roles)
     if roles != group_roles:
         st.caption(
-            f"👁️ Viewing as {', '.join(role_names(roles))} "
+            f"Viewing as {', '.join(role_names(roles))} "
             f"(your roles: {', '.join(role_names(group_roles))})"
         )
     badge = environment_badge(config.environment.value)
@@ -324,7 +324,7 @@ def render_sidebar_user(
     st.markdown(f"Environment: {badge}{mode}", unsafe_allow_html=True)
     notice = interim_roles_notice(config)
     if notice:
-        st.caption(f"⚠️ {notice}")
+        st.caption(notice)
 
 
 def render_sidebar_logo() -> None:
@@ -394,7 +394,7 @@ def main() -> None:
     """Application entry point with global error boundary."""
     st.set_page_config(
         page_title="One Pager App",
-        page_icon="📋",
+        page_icon=":material/description:",
         layout="wide",
         initial_sidebar_state="expanded",
     )

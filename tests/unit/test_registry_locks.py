@@ -72,8 +72,8 @@ def test__registry__shows_lock_icon_and_holder_for_active_locks_only(
     assert not at.exception
     cells = [m.value for m in at.markdown]
     assert "**Lock**" in cells
-    assert "🔒 MJO" in cells
-    assert "🔒 BS" not in cells
+    assert "MJO" in cells
+    assert "BS" not in cells
 
 
 @pytest.mark.unit

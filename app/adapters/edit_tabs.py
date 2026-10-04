@@ -163,7 +163,7 @@ def _render_create_use_case(doc: OnePagerDocument, data_access: DataAccess) -> N
     user = current_user()
     if user is None or not can_manage_use_cases(user.initials, current_roles()):
         return
-    with st.expander("➕ Create a new Use Case"):  # noqa: RUF001
+    with st.expander("Create a new Use Case"):
         for name, (label, max_length) in USE_CASE_FIELDS.items():
             st.text_area(f"{label} *", key=f"edit_uc_new_{name}", max_chars=max_length)
         st.selectbox(

@@ -357,9 +357,8 @@ def _can_create() -> bool:
 
 def _render_new_button(key: str) -> None:
     """Render [+ New] for users allowed to create One Pagers (UI_Design §4.1)."""
-    # Button labels are Markdown; a leading "+" would render as a bullet.
     if _can_create() and st.button(
-        "➕ New",  # noqa: RUF001
+        "New",
         key=key,
         type="primary",
         help="Create a new One Pager",
@@ -429,8 +428,8 @@ def _render_header_row() -> None:
 
 
 def lock_cell(lock: LockInfo | None) -> str:
-    """Lock column text: icon plus the holder's initials (UI_Design.md §4.1, §7)."""
-    return f"🔒 {lock.locked_by_initials}" if lock else ""
+    """Lock column text: the holder's initials (UI_Design.md §4.1, §7)."""
+    return lock.locked_by_initials if lock else ""
 
 
 def _load_locks(
@@ -462,7 +461,7 @@ def _render_interactive_table(
     st.caption(
         "Click the View button on a row to open the One Pager in the Preview page. "
         "Click a column title to sort by it; click it again to reverse the order. "
-        "🔒 marks a One Pager that is being edited, with the editor's initials."
+        "The Lock column shows the initials of the person editing a One Pager."
     )
     if locks is None:
         st.caption("Lock status is unavailable right now.")
@@ -557,16 +556,16 @@ def _render_page_state_populated(
 def _render_page_state_empty_no_filters() -> None:
     """Render page state when no One Pagers exist and no filters are applied."""
     if _can_create():
-        st.info("📋 **No One Pagers yet** — create the first one.")
+        st.info("**No One Pagers yet** — create the first one.")
         _render_new_button("registry_new_empty")
     else:
-        st.info("📋 **No One Pagers found.**")
+        st.info("**No One Pagers found.**")
 
 
 def _render_page_state_empty_with_filters() -> None:
     """Render page state when filters are applied but no results match."""
     st.warning(
-        "🔍 **No One Pagers match your filters.** Try adjusting your filter criteria."
+        "**No One Pagers match your filters.** Try adjusting your filter criteria."
     )
     col1, _, _ = st.columns([1, 1, 3])
     with col1:

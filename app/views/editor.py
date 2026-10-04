@@ -185,7 +185,7 @@ def _render_error_summary(errors: list[ValidationError]) -> None:
         label = _FIELD_LABELS.get(section, section or "Form")
         lines.append(f"- **{label}:** {error.message}")
     st.warning(
-        f"⚠ {len(errors)} issue(s) must be fixed before the One Pager can be "
+        f"{len(errors)} issue(s) must be fixed before the One Pager can be "
         "created:\n\n" + "\n".join(lines)
     )
 
@@ -275,10 +275,8 @@ if st.session_state.get(EDITOR_MODE_KEY) == "edit":
 
 if st.session_state.get(EDITOR_MODE_KEY) != "create":
     st.title("Editor")
-    st.info(
-        "Start from the Registry (➕ New) or from a One Pager's Edit action."  # noqa: RUF001
-    )
-    if st.button("📋 Go to the Registry"):
+    st.info("Start from the Registry (New) or from a One Pager's Edit action.")
+    if st.button("Go to the Registry"):
         go_to_registry()
     st.stop()
 

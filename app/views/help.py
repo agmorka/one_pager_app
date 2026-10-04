@@ -170,5 +170,6 @@ with col_op:
 with col_dp:
     render_legend("Data Product status", dp_badges)
 st.caption(
-    "🔒 Locked by … — someone is editing the One Pager; it is read-only for others."
+    "Lock column: initials of the person editing the One Pager; it is read-only "
+    "for others."
 )

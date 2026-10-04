@@ -81,7 +81,7 @@ def test__issues_by_tab__tab_order_and_form_group(edit_mode: ModuleType) -> None
         ]
     )
     assert list(grouped) == ["Basics", "Data Sources", "Form"]
-    assert edit_mode.tab_label("Basics", 2) == "Basics 🔴 2"
+    assert edit_mode.tab_label("Basics", 2) == "Basics (2)"
     assert edit_mode.tab_label("Basics", 0) == "Basics"
 
 
