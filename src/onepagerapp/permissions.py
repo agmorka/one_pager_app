@@ -6,11 +6,13 @@ Coarse roles from Unity Catalog groups are not resolved yet (Phase 2), so
 group checks still allow every authenticated user.
 
 Per Backend_Design.md §5, all authenticated users can view any One Pager.
-Permission enforcement happens on state changes (approve, edit, etc.) in the service layer.
+Permission enforcement happens on state changes (approve, edit, etc.) in the
+service layer.
 """
 
 from collections.abc import Collection
 from dataclasses import dataclass
+from typing import Any
 
 from onepagerapp.audit import log_permission_denied
 from onepagerapp.models import AuthorizedUser, CurrentUser, LockInfo
@@ -67,12 +69,13 @@ def require_identity(
 @dataclass
 class ActionState:
     """Button state for a single action.
-    
+
     Attributes:
         enabled: Whether the button should be clickable.
         tooltip: Hover text (reason if disabled, blank if enabled).
         visible: Whether the action applies to this user and status at all;
             the Preview page does not show actions that do not apply.
+
     """
 
     enabled: bool
@@ -82,21 +85,20 @@ class ActionState:
 
 def can_view_one_pager(current_user: str | None) -> bool:
     """Check if the current user can view a One Pager.
-    
+
     Per Backend_Design.md §5, all authenticated users can view.
-    
+
     Args:
         current_user: Current user identifier or None if not authenticated.
-        
+
     Returns:
         True if user is authenticated, False otherwise.
+
     """
     return bool(current_user)
 
 
-def can_create_one_pager(
-    user: CurrentUser | None, roles: Collection[Actor]
-) -> bool:
+def can_create_one_pager(user: CurrentUser | None, roles: Collection[Actor]) -> bool:
     """Check if the user may create a new One Pager.
 
     Backend_Design.md §5: creating requires membership of the Owner/SME group
@@ -198,6 +200,7 @@ def can_manage_use_cases(user_initials: str | None, roles: Collection[Actor]) ->
 
     Returns:
         True if the user may manage Use Cases.
+
     """
     return bool(user_initials) and Actor.OWNER_SME_GROUP in roles
 
@@ -396,7 +399,9 @@ def _resolve_comment_state(one_pager_status: str, *, owner_or_sme: bool) -> Acti
 
 
 def _release_lock_state(
-    current_user_initials: str, is_locked: bool, lock_holder_initials: str | None  # noqa: FBT001
+    current_user_initials: str,
+    is_locked: bool,  # noqa: FBT001
+    lock_holder_initials: str | None,
 ) -> ActionState:
     if not is_locked:
         return ActionState(enabled=False, tooltip="This One Pager is not locked")
@@ -407,14 +412,15 @@ def _release_lock_state(
     return ActionState(enabled=True)
 
 
-def get_status_timeline_stages() -> list[dict]:
+def get_status_timeline_stages() -> list[dict[str, Any]]:
     """Return the One Pager status timeline stages for display.
-    
+
     Represents the linear progression: Draft → Ready for Review → In Review → Approved
     (with alternative path for Draft Update after approval).
-    
+
     Returns:
         List of stage dicts with: status, label, sort_order
+
     """
     return [
         {"status": "Draft", "label": "Draft", "sort_order": 1},

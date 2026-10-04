@@ -9,17 +9,21 @@ page in the navigation; the service re-checks the role (Backend_Design.md §5).
 """
 
 import logging
-from datetime import UTC, datetime
 
 import streamlit as st
 
-from onepagerapp.auth import resolve_current_user
-from onepagerapp.data_access.base import DataAccess
+from adapters.navigation import PREVIEW_ID_KEY, PREVIEW_PAGE, REVIEW_MODE_KEY
+from adapters.page import (
+    current_roles,
+    render_error_state,
+    require_data_access,
+    signed_in_user,
+    timestamp_label,
+)
 from onepagerapp.data_access.connection import user_error_message
-from onepagerapp.models import CurrentUser, OnePagerStatusRow
+from onepagerapp.models import OnePagerStatusRow
 from onepagerapp.permissions import PermissionDeniedError
 from onepagerapp.review import get_review_queue
-from onepagerapp.state_machine import Actor
 
 logger = logging.getLogger(__name__)
 
@@ -29,22 +33,22 @@ EMPTY_MESSAGE = "Nothing waiting for your review."
 QUEUE_COLUMNS = ["ID", "Product", "Domain", "Owner", "Submitted", "Version", ""]
 _COLUMN_RATIOS = [1.0, 2.4, 1.5, 1.8, 1.4, 1.0, 1.0]
 
-# Session key Preview reads to show the review actions (UI_Design.md §4.3).
-REVIEW_MODE_KEY = "preview_review_mode"
 
-
-def submitted_label(value: datetime) -> str:
-    """Submission date for the queue, in UTC (e.g. "2026-09-19 10:15 UTC")."""
-    if value.tzinfo is not None:
-        value = value.astimezone(UTC)
-    return value.strftime("%Y-%m-%d %H:%M") + " UTC"
+# ============================================================================
+# Helpers
+# ============================================================================
 
 
 def open_in_review_mode(one_pager_id: str) -> None:
     """Open the One Pager in Preview with the review actions."""
-    st.session_state["preview_one_pager_id"] = one_pager_id
+    st.session_state[PREVIEW_ID_KEY] = one_pager_id
     st.session_state[REVIEW_MODE_KEY] = one_pager_id
-    st.switch_page("views/preview.py")
+    st.switch_page(PREVIEW_PAGE)
+
+
+# ============================================================================
+# Render Components
+# ============================================================================
 
 
 def render_queue(rows: list[OnePagerStatusRow]) -> None:
@@ -61,7 +65,7 @@ def render_queue(rows: list[OnePagerStatusRow]) -> None:
             row.product_name,
             row.business_domain,
             f"{row.owner_name} ({row.owner_initials})",
-            submitted_label(row.last_updated_at),
+            timestamp_label(row.last_updated_at),
             row.version,
         ]
         for column, value in zip(cells[:-1], values, strict=True):
@@ -80,21 +84,13 @@ def render_queue(rows: list[OnePagerStatusRow]) -> None:
 # Review Page
 # ============================================================================
 
-if not st.session_state.get("services_initialized"):
-    st.error("Services not initialized. Please refresh the page.")
-    st.stop()
-
-data_access: DataAccess = st.session_state.data_access
-current_user_info: CurrentUser = st.session_state.get(
-    "current_user_info"
-) or resolve_current_user(
-    st.session_state.get("current_user", "unknown"), st.session_state.config
-)
-roles: frozenset[Actor] = st.session_state.get("current_user_roles", frozenset())
+data_access = require_data_access()
+user = signed_in_user()
+roles = current_roles()
 
 try:
     with st.spinner("Loading the review queue..."):
-        queue = get_review_queue(data_access, current_user_info, roles)
+        queue = get_review_queue(data_access, user, roles)
 except PermissionDeniedError as e:
     st.title("Review Queue")
     st.info(str(e))
@@ -102,10 +98,7 @@ except PermissionDeniedError as e:
 except Exception as e:
     logger.exception("Failed to load the review queue")
     st.title("Review Queue")
-    st.error(user_error_message(e, LOAD_ERROR_MESSAGE), icon="⚠️")
-    if st.button("Retry", key="review_retry"):
-        st.rerun()
-    st.stop()
+    render_error_state(user_error_message(e, LOAD_ERROR_MESSAGE), key="review_retry")
 
 title_col, count_col = st.columns([4, 1])
 title_col.title("Review Queue")

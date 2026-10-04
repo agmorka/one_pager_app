@@ -69,6 +69,7 @@ class OnePagerDocumentStore:
 
         Raises:
             RuntimeError: If the file exists but cannot be read or parsed.
+
         """
         if version:
             path = self._existing_file_for(one_pager_id, version)
@@ -84,9 +85,7 @@ class OnePagerDocumentStore:
         if latest is None:
             logger.info(f"No document files found for {one_pager_id}")
             return None
-        logger.warning(
-            f"No version specified for {one_pager_id}; using {latest.name}"
-        )
+        logger.warning(f"No version specified for {one_pager_id}; using {latest.name}")
         return self._load(latest, one_pager_id)
 
     def write(
@@ -100,16 +99,16 @@ class OnePagerDocumentStore:
 
         Raises:
             RuntimeError: If the file already exists or cannot be written.
+
         """
         path = self._file_for(one_pager_id, version, self._write_root)
         content = document_to_yaml(document)
         try:
             self._files.create(path, content)
         except OSError as e:
-            logger.error(f"Failed to write document {path}: {e}")
-            raise RuntimeError(
-                f"Failed to write document for {one_pager_id}: {e}"
-            ) from e
+            logger.error(f"Failed to write document {path}: {e}")  # noqa: TRY400 - callers log the traceback
+            msg = f"Failed to write document for {one_pager_id}: {e}"
+            raise RuntimeError(msg) from e
         document.raw_content = content
         return path
 
@@ -186,8 +185,9 @@ class OnePagerDocumentStore:
             content = self._files.read_text(path)
             data = yaml.safe_load(content)
         except (OSError, yaml.YAMLError) as e:
-            logger.error(f"Failed to read document for {one_pager_id} from {path}: {e}")
-            raise RuntimeError(f"Failed to read document: {e}") from e
+            logger.error(f"Failed to read document for {one_pager_id} from {path}: {e}")  # noqa: TRY400 - callers log the traceback
+            msg = f"Failed to read document: {e}"
+            raise RuntimeError(msg) from e
         if not data:
             logger.warning(f"Document at {path} is empty or invalid YAML")
             return None

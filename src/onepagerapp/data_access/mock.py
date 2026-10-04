@@ -1,8 +1,12 @@
-"""Mock data access for local development and unit tests."""
+"""Mock data access for local development and unit tests.
+
+The seed data lives in ``mock_seed``.
+"""
 
 import copy
 from dataclasses import replace
 from datetime import UTC, datetime
+from typing import Any
 
 import pandas as pd
 
@@ -11,6 +15,17 @@ from onepagerapp.data_access.base import (
     NotFoundError,
     check_reference_table,
     check_status_table,
+)
+from onepagerapp.data_access.mock_seed import (
+    sample_use_cases,
+    seed_authorized_users,
+    seed_change_logs,
+    seed_dp_statuses,
+    seed_op_statuses,
+    seed_reference_data,
+    seed_review_comments,
+    seed_status_rows,
+    seed_use_case_references,
 )
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.id_generator import next_id
@@ -32,7 +47,7 @@ from onepagerapp.models import (
     UseCaseInput,
     UseCasePage,
 )
-from onepagerapp.validation import CURRENT_STRUCTURE_DEFINITION
+from onepagerapp.timeutils import as_utc
 
 # Signed-in user in local-mock mode unless ONE_PAGER_APP_MOCK_USER says
 # otherwise. It uses the default domain and suffix, so it gets the initials LDU
@@ -64,28 +79,18 @@ class MockDataAccess(DataAccess):
         self._current_user = current_user
         self._groups = groups
         self._status_rows: dict[str, OnePagerStatusRow] = {
-            row.one_pager_id: row for row in _seed_status_rows()
+            row.one_pager_id: row for row in seed_status_rows()
         }
-        self._change_logs: dict[str, list[ChangeLogEntry]] = _seed_change_logs()
+        self._change_logs: dict[str, list[ChangeLogEntry]] = seed_change_logs()
         self._authorized_users: dict[str, list[AuthorizedUser]] = (
-            _seed_authorized_users()
+            seed_authorized_users()
         )
         self._use_cases: dict[str, UseCase] = {
-            uc.use_case_id: uc for uc in _sample_use_cases()
+            uc.use_case_id: uc for uc in sample_use_cases()
         }
         # (one_pager_id, use_case_id) rows of the use_case_references table.
-        # The sample YAML documents store Use Cases inline without IDs, so the
-        # references are seeded here rather than derived from the documents.
-        self._use_case_references: set[tuple[str, str]] = {
-            ("OP-0001", "UC-001"),
-            ("OP-0001", "UC-002"),
-            ("OP-0002", "UC-002"),
-            ("OP-0002", "UC-003"),
-            ("OP-0002", "UC-004"),
-        }
-        self._review_comments: dict[str, list[ReviewComment]] = (
-            _seed_review_comments()
-        )
+        self._use_case_references: set[tuple[str, str]] = seed_use_case_references()
+        self._review_comments: dict[str, list[ReviewComment]] = seed_review_comments()
         self._next_review_comment_id = (
             max(
                 (c.id for comments in self._review_comments.values() for c in comments),
@@ -94,10 +99,10 @@ class MockDataAccess(DataAccess):
             + 1
         )
         # Rows of the Admin-managed reference tables and status definitions.
-        self._reference: dict[str, list[dict]] = _seed_reference_data()
-        self._status_definitions: dict[str, list[dict]] = {
-            "ref_op_status": _seed_op_statuses(),
-            "ref_dp_status": _seed_dp_statuses(),
+        self._reference: dict[str, list[dict[str, Any]]] = seed_reference_data()
+        self._status_definitions: dict[str, list[dict[str, Any]]] = {
+            "ref_op_status": seed_op_statuses(),
+            "ref_dp_status": seed_dp_statuses(),
         }
         # Rows of the locks table, keyed by one_pager_id (one lock per One Pager).
         self._locks: dict[str, LockInfo] = {}
@@ -144,11 +149,9 @@ class MockDataAccess(DataAccess):
     def _reference_frame(self, table: str) -> pd.DataFrame:
         key = check_reference_table(table)
         rows = sorted(self._reference[table], key=lambda r: (r["sort_order"], r[key]))
-        return pd.DataFrame(
-            copy.deepcopy(rows), columns=[key, "sort_order", "active"]
-        )
+        return pd.DataFrame(copy.deepcopy(rows), columns=[key, "sort_order", "active"])
 
-    def _reference_row(self, table: str, value: str) -> dict | None:
+    def _reference_row(self, table: str, value: str) -> dict[str, Any] | None:
         key = check_reference_table(table)
         return next((r for r in self._reference[table] if r[key] == value), None)
 
@@ -258,13 +261,13 @@ class MockDataAccess(DataAccess):
 
     def get_registry(
         self,
-        filter: RegistryFilter,
+        filter: RegistryFilter,  # noqa: A002 - matches DataAccess
         page: int,
         page_size: int,
         sort: RegistrySort | None = None,
     ) -> RegistryPage:
         """Query One Pagers with filtering, sorting and pagination.
-        
+
         Applies all non-None filter criteria with AND semantics. Sorting is
         case-insensitive, with ties broken by one_pager_id (as in the lakehouse).
         """
@@ -286,9 +289,9 @@ class MockDataAccess(DataAccess):
             page_size=page_size,
         )
 
-    def get_registry_status_counts(self, filter: RegistryFilter) -> dict[str, int]:
+    def get_registry_status_counts(self, filter: RegistryFilter) -> dict[str, int]:  # noqa: A002
         """Aggregate count of One Pagers by one_pager_status.
-        
+
         Applies the same filter as get_registry(), then groups by one_pager_status.
         """
         counts: dict[str, int] = {}
@@ -327,7 +330,9 @@ class MockDataAccess(DataAccess):
         row = self._status_rows.get(one_pager_id)
         return row.to_header() if row else None
 
-    def read_document(self, one_pager_id: str, version: str | None = None) -> OnePagerDocument | None:
+    def read_document(
+        self, one_pager_id: str, version: str | None = None
+    ) -> OnePagerDocument | None:
         """Read the YAML document content for a One Pager from the document store."""
         return self._document_store.read(one_pager_id, version)
 
@@ -337,7 +342,7 @@ class MockDataAccess(DataAccess):
         # Seeded entries are naive, new ones UTC-aware: compare both as UTC.
         return sorted(
             entries,
-            key=lambda e: (_as_utc(e.created_at), e.id),
+            key=lambda e: (as_utc(e.created_at), e.id),
             reverse=True,
         )
 
@@ -346,7 +351,7 @@ class MockDataAccess(DataAccess):
         comments = self._review_comments.get(one_pager_id, [])
         return sorted(
             (copy.copy(c) for c in comments),
-            key=lambda c: (_as_utc(c.created_at), c.id),
+            key=lambda c: (as_utc(c.created_at), c.id),
         )
 
     def get_lock(self, one_pager_id: str) -> LockInfo | None:
@@ -471,7 +476,7 @@ class MockDataAccess(DataAccess):
             for row in self._status_rows.values()
             if row.one_pager_status == one_pager_status
         ]
-        return sorted(rows, key=lambda r: (_as_utc(r.last_updated_at), r.one_pager_id))
+        return sorted(rows, key=lambda r: (as_utc(r.last_updated_at), r.one_pager_id))
 
     def get_pending_pr_rows(self) -> list[OnePagerStatusRow]:
         rows = [copy.copy(row) for row in self._status_rows.values() if row.pending_pr]
@@ -480,7 +485,7 @@ class MockDataAccess(DataAccess):
             reviewed = row.reviewed_at
             return (
                 reviewed is None,
-                _as_utc(reviewed or row.last_updated_at),
+                as_utc(reviewed or row.last_updated_at),
                 row.one_pager_id,
             )
 
@@ -580,7 +585,10 @@ class MockDataAccess(DataAccess):
         return use_case
 
     def get_use_cases(
-        self, filter: UseCaseFilter, page: int, page_size: int
+        self,
+        filter: UseCaseFilter,  # noqa: A002 - matches DataAccess
+        page: int,
+        page_size: int,
     ) -> UseCasePage:
         rows = sorted(self._use_cases.values(), key=lambda uc: uc.use_case_id)
         if not filter.include_deprecated:
@@ -660,7 +668,10 @@ class MockDataAccess(DataAccess):
         )
 
     def set_use_case_deprecated(
-        self, use_case_id: str, deprecated: bool, user_initials: str  # noqa: FBT001
+        self,
+        use_case_id: str,
+        deprecated: bool,  # noqa: FBT001 - matches DataAccess
+        user_initials: str,
     ) -> None:
         use_case = self._require_use_case(use_case_id)
         self._use_cases[use_case_id] = replace(
@@ -669,358 +680,3 @@ class MockDataAccess(DataAccess):
             last_updated_by=user_initials,
             last_updated_at=datetime.now(),
         )
-
-
-def _as_utc(value: datetime) -> datetime:
-    return value.replace(tzinfo=UTC) if value.tzinfo is None else value
-
-
-# ============================================================================
-# Seed data (matches tests/fixtures/sample_one_pagers/)
-# ============================================================================
-
-
-def _seed_status_rows() -> list[OnePagerStatusRow]:
-    return [
-        OnePagerStatusRow(
-            one_pager_id="OP-0001",
-            data_product="person",
-            product_name="Person Master Data",
-            business_domain="Customer",
-            data_product_type="Foundational",
-            one_pager_status="Approved",
-            data_product_status="Ready for Development",
-            version="1.0.0",
-            owner_name="Alice Brown",
-            owner_initials="ABR",
-            owner_email="alice.brown@company.com",
-            owner_team="Data Platform",
-            created_by="ABR",
-            created_at=datetime(2026, 8, 1, 9, 0),
-            last_updated_at=datetime(2026, 9, 20, 14, 30),
-            last_updated_by="ABR",
-            structure_definition=CURRENT_STRUCTURE_DEFINITION,
-            reviewed_at=datetime(2026, 9, 20, 14, 30),
-            reviewed_by="CJ",
-        ),
-        OnePagerStatusRow(
-            one_pager_id="OP-0002",
-            data_product="order",
-            product_name="Order Master Data",
-            business_domain="Sales",
-            data_product_type="Foundational",
-            one_pager_status="In Review",
-            data_product_status="In Definition",
-            version="0.3.0",
-            owner_name="Bob Smith",
-            owner_initials="BSM",
-            owner_email="bob.smith@company.com",
-            owner_team="Sales Analytics",
-            created_by="BSM",
-            created_at=datetime(2026, 9, 1, 9, 0),
-            last_updated_at=datetime(2026, 9, 19, 10, 15),
-            last_updated_by="BSM",
-            structure_definition=CURRENT_STRUCTURE_DEFINITION,
-        ),
-    ]
-
-
-def _seed_authorized_users() -> dict[str, list[AuthorizedUser]]:
-    return {
-        "OP-0001": [
-            AuthorizedUser(
-                one_pager_id="OP-0001",
-                user_initials="ABR",
-                user_name="Alice Brown",
-                user_email="alice.brown@company.com",
-                user_team="Data Platform",
-                role="owner",
-            ),
-        ],
-        "OP-0002": [
-            AuthorizedUser(
-                one_pager_id="OP-0002",
-                user_initials="BSM",
-                user_name="Bob Smith",
-                user_email="bob.smith@company.com",
-                user_team="Sales Analytics",
-                role="owner",
-            ),
-            AuthorizedUser(
-                one_pager_id="OP-0002",
-                user_initials="DPI",
-                user_name="Diana Prince",
-                user_email="diana.prince@company.com",
-                user_team="Finance",
-                role="sme",
-            ),
-        ],
-    }
-
-
-def _seed_change_logs() -> dict[str, list[ChangeLogEntry]]:
-    return {
-        "OP-0001": [
-            ChangeLogEntry(
-                id=3,
-                one_pager_id="OP-0001",
-                version="1.0.0",
-                event_type="status_transition",
-                author_initials="ADMIN",
-                author_name="Approval System",
-                summary="Document approved and published to Git",
-                created_at=datetime(2026, 9, 20, 14, 30),
-                from_status="In Review",
-                to_status="Approved",
-                status_field="one_pager_status",
-            ),
-            ChangeLogEntry(
-                id=2,
-                one_pager_id="OP-0001",
-                version="0.9.0",
-                event_type="content_save",
-                author_initials="ABR",
-                author_name="Alice Brown",
-                summary="Addressed review comments on data sources",
-                created_at=datetime(2026, 9, 15, 10, 0),
-            ),
-            ChangeLogEntry(
-                id=1,
-                one_pager_id="OP-0001",
-                version="0.1.0",
-                event_type="creation",
-                author_initials="ABR",
-                author_name="Alice Brown",
-                summary="Initial One Pager created",
-                created_at=datetime(2026, 8, 1, 9, 0),
-            ),
-        ],
-    }
-
-
-def _seed_review_comments() -> dict[str, list[ReviewComment]]:
-    return {
-        "OP-0001": [
-            ReviewComment(
-                id=1,
-                one_pager_id="OP-0001",
-                version="0.1.0",
-                section="businessRequirements",
-                reviewer_initials="CJ",
-                reviewer_name="Charlie Jones",
-                comment="Add a requirement for audit trail compliance.",
-                resolved=True,
-                created_at=datetime(2026, 9, 1, 9, 0),
-                resolved_by="ABR",
-                resolved_at=datetime(2026, 9, 5, 14, 0),
-            ),
-            ReviewComment(
-                id=2,
-                one_pager_id="OP-0001",
-                version="0.9.0",
-                section="dataSources",
-                reviewer_initials="BSM",
-                reviewer_name="Bob Smith",
-                comment="Need to clarify the refreshFrequency for Salesforce.",
-                resolved=True,
-                created_at=datetime(2026, 9, 12, 11, 0),
-                resolved_by="ABR",
-                resolved_at=datetime(2026, 9, 15, 10, 30),
-            ),
-        ],
-    }
-
-
-def _sample_use_cases() -> list[UseCase]:
-    """Return sample Use Cases for local testing (mirrors seed_use_cases_dev.sql)."""
-    samples = [
-        (
-            "UC-001", "Analytics Manager",
-            "Understand customer lifetime value trends",
-            "Aggregate spending, engagement, and product usage "
-            "without duplicate records",
-            "Identify high-value customer segments for targeted marketing",
-            "Must Have", False, "JD", datetime(2026, 6, 1, 9, 0),
-        ),
-        (
-            "UC-002", "Compliance Officer",
-            "Fulfill GDPR data subject access requests quickly",
-            "Query Person dataset with unique ID and get all attributes in one place",
-            "Respond to GDPR requests within 30 days",
-            "Must Have", False, "ABR", datetime(2026, 6, 1, 9, 30),
-        ),
-        (
-            "UC-003", "Finance Director",
-            "Reconcile revenue across channels and time periods",
-            "Query unified order data by date range, channel, product, and customer",
-            "Close accounting books on time with full audit trail",
-            "High", False, "BSM", datetime(2026, 7, 2, 11, 0),
-        ),
-        (
-            "UC-004", "Operations Manager",
-            "Track fulfillment status and predict delivery dates",
-            "See order status, warehouse inventory, and shipping progress in one view",
-            "Proactively communicate delivery estimates to customers",
-            "Medium", False, "BSM", datetime(2026, 7, 2, 11, 15),
-        ),
-        (
-            "UC-005", "Branch Advisor",
-            "See a customer summary before meetings",
-            "Open a printed customer summary prepared by the back office",
-            "Prepare advice for scheduled customer meetings",
-            "Low", True, "ABR", datetime(2026, 5, 20, 8, 45),
-        ),
-    ]
-    return [
-        UseCase(
-            use_case_id=uc_id,
-            persona=persona,
-            goal=goal,
-            scenario=scenario,
-            decision_enabled=decision,
-            priority=priority,
-            deprecated=deprecated,
-            created_by=initials,
-            created_at=created_at,
-            last_updated_by=initials,
-            last_updated_at=created_at,
-        )
-        for (
-            uc_id, persona, goal, scenario, decision, priority, deprecated, initials,
-            created_at,
-        ) in samples
-    ]
-
-
-def _seed_op_statuses() -> list[dict]:
-    """``ref_op_status`` rows (the Liquibase seed)."""
-    return [
-        {
-            "status": "Draft",
-            "display_label": "Draft",
-            "sort_order": 1,
-            "badge_color": "#808080",
-            "is_terminal": False,
-        },
-        {
-            "status": "Ready for Review",
-            "display_label": "Ready for Review",
-            "sort_order": 2,
-            "badge_color": "#F9BD00",
-            "is_terminal": False,
-        },
-        {
-            "status": "In Review",
-            "display_label": "In Review",
-            "sort_order": 3,
-            "badge_color": "#FFA500",
-            "is_terminal": False,
-        },
-        {
-            "status": "Approved",
-            "display_label": "Approved",
-            "sort_order": 4,
-            "badge_color": "#65B676",
-            "is_terminal": False,
-        },
-        {
-            "status": "Draft Update",
-            "display_label": "Draft Update",
-            "sort_order": 5,
-            "badge_color": "#7E57C2",
-            "is_terminal": False,
-        },
-        {
-            "status": "Cancelled",
-            "display_label": "Cancelled",
-            "sort_order": 6,
-            "badge_color": "#F34421",
-            "is_terminal": True,
-        },
-    ]
-
-
-def _seed_dp_statuses() -> list[dict]:
-    """``ref_dp_status`` rows (the Liquibase seed)."""
-    return [
-        {
-            "status": "In Definition",
-            "display_label": "In Definition",
-            "sort_order": 1,
-            "badge_color": "#808080",
-            "is_terminal": False,
-        },
-        {
-            "status": "Ready for Development",
-            "display_label": "Ready for Development",
-            "sort_order": 2,
-            "badge_color": "#65B676",
-            "is_terminal": False,
-        },
-        {
-            "status": "In Development",
-            "display_label": "In Development",
-            "sort_order": 3,
-            "badge_color": "#3599B8",
-            "is_terminal": False,
-        },
-        {
-            "status": "Active",
-            "display_label": "Active",
-            "sort_order": 4,
-            "badge_color": "#00975f",
-            "is_terminal": False,
-        },
-        {
-            "status": "In Enhancement",
-            "display_label": "In Enhancement",
-            "sort_order": 5,
-            "badge_color": "#F9BD00",
-            "is_terminal": False,
-        },
-        {
-            "status": "Deprecated",
-            "display_label": "Deprecated",
-            "sort_order": 6,
-            "badge_color": "#7E57C2",
-            "is_terminal": True,
-        },
-        {
-            "status": "Cancelled",
-            "display_label": "Cancelled",
-            "sort_order": 7,
-            "badge_color": "#F34421",
-            "is_terminal": True,
-        },
-    ]
-
-
-def _seed_reference_data() -> dict[str, list[dict]]:
-    """Rows of the Admin-managed reference tables (Data_Model.md §7)."""
-
-    def rows(key: str, values: list[str]) -> list[dict]:
-        return [
-            {key: value, "sort_order": order, "active": True}
-            for order, value in enumerate(values, start=1)
-        ]
-
-    return {
-        "ref_business_domains": rows(
-            "domain",
-            [
-                "Finance",
-                "Operations",
-                "HR",
-                "Technology",
-                "Marketing",
-                "Sales",
-                "Customer",
-            ],
-        ),
-        "ref_data_product_types": rows(
-            "type", ["Foundational", "Integrated", "Augmented"]
-        ),
-        "ref_source_systems": rows(
-            "system_name", ["SAP ERP", "Salesforce CRM", "Workday", "Core Banking"]
-        ),
-    }

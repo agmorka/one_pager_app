@@ -18,7 +18,7 @@ dynamic = ["version"]
 [dependency-groups]
 dev = [
     "pytest==8.3.4",
-    "pytest-cov==6.2.1", 
+    "pytest-cov==6.2.1",
     "ruff==0.12.5",
     "mypy==1.15.0"
 ]
@@ -72,7 +72,8 @@ indent-width = 4
 respect-gitignore = true
 show-fixes = true
 include = [
-  "src/**/*.py", 
+  "src/**/*.py",
+  "app/**/*.py",
   "tests/**/*.py"
   ]
 
@@ -106,11 +107,20 @@ line-ending = "lf"
 docstring-code-format = true
 docstring-code-line-length = 88
 
+[tool.ruff.lint.isort]
+# app/ runs with app/ on sys.path: ``adapters`` is first-party there.
+known-first-party = ["onepagerapp", "adapters"]
+
 [tool.ruff.lint.per-file-ignores]
-"src/onepagerapp/onepagerapp_core/data_access/factory.py" = ["PLC0415"]
-"src/onepagerapp/pages/*" = [
-  "INP001", # File is part of an implicit namespace package. Add an `__init__.py`.
-  "N999",   # "Invalid module name"
+# The mock store keeps naive timestamps, like Delta TIMESTAMP values read back
+# without an offset (seeded rows and rows written in a session must compare).
+"src/onepagerapp/data_access/mock.py" = ["DTZ001", "DTZ005"]
+"src/onepagerapp/data_access/mock_seed.py" = ["DTZ001"]
+"app/views/*" = [
+  "INP001", # Streamlit page scripts, run by st.navigation, not imported.
+]
+"app/app.py" = [
+  "INP001", # The Streamlit entry point, run by `streamlit run app.py`.
 ]
 "tests/*" = [
   "ARG001",  # Unused function arguments (pytest fixtures)
@@ -135,7 +145,7 @@ docstring-code-line-length = 88
 
 # Mypy settings
 [tool.mypy]
-files = ["src/onepagerapp/onepagerapp_core"]
+files = ["src/onepagerapp"]
 plugins = ["pydantic.mypy"]
 
 strict = true
@@ -143,3 +153,7 @@ ignore_missing_imports = true
 
 incremental = true
 cache_dir = ".mypy_cache"
+
+[[tool.mypy.overrides]]
+module = ["yaml"]  # types-PyYAML is not a dependency
+ignore_missing_imports = true

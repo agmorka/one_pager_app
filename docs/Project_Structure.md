@@ -65,30 +65,64 @@ OnePagerApp/
 │   │   └── config.toml             # BEC theme (UI_Design.md §3); Streamlit is started from app/
 │   ├── app.py                      # Streamlit entry point — bootstraps shared services, global error boundary
 │   ├── app.yml                     # Databricks App configuration (runtime manifest)
-│   ├── adapters/                   # Presentation helpers (theming, etc.)
+│   ├── adapters/                   # Presentation helpers shared by the pages (may import Streamlit)
 │   │   ├── __init__.py
-│   │   └── theme.py                # BEC theming constants, status badge colors
+│   │   ├── page.py                 # Session services and user, flash messages, error banner with Retry
+│   │   ├── navigation.py           # Page scripts and the session keys pages hand over to each other
+│   │   ├── session.py              # Browser-session ID (tells edit locks apart)
+│   │   ├── cache.py                # Short-lived Registry / Use Case list caches
+│   │   ├── theme.py                # BEC theming constants, status badge colors
+│   │   ├── workflow_actions.py     # Preview workflow actions → flash message or user-facing error
+│   │   ├── edit_mode.py            # Editor in edit mode (tabs, Save Draft, Submit, unsaved-changes guard)
+│   │   ├── edit_tabs.py            # Editor tabs of the array sections
+│   │   └── repeating.py            # Repeating-items pattern (table + add/edit/remove form)
 │   ├── assets/                     # Static assets (images, etc.)
-│   └── views/                      # Streamlit page modules
+│   └── views/                      # Streamlit page scripts, all with the same layout:
+│       │                           #   docstring, imports, constants, Cached Data, Helpers,
+│       │                           #   Render Components, then the page itself
 │       ├── registry.py             # Browse/search/filter all One Pagers (landing page)
-│       ├── preview.py              # Read-only view of one One Pager
-│       ├── editor.py               # Create (and later edit) a One Pager
-│       └── use_cases.py            # Use Case registry
-├── resources/
-│   └── schemas/                    # JSON Schema files (source of truth for validation)
-│       └── structure_one_pager_v_1.json
+│       ├── preview.py              # Read-only view of one One Pager, with its workflow actions
+│       ├── editor.py               # Create a One Pager (edit mode lives in adapters/edit_mode.py)
+│       ├── review.py               # Approver's review queue
+│       ├── use_cases.py            # Use Case registry
+│       ├── help.py                 # Lifecycle, roles and status legend
+│       └── admin.py                # Reference data, status definitions, pending PRs
+├── schemas/                        # JSON Schema files (source of truth for validation)
+│   ├── structure_one_pager_v_1.json
+│   └── structure_one_pager_v_2.json
 ├── src/                            # Core application package and domain layer
 │   └── onepagerapp/                # Main application package — pure Python, no Streamlit imports
 │       ├── __init__.py
 │       ├── __version.py            # Version constant
+│       ├── admin.py                # Admin services: reference data, status definitions, pending PRs
 │       ├── audit.py                # Structured security-event logging
+│       ├── auth.py                 # Corporate initials, display name and roles of the signed-in user
 │       ├── config.py               # Configuration and AppConfig model
-│       └── data_access/            # Domain/data access layer — pure Python abstraction
+│       ├── directory.py            # The user's workspace directory entry (SCIM Me)
+│       ├── export.py / pdf.py      # PDF export of a One Pager
+│       ├── help_content.py         # Help page content
+│       ├── id_generator.py         # OP-####, UC-###, BR-### IDs
+│       ├── locking.py              # Edit locks
+│       ├── permissions.py          # Permission checks and Preview action states
+│       ├── review.py               # Review queue and review comments
+│       ├── state_machine.py        # OP/DP transitions (single source of truth)
+│       ├── timeutils.py            # UTC timestamp helpers
+│       ├── use_cases.py            # Use Case rules and write services
+│       ├── versioning.py           # MAJOR.MINOR.PATCH document versions
+│       ├── models/                 # Domain dataclasses (registry, one_pager, users, use_cases, pagination)
+│       ├── validation/             # rules, sanitize, basics (create tier), schema, tiers (lenient/strict)
+│       ├── editing/                # session (open), save (Save Draft), authorized_users, use_case_links, requirements
+│       ├── workflow/               # create, transitions, submit, cancel, data_product, review_decisions, update
+│       ├── documents/              # YAML document store (local folder or UC volume via the Files API)
+│       └── data_access/            # Tabular data access — pure Python abstraction
 │           ├── __init__.py
 │           ├── base.py             # DataAccess ABC — contract for all implementations
-│           ├── delta.py            # DeltaDataAccess — SQL Connector implementation
+│           ├── connection.py       # SQL warehouse connection, identities, statement errors
+│           ├── lakehouse.py        # LakehouseAccess — SQL Statement Execution API implementation
+│           ├── sql_rows.py         # Parsing statement results into rows and Python values
 │           ├── factory.py          # create_data_access() factory — selects implementation
-│           └── mock.py             # MockDataAccess — in-memory pandas fakes for dev/testing
+│           ├── mock.py             # MockDataAccess — in-memory fakes for dev/testing
+│           └── mock_seed.py        # Seed data of MockDataAccess (matches the test fixtures)
 ├── tests/
 │   ├── __init__.py
 │   ├── unit/                       # Pure pytest — no Streamlit or Databricks dependency
@@ -108,6 +142,8 @@ OnePagerApp/
 ```
 
 ### Key conventions
+- The larger domain modules of `src/onepagerapp/` are packages (`models`, `validation`, `editing`, `workflow`) whose `__init__.py` re-exports their public names, so callers import from the package (`from onepagerapp.workflow import create_one_pager`), never from its submodules.
+- Pages read the session's services and user through `adapters/page.py` and switch pages through `adapters/navigation.py`; they never use session keys or page paths as string literals.
 - `app/` contains all Streamlit-dependent code: the entry point (`app.py`), UI adapters, views, and the app configuration manifest (`app.yml`).
 - `src/onepagerapp/` is the core library: pure Python with no Streamlit imports. It provides configuration, data access abstraction, and domain logic.
 - `src/onepagerapp/data_access/` defines a `DataAccess` ABC and multiple implementations (SQL Connector for Databricks, in-memory mock for local dev/testing). The app selects the implementation at runtime based on `APP_MODE` env var.

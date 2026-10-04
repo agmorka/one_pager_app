@@ -20,11 +20,20 @@ cleared, so the Editor and the Registry show it at once.
 
 import logging
 from collections.abc import Callable
-from datetime import UTC, datetime
 
 import pandas as pd
 import streamlit as st
 
+from adapters.page import (
+    ALERT_ICON,
+    current_roles,
+    render_retry_banner,
+    require_data_access,
+    set_flash,
+    show_flash,
+    signed_in_user,
+    timestamp_label,
+)
 from adapters.theme import DEFAULT_BADGE_COLOR, status_badge
 from onepagerapp.admin import (
     REFERENCE_KINDS,
@@ -42,7 +51,6 @@ from onepagerapp.admin import (
     update_reference_value,
     update_status_definition,
 )
-from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.data_access.connection import user_error_message
 from onepagerapp.models import CurrentUser
@@ -63,6 +71,11 @@ PENDING_PR_COLUMNS = ["ID", "Product", "Version", "Approved", "Approved by", ""]
 _PENDING_PR_RATIOS = [1.0, 2.4, 1.0, 1.8, 1.2, 1.2]
 
 
+# ============================================================================
+# Helpers
+# ============================================================================
+
+
 def apply_change(change: Callable[[], None], success: str) -> str | None:
     """Run an Admin change; on success clear cached reference data and re-run.
 
@@ -79,15 +92,20 @@ def apply_change(change: Callable[[], None], success: str) -> str | None:
         return SAVE_FAILED_MESSAGE
     # Reference data is cached by the Registry and the Editor (UI_Design §6).
     st.cache_data.clear()
-    st.session_state[FLASH_KEY] = success
+    set_flash(FLASH_KEY, success)
     st.rerun()
     return None
 
 
 def render_load_error(key: str, error: Exception) -> None:
-    st.error(user_error_message(error, LOAD_ERROR_MESSAGE), icon="⚠️")
-    if st.button("Retry", key=key):
+    """Show the load error of a section with Retry; the rest of the page stays."""
+    if render_retry_banner(user_error_message(error, LOAD_ERROR_MESSAGE), key):
         st.rerun()
+
+
+# ============================================================================
+# Render Components
+# ============================================================================
 
 
 def render_reference_section(
@@ -127,8 +145,7 @@ def render_reference_section(
         st.info(f"No {kind.noun} values yet.")
     if kind.usage_filter is None:
         st.caption(
-            f"One Pagers store the {kind.noun} as free text, so usage is not "
-            "tracked."
+            f"One Pagers store the {kind.noun} as free text, so usage is not tracked."
         )
 
     col_edit, col_add = st.columns(2)
@@ -203,7 +220,7 @@ def _edit_reference_form(
             f"Deleted {selected}.",
         )
     if error:
-        st.error(error, icon="⚠️")
+        st.error(error, icon=ALERT_ICON)
 
 
 def _add_reference_form(
@@ -232,7 +249,7 @@ def _add_reference_form(
             f"Added {' '.join(name.split())}.",
         )
         if error:
-            st.error(error, icon="⚠️")
+            st.error(error, icon=ALERT_ICON)
 
 
 def render_status_section(
@@ -309,15 +326,7 @@ def render_status_section(
                 f"Saved the status {status}.",
             )
             if error:
-                st.error(error, icon="⚠️")
-
-
-def _approved_label(value: datetime | None) -> str:
-    if value is None:
-        return "-"
-    if value.tzinfo is not None:
-        value = value.astimezone(UTC)
-    return value.strftime("%Y-%m-%d %H:%M") + " UTC"
+                st.error(error, icon=ALERT_ICON)
 
 
 def render_pending_prs_section(
@@ -335,7 +344,7 @@ def render_pending_prs_section(
         logger.exception("Failed to load the pending PRs")
         render_load_error("admin_retry_pending_prs", e)
         return
-    st.info(RETRY_PR_UNAVAILABLE, icon="ℹ️")
+    st.info(RETRY_PR_UNAVAILABLE, icon="ℹ️")  # noqa: RUF001
     if not rows:
         st.success("No pending PRs: every approved One Pager has its PR.")
         return
@@ -349,7 +358,7 @@ def render_pending_prs_section(
             row.one_pager_id,
             row.product_name,
             row.version,
-            _approved_label(row.reviewed_at),
+            timestamp_label(row.reviewed_at),
             row.reviewed_by or "-",
         ]
         for column, value in zip(cells[:-1], values, strict=True):
@@ -367,39 +376,27 @@ def render_pending_prs_section(
 # Admin Page
 # ============================================================================
 
-if not st.session_state.get("services_initialized"):
-    st.error("Services not initialized. Please refresh the page.")
-    st.stop()
-
-data_access: DataAccess = st.session_state.data_access
-current_user_info: CurrentUser = st.session_state.get(
-    "current_user_info"
-) or resolve_current_user(
-    st.session_state.get("current_user", "unknown"), st.session_state.config
-)
-roles: frozenset[Actor] = st.session_state.get("current_user_roles", frozenset())
+data_access = require_data_access()
+user = signed_in_user()
+roles = current_roles()
 
 st.title("Administration")
 try:
-    check_can_administer(current_user_info, roles)
+    check_can_administer(user, roles)
 except PermissionDeniedError as e:
     st.info(str(e))
     st.stop()
 
-flash = st.session_state.pop(FLASH_KEY, None)
-if flash:
-    st.success(flash)
+show_flash(FLASH_KEY)
 
 # A horizontal section menu: the sections use columns themselves, and
 # Streamlit allows only one level of nested columns.
-section = st.radio(
-    "Section", options=SECTIONS, horizontal=True, key="admin_section"
-)
+section = st.radio("Section", options=SECTIONS, horizontal=True, key="admin_section")
 st.divider()
 if section == STATUS_SECTION:
-    render_status_section(data_access, current_user_info, roles)
+    render_status_section(data_access, user, roles)
 elif section == PENDING_PRS_SECTION:
-    render_pending_prs_section(data_access, current_user_info, roles)
+    render_pending_prs_section(data_access, user, roles)
 else:
     kind = next(k for k in REFERENCE_KINDS if k.title == section)
-    render_reference_section(data_access, kind, current_user_info, roles)
+    render_reference_section(data_access, kind, user, roles)

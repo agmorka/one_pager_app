@@ -28,6 +28,7 @@ from onepagerapp.permissions import (
     can_release_lock,
     require_identity,
 )
+from onepagerapp.timeutils import as_utc
 
 logger = logging.getLogger(__name__)
 
@@ -83,14 +84,9 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-def _as_utc(value: datetime) -> datetime:
-    """Treat naive timestamps (Delta TIMESTAMP read back without an offset) as UTC."""
-    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
-
-
 def is_expired(lock: LockInfo, now: datetime | None = None) -> bool:
     """Whether the lock has passed ``expires_at`` (Data_Model.md §4 ``locks``)."""
-    return _as_utc(now or utc_now()) > _as_utc(lock.expires_at)
+    return as_utc(now or utc_now()) > as_utc(lock.expires_at)
 
 
 def active_lock(lock: LockInfo | None, now: datetime | None = None) -> LockInfo | None:
@@ -133,7 +129,7 @@ def is_held_by(
 
 def locked_by_message(lock: LockInfo) -> str:
     """User-facing text for a lock held by someone else (Backend_Design.md §6)."""
-    since = _as_utc(lock.acquired_at).strftime("%Y-%m-%d %H:%M UTC")
+    since = as_utc(lock.acquired_at).strftime("%Y-%m-%d %H:%M UTC")
     return f"Locked by {lock.locked_by_name} since {since}."
 
 
@@ -200,7 +196,7 @@ def acquire_lock(  # noqa: PLR0913 - every argument is part of the lock identity
 
     """
     require_identity(user, "acquire_lock", one_pager_id)
-    now = _as_utc(now or utc_now())
+    now = as_utc(now or utc_now())
     existing = data_access.get_lock(one_pager_id)
 
     if existing is not None and not is_expired(existing, now):
@@ -261,7 +257,7 @@ def heartbeat(  # noqa: PLR0913 - every argument is part of the lock identity
 
     """
     require_identity(user, "heartbeat", one_pager_id)
-    now = _as_utc(now or utc_now())
+    now = as_utc(now or utc_now())
     return data_access.refresh_lock(
         one_pager_id,
         locked_by_initials=user.initials,

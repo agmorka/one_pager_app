@@ -11,11 +11,12 @@ while they rework it (``resolve_review_comment``). Comments are never deleted
 Pure Python — no Streamlit.
 """
 
+import logging
 from collections.abc import Collection
 from datetime import UTC, datetime
 
 from onepagerapp.audit import Outcome, log_event, log_permission_denied
-from onepagerapp.data_access.base import DataAccess, NotFoundError
+from onepagerapp.data_access.base import DataAccess, require_status_row
 from onepagerapp.models import CurrentUser, OnePagerStatusRow, ReviewComment
 from onepagerapp.permissions import (
     EDITABLE_STATUSES,
@@ -26,6 +27,8 @@ from onepagerapp.permissions import (
 )
 from onepagerapp.state_machine import IN_REVIEW, Actor, InvalidTransitionError
 from onepagerapp.validation import sanitize_text
+
+logger = logging.getLogger(__name__)
 
 REVIEW_DENIED_MESSAGE = "Only Approvers can review One Pagers."
 MAX_COMMENT_LENGTH = 2000
@@ -85,14 +88,6 @@ def get_review_queue(
     return data_access.get_one_pager_status_rows(IN_REVIEW)
 
 
-def _status_row(data_access: DataAccess, one_pager_id: str) -> OnePagerStatusRow:
-    row = data_access.get_one_pager_status_row(one_pager_id)
-    if row is None:
-        msg = f"One Pager {one_pager_id} not found."
-        raise NotFoundError(msg)
-    return row
-
-
 def add_review_comment(  # noqa: PLR0913 - every argument is part of the comment
     data_access: DataAccess,
     one_pager_id: str,
@@ -118,7 +113,7 @@ def add_review_comment(  # noqa: PLR0913 - every argument is part of the comment
 
     """
     require_identity(user, "add_review_comment", one_pager_id)
-    row = _status_row(data_access, one_pager_id)
+    row = require_status_row(data_access, one_pager_id)
     check_can_review(user, roles)
     if is_owner_or_sme(user, data_access.get_authorized_users(one_pager_id)):
         log_permission_denied(
@@ -150,6 +145,7 @@ def add_review_comment(  # noqa: PLR0913 - every argument is part of the comment
     try:
         data_access.add_review_comment(review_comment)
     except Exception as e:
+        logger.exception(f"Storing a review comment on {one_pager_id} failed")
         log_event(
             "add_review_comment",
             Outcome.FAILED,
@@ -168,7 +164,9 @@ def add_review_comment(  # noqa: PLR0913 - every argument is part of the comment
 
 
 def resolve_denied_reason(
-    user: CurrentUser | None, one_pager_status: str, owner_or_sme: bool  # noqa: FBT001
+    user: CurrentUser | None,
+    one_pager_status: str,
+    owner_or_sme: bool,  # noqa: FBT001
 ) -> str | None:
     """Why the user may not resolve comments now, or None if they may."""
     if not (user and owner_or_sme):
@@ -199,7 +197,7 @@ def resolve_review_comment(
 
     """
     require_identity(user, "resolve_review_comment", one_pager_id)
-    row = _status_row(data_access, one_pager_id)
+    row = require_status_row(data_access, one_pager_id)
     owner_or_sme = is_owner_or_sme(user, data_access.get_authorized_users(one_pager_id))
     reason = resolve_denied_reason(user, row.one_pager_status, owner_or_sme)
     if reason:
@@ -215,6 +213,7 @@ def resolve_review_comment(
             resolved_at=now or datetime.now(UTC),
         )
     except Exception as e:
+        logger.exception(f"Resolving comment {comment_id} of {one_pager_id} failed")
         log_event(
             "resolve_review_comment",
             Outcome.FAILED,

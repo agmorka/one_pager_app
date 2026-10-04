@@ -18,6 +18,7 @@ Pure Python — no Streamlit.
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 from onepagerapp.audit import Outcome, log_event, log_permission_denied
 from onepagerapp.data_access.base import DataAccess, NotFoundError
@@ -29,6 +30,7 @@ from onepagerapp.models import (
 )
 from onepagerapp.pdf import BOLD, MUTED_COLOR, SMALL_SIZE, PdfDocument
 from onepagerapp.permissions import PermissionDeniedError, can_view_one_pager
+from onepagerapp.timeutils import utc_label
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +99,7 @@ OPEN_QUESTION_COLUMNS = {
 }
 
 
-def cell_text(row: dict, keys: str) -> str:
+def cell_text(row: dict[str, Any], keys: str) -> str:
     """Display text of one table cell ("" when empty).
 
     ``keys`` is a column key of the tables above: the first non-empty value
@@ -114,14 +116,16 @@ def cell_text(row: dict, keys: str) -> str:
     return ""
 
 
-def resolve_use_cases(data_access: DataAccess, doc: OnePagerDocument) -> list[dict]:
+def resolve_use_cases(
+    data_access: DataAccess, doc: OnePagerDocument
+) -> list[dict[str, Any]]:
     """Rows for the Use Cases table, resolved from the shared use_cases table.
 
     v2 documents hold only ``useCaseId`` references (Data_Model.md §5); their
     content is looked up here. v1 documents hold inline objects, shown as-is.
     A reference that cannot be resolved still shows its ID.
     """
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     for item in doc.use_cases:
         use_case_id = item.get("useCaseId")
         if not use_case_id:
@@ -217,7 +221,7 @@ def export_one_pager_pdf(  # noqa: PLR0913 - service call with its context
 
 def render_one_pager_pdf(  # noqa: PLR0913 - everything printed on the document
     preview_data: PreviewData,
-    use_case_rows: list[dict],
+    use_case_rows: list[dict[str, Any]],
     status_colors: dict[str, str],
     *,
     exported_by: str,
@@ -290,13 +294,7 @@ def render_one_pager_pdf(  # noqa: PLR0913 - everything printed on the document
     return pdf.build()
 
 
-def _timestamp(value: datetime) -> str:
-    if value.tzinfo is not None:
-        value = value.astimezone(UTC)
-    return value.strftime("%Y-%m-%d %H:%M") + " UTC"
-
-
-def _person(person: dict) -> str:
+def _person(person: dict[str, Any]) -> str:
     name = person.get("name") or ""
     initials = person.get("initials")
     text = f"{name} ({initials})" if initials else name
@@ -328,10 +326,10 @@ def _overview(
     pdf.label_value("SMEs", "; ".join(_person(s) for s in doc.smes) or "None")
     pdf.label_value(
         "Last Updated",
-        f"{_timestamp(header.last_updated_at)} by {header.last_updated_by}",
+        f"{utc_label(header.last_updated_at)} by {header.last_updated_by}",
     )
     pdf.paragraph(
-        f"Exported {_timestamp(exported_at)} by {exported_by}.",
+        f"Exported {utc_label(exported_at)} by {exported_by}.",
         size=SMALL_SIZE,
         color=MUTED_COLOR,
     )
@@ -352,7 +350,7 @@ def _list(pdf: PdfDocument, items: list[str], empty: str) -> None:
 
 
 def _records(
-    pdf: PdfDocument, rows: list[dict], columns: dict[str, str], empty: str
+    pdf: PdfDocument, rows: list[dict[str, Any]], columns: dict[str, str], empty: str
 ) -> None:
     """One block per table row: the first column as its title, then the rest.
 
@@ -439,7 +437,7 @@ def _change_log(pdf: PdfDocument, entries: list[ChangeLogEntry]) -> None:
         return
     for entry in entries:
         line = (
-            f"v{entry.version}  |  {_timestamp(entry.created_at)}  |  "
+            f"v{entry.version}  |  {utc_label(entry.created_at)}  |  "
             f"{entry.author_name} ({entry.author_initials})"
         )
         pdf.ensure_space(30)

@@ -16,6 +16,7 @@ import logging
 import pandas as pd
 import streamlit as st
 
+from adapters.page import ALERT_ICON, require_data_access
 from adapters.theme import status_badge
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.data_access.connection import user_error_message
@@ -41,6 +42,11 @@ COLORS_ERROR_MESSAGE = (
 )
 
 
+# ============================================================================
+# Helpers
+# ============================================================================
+
+
 def load_legends(data_access: DataAccess) -> tuple[list[BadgeInfo], list[BadgeInfo]]:
     """One Pager and Data Product badges; gray defaults if they cannot be read."""
     try:
@@ -50,10 +56,15 @@ def load_legends(data_access: DataAccess) -> tuple[list[BadgeInfo], list[BadgeIn
         )
     except Exception as e:
         logger.exception("Failed to load the status reference tables")
-        st.warning(user_error_message(e, COLORS_ERROR_MESSAGE), icon="⚠️")
+        st.warning(user_error_message(e, COLORS_ERROR_MESSAGE), icon=ALERT_ICON)
         if st.button("Retry", key="help_retry"):
             st.rerun()
         return op_legend(pd.DataFrame()), dp_legend(pd.DataFrame())
+
+
+# ============================================================================
+# Render Components
+# ============================================================================
 
 
 def render_legend(title: str, legend: list[BadgeInfo]) -> None:
@@ -87,11 +98,7 @@ def render_machine(
 # Help Page
 # ============================================================================
 
-if not st.session_state.get("services_initialized"):
-    st.error("Services not initialized. Please refresh the page.")
-    st.stop()
-
-data_access: DataAccess = st.session_state.data_access
+data_access = require_data_access()
 
 st.title("Help")
 st.caption("How One Pagers move through their lifecycle, and who does what.")
@@ -162,4 +169,6 @@ with col_op:
     render_legend("One Pager status", op_badges)
 with col_dp:
     render_legend("Data Product status", dp_badges)
-st.caption("🔒 Locked by … — someone is editing the One Pager; it is read-only for others.")
+st.caption(
+    "🔒 Locked by … — someone is editing the One Pager; it is read-only for others."
+)

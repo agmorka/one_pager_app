@@ -1,35 +1,28 @@
-"""Editing existing One Pagers (Requirements_and_Scope.md §5, Backend_Design.md §7).
+"""Save Draft (Backend_Design.md §7).
 
-``open_for_edit`` is what the Editor calls when it opens an existing One
-Pager: it checks that the user may edit it (Owner/SME, status ``Draft`` or
-``Draft Update``), acquires the edit lock and reads the current document fresh
-from the document store (editor content is never cached, UI_Design.md §6).
-
-``save_draft`` is **Save Draft**: lenient validation, a required change
-summary, a MINOR version bump, a new immutable YAML version file, the
-``one_pager_status`` update and a ``content_save`` change-log entry.
-
-Pure Python — no Streamlit.
+Lenient validation, a required change summary, a MINOR version bump, a new
+immutable YAML version file, the ``one_pager_status`` update and a
+``content_save`` change-log entry. A failed save is rolled back, so it never
+changes anything visible.
 """
 
-import copy
 import logging
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime, timedelta
-from typing import Any
+from datetime import UTC, datetime
 
-from onepagerapp.audit import Outcome, log_event, log_permission_denied
-from onepagerapp.data_access.base import DataAccess, NotFoundError
+from onepagerapp.audit import Outcome, log_event
+from onepagerapp.data_access.base import DataAccess, require_status_row
 from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.documents.serialization import document_to_dict
-from onepagerapp.id_generator import next_id
-from onepagerapp.locking import (
-    DEFAULT_LOCK_TTL,
-    LockResult,
-    acquire_lock,
-    get_active_lock,
-    is_held_by,
+from onepagerapp.editing.authorized_users import (
+    authorized_users_from_document,
+    sync_authorized_users,
 )
+from onepagerapp.editing.use_case_links import (
+    sync_use_case_references,
+    validate_new_use_case_links,
+)
+from onepagerapp.locking import get_active_lock, is_held_by
 from onepagerapp.models import (
     AuthorizedUser,
     ChangeLogEntry,
@@ -41,7 +34,6 @@ from onepagerapp.models import (
 from onepagerapp.permissions import (
     PermissionDeniedError,
     check_can_edit,
-    is_owner_or_sme,
     require_identity,
 )
 from onepagerapp.validation import (
@@ -51,6 +43,7 @@ from onepagerapp.validation import (
     validate_lenient,
     validate_strict,
 )
+from onepagerapp.versioning import bump_minor
 
 logger = logging.getLogger(__name__)
 
@@ -64,10 +57,6 @@ SAVE_CONFLICT_MESSAGE = (
 LOCK_NOT_HELD_MESSAGE = (
     "You no longer hold the edit lock for this One Pager, so it cannot be saved."
 )
-
-
-class DocumentMissingError(RuntimeError):
-    """The status row points to a document version that cannot be found."""
 
 
 class SaveError(RuntimeError):
@@ -94,117 +83,6 @@ class SaveResult:
     @property
     def ok(self) -> bool:
         return self.version is not None and not self.errors
-
-
-@dataclass
-class EditSession:
-    """What the Editor needs to edit an existing One Pager.
-
-    Attributes:
-        status_row: The ``one_pager_status`` row when the editor opened.
-        document: The document of ``status_row.version`` as stored; the editor
-            works on a copy of it.
-        lock: Outcome of the lock acquisition. When ``lock.acquired`` is False
-            the editor shows ``lock.message`` and does not allow editing.
-
-    """
-
-    status_row: OnePagerStatusRow
-    document: OnePagerDocument
-    lock: LockResult
-
-    @property
-    def one_pager_id(self) -> str:
-        return self.status_row.one_pager_id
-
-
-def load_for_edit(
-    data_access: DataAccess, one_pager_id: str, user: CurrentUser
-) -> tuple[OnePagerStatusRow, OnePagerDocument]:
-    """Read the status row and current document after the edit permission check.
-
-    Raises:
-        NotFoundError: No One Pager with this ID.
-        PermissionDeniedError: The user may not edit it (logged).
-        DocumentMissingError: The current version's document is missing.
-
-    """
-    require_identity(user, "load_for_edit", one_pager_id)
-    row = data_access.get_one_pager_status_row(one_pager_id)
-    if row is None:
-        msg = f"One Pager {one_pager_id} not found."
-        raise NotFoundError(msg)
-    check_can_edit(
-        user,
-        one_pager_id,
-        row.one_pager_status,
-        data_access.get_authorized_users(one_pager_id),
-    )
-    document = data_access.read_document(one_pager_id, row.version)
-    if document is None:
-        logger.error(f"Document of {one_pager_id} v{row.version} is missing")
-        msg = f"The document of {one_pager_id} v{row.version} could not be found."
-        raise DocumentMissingError(msg)
-    return row, document
-
-
-def open_for_edit(  # noqa: PLR0913 - every argument is part of the edit identity
-    data_access: DataAccess,
-    one_pager_id: str,
-    user: CurrentUser,
-    session_id: str,
-    *,
-    ttl: timedelta = DEFAULT_LOCK_TTL,
-    now: datetime | None = None,
-) -> EditSession:
-    """Open an existing One Pager in the Editor (edit mode).
-
-    The permission check runs before the lock is taken, so a user who may not
-    edit never blocks others with a lock.
-
-    Raises:
-        NotFoundError: No One Pager with this ID.
-        PermissionDeniedError: The user may not edit it.
-        DocumentMissingError: The current version's document is missing.
-        RuntimeError: The lock or document could not be read or written.
-
-    """
-    row, document = load_for_edit(data_access, one_pager_id, user)
-    lock = acquire_lock(data_access, one_pager_id, user, session_id, ttl=ttl, now=now)
-    return EditSession(status_row=row, document=document, lock=lock)
-
-
-def working_copy(document: OnePagerDocument) -> OnePagerDocument:
-    """Return a deep copy of a document for the editor to change freely."""
-    return copy.deepcopy(document)
-
-
-def has_unsaved_changes(saved: OnePagerDocument, working: OnePagerDocument) -> bool:
-    """Whether the working copy differs from the stored document in content.
-
-    Both are normalized first, so whitespace, HTML tags or a blank row the
-    user left behind do not count as a change.
-    """
-    return document_to_dict(normalize_document(saved)) != document_to_dict(
-        normalize_document(working)
-    )
-
-
-def bump_minor(version: str) -> str:
-    """Next MINOR version (Requirements_and_Scope.md §7): 0.3.0 -> 0.4.0.
-
-    PATCH is not used, so it is reset to 0.
-
-    Raises:
-        ValueError: If ``version`` is not MAJOR.MINOR.PATCH.
-
-    """
-    parts = version.split(".")
-    if len(parts) != 3 or not all(p.isdigit() for p in parts):  # noqa: PLR2004
-        msg = f"Invalid version {version!r}"
-        raise ValueError(msg)
-    major, minor, _ = (int(p) for p in parts)
-    return f"{major}.{minor + 1}.0"
 
 
 def validate_change_summary(summary: str) -> list[ValidationError]:
@@ -456,10 +334,7 @@ def save_draft(  # noqa: PLR0913 - every argument is needed to save
     """
     require_identity(user, "save_draft", one_pager_id)
     now = now or datetime.now(UTC)
-    row = data_access.get_one_pager_status_row(one_pager_id)
-    if row is None:
-        msg = f"One Pager {one_pager_id} not found."
-        raise NotFoundError(msg)
+    row = require_status_row(data_access, one_pager_id)
     # Checked against the list *before* the edit (Backend_Design §11).
     authorized_before = data_access.get_authorized_users(one_pager_id)
     check_can_edit(user, one_pager_id, row.one_pager_status, authorized_before)
@@ -586,228 +461,3 @@ def _restore_status_row(
             one_pager_id=previous.one_pager_id,
         )
     return restored
-
-
-# ============================================================================
-# Owner/SME sync (Backend_Design.md §11)
-# ============================================================================
-
-
-@dataclass
-class AuthorizedUsersDiff:
-    """Changes that make ``one_pager_authorized_users`` match a document."""
-
-    inserts: list[AuthorizedUser] = field(default_factory=list)
-    updates: list[AuthorizedUser] = field(default_factory=list)
-    deletes: list[str] = field(default_factory=list)
-
-    @property
-    def empty(self) -> bool:
-        return not (self.inserts or self.updates or self.deletes)
-
-
-def authorized_users_from_document(
-    one_pager_id: str, document: OnePagerDocument
-) -> list[AuthorizedUser]:
-    """Build the Owner (role ``owner``) and SME (role ``sme``) rows of a document."""
-    users = [
-        AuthorizedUser(
-            one_pager_id=one_pager_id,
-            user_initials=document.owner_initials,
-            user_name=document.owner_name,
-            user_email=document.owner_email,
-            user_team=document.owner_team,
-            role="owner",
-        )
-    ]
-    users.extend(
-        AuthorizedUser(
-            one_pager_id=one_pager_id,
-            user_initials=str(sme.get("initials") or ""),
-            user_name=str(sme.get("name") or ""),
-            user_email=str(sme.get("email") or ""),
-            user_team=sme.get("team") or None,
-            role="sme",
-        )
-        for sme in document.smes
-    )
-    return [u for u in users if u.user_initials]
-
-
-def diff_authorized_users(
-    current: list[AuthorizedUser], desired: list[AuthorizedUser]
-) -> AuthorizedUsersDiff:
-    """Compare the table rows with the document's Owner/SMEs, keyed by initials.
-
-    New initials are inserted, rows whose name, email, team or role changed
-    are updated, and initials no longer listed are deleted.
-    """
-    by_initials = {u.user_initials: u for u in current}
-    wanted = {u.user_initials: u for u in desired}
-    diff = AuthorizedUsersDiff()
-    for initials, user in wanted.items():
-        existing = by_initials.get(initials)
-        if existing is None:
-            diff.inserts.append(user)
-        elif (
-            existing.user_name,
-            existing.user_email,
-            existing.user_team,
-            existing.role,
-        ) != (user.user_name, user.user_email, user.user_team, user.role):
-            diff.updates.append(user)
-    diff.deletes = [initials for initials in by_initials if initials not in wanted]
-    return diff
-
-
-def sync_authorized_users(
-    data_access: DataAccess,
-    current: list[AuthorizedUser],
-    desired: list[AuthorizedUser],
-) -> AuthorizedUsersDiff:
-    """Make ``one_pager_authorized_users`` match ``desired`` (insert/update/delete).
-
-    Inserts run before deletes, so a failure part-way never leaves the One
-    Pager with fewer editors than either the old or the new list.
-    """
-    diff = diff_authorized_users(current, desired)
-    if diff.inserts:
-        data_access.insert_authorized_users(diff.inserts)
-    if diff.updates:
-        data_access.update_authorized_users(diff.updates)
-    if diff.deletes:
-        one_pager_id = (current or desired)[0].one_pager_id
-        data_access.delete_authorized_users(one_pager_id, diff.deletes)
-    return diff
-
-
-# ============================================================================
-# Use Case links (Backend_Design.md §9)
-# ============================================================================
-
-DEPRECATED_LINK_MESSAGE = "{use_case_id} is deprecated and cannot be linked."
-UNKNOWN_LINK_MESSAGE = "{use_case_id} does not exist."
-
-
-def link_denied_reason(data_access: DataAccess, use_case_id: str) -> str | None:
-    """Why a Use Case cannot be linked to a One Pager, or None if it can."""
-    use_case = data_access.get_use_case(use_case_id)
-    if use_case is None:
-        return UNKNOWN_LINK_MESSAGE.format(use_case_id=use_case_id)
-    if use_case.deprecated:
-        return DEPRECATED_LINK_MESSAGE.format(use_case_id=use_case_id)
-    return None
-
-
-def validate_new_use_case_links(
-    data_access: DataAccess, linked_before: list[str], use_case_ids: list[str]
-) -> list[ValidationError]:
-    """Errors for Use Cases the save would newly link that cannot be linked.
-
-    Links that already exist stay valid when their Use Case is deprecated
-    later (it simply cannot be linked to new One Pagers).
-    """
-    errors: list[ValidationError] = []
-    seen: set[str] = set()
-    for use_case_id in use_case_ids:
-        if use_case_id in seen:
-            errors.append(
-                ValidationError("useCases", f"{use_case_id} is linked twice.")
-            )
-        seen.add(use_case_id)
-        if use_case_id in linked_before:
-            continue
-        reason = link_denied_reason(data_access, use_case_id)
-        if reason:
-            errors.append(ValidationError("useCases", reason))
-    return errors
-
-
-def _check_can_link(
-    data_access: DataAccess, one_pager_id: str, user: CurrentUser, action: str
-) -> None:
-    if not is_owner_or_sme(user, data_access.get_authorized_users(one_pager_id)):
-        log_permission_denied(action, user=user.initials, one_pager_id=one_pager_id)
-        msg = "Only the Owner or an SME of this One Pager can change its Use Cases."
-        raise PermissionDeniedError(msg)
-
-
-def link_use_case(
-    data_access: DataAccess, one_pager_id: str, use_case_id: str, user: CurrentUser
-) -> None:
-    """Link a Use Case to a One Pager (insert into ``use_case_references``).
-
-    Raises:
-        PermissionDeniedError: The user is not Owner/SME of the One Pager.
-        ValueError: The Use Case does not exist or is deprecated.
-
-    """
-    require_identity(user, "link_use_case", one_pager_id)
-    _check_can_link(data_access, one_pager_id, user, "link_use_case")
-    reason = link_denied_reason(data_access, use_case_id)
-    if reason:
-        raise ValueError(reason)
-    data_access.add_use_case_reference(one_pager_id, use_case_id)
-    log_event(
-        "link_use_case",
-        Outcome.SUCCESS,
-        user=user.initials,
-        one_pager_id=one_pager_id,
-        use_case_id=use_case_id,
-    )
-
-
-def unlink_use_case(
-    data_access: DataAccess, one_pager_id: str, use_case_id: str, user: CurrentUser
-) -> None:
-    """Unlink a Use Case from a One Pager (delete from ``use_case_references``).
-
-    Raises:
-        PermissionDeniedError: The user is not Owner/SME of the One Pager.
-
-    """
-    require_identity(user, "unlink_use_case", one_pager_id)
-    _check_can_link(data_access, one_pager_id, user, "unlink_use_case")
-    data_access.remove_use_case_reference(one_pager_id, use_case_id)
-    log_event(
-        "unlink_use_case",
-        Outcome.SUCCESS,
-        user=user.initials,
-        one_pager_id=one_pager_id,
-        use_case_id=use_case_id,
-    )
-
-
-def sync_use_case_references(
-    data_access: DataAccess,
-    one_pager_id: str,
-    linked_before: list[str],
-    use_case_ids: list[str],
-    user: CurrentUser,
-) -> None:
-    """Link the Use Cases a save added and unlink the ones it removed."""
-    for use_case_id in sorted(set(use_case_ids) - set(linked_before)):
-        link_use_case(data_access, one_pager_id, use_case_id, user)
-    for use_case_id in sorted(set(linked_before) - set(use_case_ids)):
-        unlink_use_case(data_access, one_pager_id, use_case_id, user)
-
-
-# ============================================================================
-# Business Requirement IDs
-# ============================================================================
-
-
-def assign_requirement_id(data_access: DataAccess, requirement: dict[str, Any]) -> str:
-    """Give a new Business Requirement its ``BR-###`` ID.
-
-    IDs come from the global ``id_sequences`` counter (Data_Model.md §4), so
-    they are unique across all One Pagers. An ID consumed by a requirement
-    that is never saved leaves a harmless gap.
-
-    Raises:
-        IdGenerationError: The counter could not be advanced.
-        ValueError: The BR-### range is exhausted.
-
-    """
-    requirement["id"] = next_id(data_access, "BR")
-    return str(requirement["id"])

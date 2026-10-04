@@ -18,20 +18,27 @@ import logging
 import re
 
 import streamlit as st
-from adapters.cache import get_use_cases, writes_data
 
+from adapters.cache import get_use_cases, writes_data
+from adapters.page import (
+    current_initials,
+    current_roles,
+    current_user,
+    render_error_state,
+    require_data_access,
+    set_flash,
+    show_flash,
+)
 from onepagerapp.data_access.base import DataAccess, NotFoundError
 from onepagerapp.data_access.connection import user_error_message
 from onepagerapp.models import (
     PRIORITY_OPTIONS,
-    CurrentUser,
     UseCase,
     UseCaseFilter,
     UseCaseInput,
     UseCasePage,
 )
 from onepagerapp.permissions import can_manage_use_cases
-from onepagerapp.state_machine import Actor
 from onepagerapp.use_cases import (
     USE_CASE_FIELDS,
     clean_use_case_input,
@@ -42,6 +49,11 @@ from onepagerapp.use_cases import (
 )
 
 logger = logging.getLogger(__name__)
+
+LOAD_ERROR_MESSAGE = (
+    "**Unable to load Use Cases.** Please try again. If the problem persists, "
+    "check that the `use_cases` and `use_case_references` tables are deployed."
+)
 
 # Pagination settings
 ROWS_PER_PAGE = 20
@@ -59,7 +71,7 @@ _ROW_COLUMN_RATIOS = [0.9, 1.8, 3.0, 1.0, 0.9, 1.0, 1.2]
 
 _PAGE_KEY = "use_cases_page"
 _SELECTED_KEY = "uc_selected_id"
-_FLASH_KEY = "uc_flash"
+FLASH_KEY = "uc_flash"
 
 # Button labels are markdown: escape "+" so it isn't read as a list marker
 _NEW_BUTTON_LABEL = "\\+ New Use Case"
@@ -79,30 +91,8 @@ def _md(text: str) -> str:
     return _MARKDOWN_SPECIAL.sub(r"\\\1", text)
 
 
-def _current_initials() -> str | None:
-    """Initials of the signed-in user, resolved once per session by app.py.
-
-    None when nobody is signed in or the username is not recognised.
-    """
-    user: CurrentUser | None = st.session_state.get("current_user_info")
-    return (user.initials or None) if user else None
-
-
-def _current_user_info() -> CurrentUser | None:
-    return st.session_state.get("current_user_info")
-
-
-def _current_roles() -> frozenset[Actor]:
-    return st.session_state.get("current_user_roles", frozenset())
-
-
 def _used_by_label(count: int) -> str:
     return f"{count} OP" if count == 1 else f"{count} OPs"
-
-
-def _flash(message: str) -> None:
-    """Queue a success message for the next run (st.rerun discards this run)."""
-    st.session_state[_FLASH_KEY] = message
 
 
 def _reset_page() -> None:
@@ -121,7 +111,7 @@ def _select_use_case(use_case_id: str | None) -> None:
 
 
 # ============================================================================
-# Dialogs: create, edit and deprecate
+# Dialogs: Create, Edit and Deprecate
 # ============================================================================
 
 
@@ -178,21 +168,21 @@ def _render_use_case_form(data_access: DataAccess, existing: UseCase | None) -> 
         with writes_data():
             if existing is None:
                 new_id = create_use_case(
-                    data_access, data, _current_user_info(), roles=_current_roles()
+                    data_access, data, current_user(), roles=current_roles()
                 )
             else:
                 update_use_case(
                     data_access,
                     existing.use_case_id,
                     data,
-                    _current_user_info(),
-                    roles=_current_roles(),
+                    current_user(),
+                    roles=current_roles(),
                 )
         if existing is None:
             _select_use_case(new_id)
-            _flash(f"Created Use Case {new_id}.")
+            set_flash(FLASH_KEY, f"Created Use Case {new_id}.")
         else:
-            _flash(f"Saved changes to {existing.use_case_id}.")
+            set_flash(FLASH_KEY, f"Saved changes to {existing.use_case_id}.")
     except NotFoundError:
         st.error("This Use Case no longer exists. Close the dialog and refresh.")
         return
@@ -239,14 +229,14 @@ def _deprecate_dialog(
                     data_access,
                     use_case.use_case_id,
                     deprecated=True,
-                    user=_current_user_info(),
-                    roles=_current_roles(),
+                    user=current_user(),
+                    roles=current_roles(),
                 )
         except Exception:
             logger.exception("Failed to deprecate use case")
             st.error("The Use Case could not be deprecated. Please try again.")
             return
-        _flash(f"Deprecated {use_case.use_case_id}.")
+        set_flash(FLASH_KEY, f"Deprecated {use_case.use_case_id}.")
         st.rerun()
     if cancel_col.button("Cancel", key="uc_deprecate_cancel"):
         st.rerun()
@@ -259,19 +249,19 @@ def _restore(data_access: DataAccess, use_case: UseCase) -> None:
                 data_access,
                 use_case.use_case_id,
                 deprecated=False,
-                user=_current_user_info(),
-                roles=_current_roles(),
+                user=current_user(),
+                roles=current_roles(),
             )
     except Exception:
         logger.exception("Failed to restore use case")
         st.error("The Use Case could not be restored. Please try again.")
         return
-    _flash(f"Restored {use_case.use_case_id}.")
+    set_flash(FLASH_KEY, f"Restored {use_case.use_case_id}.")
     st.rerun()
 
 
 # ============================================================================
-# Render Helpers
+# Render Components
 # ============================================================================
 
 
@@ -365,9 +355,7 @@ def _render_details(
         )
     except Exception as e:
         logger.exception("Failed to load use case details")
-        st.error(
-            user_error_message(e, "Unable to load the details of this Use Case.")
-        )
+        st.error(user_error_message(e, "Unable to load the details of this Use Case."))
         return
     if use_case is None:
         _select_use_case(None)
@@ -410,13 +398,8 @@ def _render_details(
 # Use Cases Page
 # ============================================================================
 
-try:
-    data_access = st.session_state.data_access
-except (AttributeError, KeyError):
-    st.error("Services are not initialized. Please refresh the page.")
-    st.stop()
-
-can_manage = can_manage_use_cases(_current_initials(), _current_roles())
+data_access = require_data_access()
+can_manage = can_manage_use_cases(current_initials(), current_roles())
 
 title_col, new_col = st.columns([5, 1])
 title_col.title("Use Case Registry")
@@ -427,9 +410,7 @@ with new_col:
     if can_manage and st.button(_NEW_BUTTON_LABEL, type="primary", key="uc_new"):
         _create_dialog(data_access)
 
-flash = st.session_state.pop(_FLASH_KEY, None)
-if flash:
-    st.success(flash)
+show_flash(FLASH_KEY)
 
 st.markdown("**Filters**")
 _render_filter_bar()
@@ -449,29 +430,17 @@ st.session_state.setdefault(_PAGE_KEY, 1)
 try:
     with st.spinner("Loading Use Cases..."):
         use_case_page = get_use_cases(
-            data_access,
-            current_filter, st.session_state[_PAGE_KEY], ROWS_PER_PAGE
+            data_access, current_filter, st.session_state[_PAGE_KEY], ROWS_PER_PAGE
         )
         # Clamp to the last page if rows disappeared (e.g. after deprecating)
         if not use_case_page.rows and st.session_state[_PAGE_KEY] > 1:
             st.session_state[_PAGE_KEY] = max(use_case_page.total_pages, 1)
             use_case_page = get_use_cases(
-                data_access,
-                current_filter, st.session_state[_PAGE_KEY], ROWS_PER_PAGE
+                data_access, current_filter, st.session_state[_PAGE_KEY], ROWS_PER_PAGE
             )
 except Exception as e:
     logger.exception("Failed to fetch use cases")
-    st.error(
-        user_error_message(
-            e,
-            "**Unable to load Use Cases.** Please try again. If the problem "
-            "persists, check that the `use_cases` and `use_case_references` "
-            "tables are deployed.",
-        )
-    )
-    if st.button("Retry", key="uc_retry"):
-        st.rerun()
-    st.stop()
+    render_error_state(user_error_message(e, LOAD_ERROR_MESSAGE), key="uc_retry")
 
 if use_case_page.rows:
     st.markdown(

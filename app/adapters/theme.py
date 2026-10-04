@@ -29,19 +29,23 @@ ENVIRONMENT_BADGE_COLORS: dict[str, tuple[str, str]] = {
 
 def get_op_status_colors(data_access: DataAccess) -> dict[str, str]:
     """Build One Pager status color map from ref_op_status table.
-    
+
     Args:
         data_access: DataAccess instance to fetch reference data
-        
+
     Returns:
         Dictionary mapping status strings to hex color codes
-        
+
     Raises:
         RuntimeError: If the returned data is invalid or missing required columns
+
     """
     statuses = data_access.get_ref_op_status()
-    logger.debug(f"ref_op_status returned {len(statuses)} rows with columns: {list(statuses.columns)}")
-    
+    logger.debug(
+        f"ref_op_status returned {len(statuses)} rows "
+        f"with columns: {list(statuses.columns)}"
+    )
+
     # Validate required columns exist
     required_columns = {"status", "badge_color"}
     missing_columns = required_columns - set(statuses.columns)
@@ -51,28 +55,33 @@ def get_op_status_colors(data_access: DataAccess) -> dict[str, str]:
             f"Got columns: {list(statuses.columns)}"
         )
         raise RuntimeError(msg)
-    
+
     if statuses.empty:
-        raise RuntimeError("ref_op_status table is empty — no statuses available")
-    
+        msg = "ref_op_status table is empty — no statuses available"
+        raise RuntimeError(msg)
+
     return dict(zip(statuses["status"], statuses["badge_color"], strict=False))
 
 
 def get_dp_status_colors(data_access: DataAccess) -> dict[str, str]:
     """Build Data Product status color map from ref_dp_status table.
-    
+
     Args:
         data_access: DataAccess instance to fetch reference data
-        
+
     Returns:
         Dictionary mapping status strings to hex color codes
-        
+
     Raises:
         RuntimeError: If the returned data is invalid or missing required columns
+
     """
     statuses = data_access.get_ref_dp_status()
-    logger.debug(f"ref_dp_status returned {len(statuses)} rows with columns: {list(statuses.columns)}")
-    
+    logger.debug(
+        f"ref_dp_status returned {len(statuses)} rows "
+        f"with columns: {list(statuses.columns)}"
+    )
+
     # Validate required columns exist
     required_columns = {"status", "badge_color"}
     missing_columns = required_columns - set(statuses.columns)
@@ -82,10 +91,11 @@ def get_dp_status_colors(data_access: DataAccess) -> dict[str, str]:
             f"Got columns: {list(statuses.columns)}"
         )
         raise RuntimeError(msg)
-    
+
     if statuses.empty:
-        raise RuntimeError("ref_dp_status table is empty — no statuses available")
-    
+        msg = "ref_dp_status table is empty — no statuses available"
+        raise RuntimeError(msg)
+
     return dict(zip(statuses["status"], statuses["badge_color"], strict=False))
 
 
@@ -149,22 +159,23 @@ def apply_theme() -> None:
 
 def status_badge(status: str, color: str) -> str:
     """Generate HTML for a status badge with colored dot and text label.
-    
+
     Renders both a colored dot and text label for accessibility—never color alone,
     to support users with color blindness.
-    
+
     Args:
         status: The status text to display (e.g. "Draft", "Approved")
         color: Hex color code for the dot (e.g. '#65B676')
-        
+
     Returns:
         HTML string for the badge with colored dot + text
+
     """
     return (
         f'<span class="status-badge">'
         f'<span class="status-badge-dot" style="background-color: {color};"></span>'
-        f'{status}'
-        f'</span>'
+        f"{status}"
+        f"</span>"
     )
 
 
@@ -178,6 +189,7 @@ def environment_badge(environment: str) -> str:
 
     Returns:
         HTML string for the badge.
+
     """
     background, text = ENVIRONMENT_BADGE_COLORS.get(
         environment, (DEFAULT_BADGE_COLOR, "#FFFFFF")
