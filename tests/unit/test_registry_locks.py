@@ -1,90 +1,64 @@
 """Registry lock indicator (UI_Design.md §4.1, Requirements_and_Scope.md §10)."""
 
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
+from datetime import timedelta
 
 import pytest
-import streamlit as st
-from streamlit.testing.v1 import AppTest
 
 from onepagerapp.data_access.mock import MockDataAccess
-from onepagerapp.documents import OnePagerDocumentStore
-from onepagerapp.models import LockInfo
-from tests.conftest import FIXTURES_DIR
-from tests.users import make_user
-
-APP_DIR = Path(__file__).resolve().parents[2] / "app"
-
-
-def _lock(one_pager_id: str, initials: str, expires_in: timedelta) -> LockInfo:
-    now = datetime.now(UTC)
-    return LockInfo(
-        one_pager_id=one_pager_id,
-        locked_by_initials=initials,
-        locked_by_name=initials,
-        session_id="s1",
-        acquired_at=now - timedelta(minutes=5),
-        last_heartbeat=now - timedelta(minutes=5),
-        expires_at=now + expires_in,
-    )
-
-
-class _BrokenLocksDataAccess(MockDataAccess):
-    def get_locks(self, one_pager_ids: list[str]) -> list[LockInfo]:  # noqa: ARG002
-        msg = "locks table unreachable"
-        raise RuntimeError(msg)
+from tests.helpers import (
+    APPROVED_ID,
+    BOB,
+    IN_REVIEW_ID,
+    MAJA,
+    failing,
+    live_lock,
+    page_app,
+)
 
 
 @pytest.fixture
-def switched(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    targets: list[str] = []
-    monkeypatch.setattr(st, "switch_page", targets.append)
-    monkeypatch.syspath_prepend(str(APP_DIR))
-    return targets
-
-
-def _run(tmp_path: Path, data_access_cls: type = MockDataAccess) -> tuple:
-    store = OnePagerDocumentStore(FIXTURES_DIR, write_path=tmp_path)
-    data_access = data_access_cls(store)
-    data_access._locks = {
-        "OP-0001": _lock("OP-0001", "MJO", timedelta(minutes=20)),
-        "OP-0002": _lock("OP-0002", "BSM", -timedelta(minutes=1)),
+def locked(mock_data_access: MockDataAccess) -> MockDataAccess:
+    """Lock OP-0001 by MJO (active) and OP-0002 by BSM (expired)."""
+    mock_data_access._locks = {
+        APPROVED_ID: live_lock(APPROVED_ID, MAJA, timedelta(minutes=20)),
+        IN_REVIEW_ID: live_lock(IN_REVIEW_ID, BOB, -timedelta(minutes=1)),
     }
-    user = make_user("ABR", "Alice Brown")
-    at = AppTest.from_file(str(APP_DIR / "views" / "registry.py"), default_timeout=30)
-    for key, value in {
-        "services_initialized": True,
-        "data_access": data_access,
-        "document_store": store,
-        "current_user": user.username,
-        "current_user_info": user,
-    }.items():
-        at.session_state[key] = value
-    return at.run(), data_access
+    return mock_data_access
 
 
 @pytest.mark.unit
-def test__registry__shows_lock_icon_and_holder_for_active_locks_only(
-    tmp_path: Path, switched: list[str]
+def test__active_and_expired_locks__open_registry__holder_of_active_lock_only(
+    locked: MockDataAccess, switched: list[str]
 ) -> None:
-    at, _ = _run(tmp_path)
+    """Only active locks are shown, with their holder."""
+    # When
+    at = page_app("registry.py", locked, roles=frozenset()).run()
 
+    # Then
     assert not at.exception
     cells = [m.value for m in at.markdown]
     assert "**Lock**" in cells
     assert "MJO" in cells
-    assert "BS" not in cells
+    assert "BSM" not in cells
 
 
 @pytest.mark.unit
-def test__registry__unreadable_locks_do_not_break_the_table(
-    tmp_path: Path, switched: list[str]
+def test__locks_unreadable__open_registry__table_shown_with_unknown_lock(
+    locked: MockDataAccess,
+    switched: list[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    at, _ = _run(tmp_path, _BrokenLocksDataAccess)
+    """A lock read error does not break the table."""
+    # Given
+    monkeypatch.setattr(locked, "get_locks", failing("locks table unreachable"))
 
+    # When
+    at = page_app("registry.py", locked, roles=frozenset()).run()
+
+    # Then
     assert not at.exception
     assert not at.error
     assert any("Lock status is unavailable" in c.value for c in at.caption)
     cells = [m.value for m in at.markdown]
-    assert "OP-0001" in cells
+    assert APPROVED_ID in cells
     assert "?" in cells

@@ -1,14 +1,12 @@
 """Edit mode: per-record permission check and opening a One Pager for edit."""
 
-from datetime import UTC, datetime, timedelta
-
 import pytest
 
 from onepagerapp.data_access.base import NotFoundError
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.editing import DocumentMissingError, open_for_edit, working_copy
 from onepagerapp.locking import LockStatus
-from onepagerapp.models import AuthorizedUser, CurrentUser, NewOnePagerInput
+from onepagerapp.models import AuthorizedUser, CurrentUser
 from onepagerapp.permissions import (
     PermissionDeniedError,
     check_can_edit,
@@ -16,101 +14,133 @@ from onepagerapp.permissions import (
     get_action_states,
     is_owner_or_sme,
 )
-from onepagerapp.workflow import create_one_pager
-from tests.users import CREATOR_ROLES, make_user
-
-NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
-
-
-def _authorized(*pairs: tuple[str, str]) -> list[AuthorizedUser]:
-    return [
-        AuthorizedUser("OP-0009", initials, initials, f"{initials}@x.dk", role)
-        for initials, role in pairs
-    ]
+from tests.helpers import (
+    ALICE,
+    BOB,
+    IN_REVIEW_ID,
+    LATER,
+    NOW,
+    SESSION_ID,
+    make_user,
+)
 
 
-@pytest.fixture
-def draft_id(
-    valid_input: NewOnePagerInput,
-    creator: CurrentUser,
-    mock_data_access: MockDataAccess,
-    document_store,  # noqa: ANN001
-) -> str:
-    result = create_one_pager(
-        valid_input,
-        creator,
-        mock_data_access,
-        document_store,
-        now=NOW,
-        roles=CREATOR_ROLES,
-    )
-    assert result.one_pager_id
-    return result.one_pager_id
+def _authorized(initials: str, role: str) -> list[AuthorizedUser]:
+    """Return the authorized users of OP-0009: one person with ``role``."""
+    return [AuthorizedUser("OP-0009", initials, initials, f"{initials}@x.dk", role)]
 
 
 @pytest.mark.unit
-def test__is_owner_or_sme__matches_initials_and_role(creator: CurrentUser) -> None:
-    assert is_owner_or_sme(creator, _authorized(("MJO", "owner")))
-    assert is_owner_or_sme(creator, _authorized(("MJO", "sme")))
-    assert not is_owner_or_sme(creator, _authorized(("MJO", "viewer")))
-    assert not is_owner_or_sme(creator, _authorized(("ABR", "owner")))
-    assert not is_owner_or_sme(None, _authorized(("MJO", "owner")))
+@pytest.mark.parametrize(
+    ("initials", "role", "expected"),
+    [
+        ("MJO", "owner", True),
+        ("MJO", "sme", True),
+        ("MJO", "viewer", False),
+        ("ABR", "owner", False),
+    ],
+)
+def test__authorized_users__is_owner_or_sme__matches_initials_and_role(
+    creator: CurrentUser, initials: str, role: str, expected: bool
+) -> None:
+    """Only an Owner or SME row with the user's initials counts."""
+    # When
+    result = is_owner_or_sme(creator, _authorized(initials, role))
+
+    # Then
+    assert result is expected
+
+
+@pytest.mark.unit
+def test__no_user__is_owner_or_sme__false() -> None:
+    """Without a user nobody is Owner or SME."""
+    # When
+    result = is_owner_or_sme(None, _authorized("MJO", "owner"))
+
+    # Then
+    assert result is False
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize("status", ["Draft", "Draft Update"])
-def test__edit_denied_reason__editable_statuses(
+def test__owner_of_editable_status__edit_denied_reason__none(
     creator: CurrentUser, status: str
 ) -> None:
-    assert edit_denied_reason(creator, status, _authorized(("MJO", "owner"))) is None
+    """A Draft or Draft Update can be edited by its Owner."""
+    # When
+    reason = edit_denied_reason(creator, status, _authorized("MJO", "owner"))
+
+    # Then
+    assert reason is None
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "status", ["Ready for Review", "In Review", "Approved", "Cancelled"]
 )
-def test__edit_denied_reason__other_statuses(creator: CurrentUser, status: str) -> None:
-    reason = edit_denied_reason(creator, status, _authorized(("MJO", "owner")))
+def test__owner_of_other_status__edit_denied_reason__names_status(
+    creator: CurrentUser, status: str
+) -> None:
+    """Other statuses are not editable; the reason names the status."""
+    # When
+    reason = edit_denied_reason(creator, status, _authorized("MJO", "owner"))
+
+    # Then
     assert reason is not None
     assert status in reason
 
 
 @pytest.mark.unit
-def test__check_can_edit__denial_is_logged(
+def test__user_not_owner_or_sme__check_can_edit__raises_and_logs(
     creator: CurrentUser, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """A denied edit raises and is logged as a security event."""
+    # When / Then
     with pytest.raises(PermissionDeniedError, match="Owner or an SME"):
-        check_can_edit(creator, "OP-0009", "Draft", _authorized(("ABR", "owner")))
+        check_can_edit(creator, "OP-0009", "Draft", _authorized("ABR", "owner"))
     assert "permission_denied" in caplog.text
     assert "OP-0009" in caplog.text
 
 
 @pytest.mark.unit
-def test__action_states__edit_enabled_for_owner_sme_of_draft() -> None:
-    def edit(user: str, status: str, holder: str | None = None) -> bool:
-        return get_action_states(
-            user,
-            "MJO",
-            status,
-            holder is not None,
-            holder,
-            authorized_initials={"MJO", "DPR"},
-        )["edit"].enabled
+@pytest.mark.parametrize(
+    ("user", "status", "holder", "enabled"),
+    [
+        ("MJO", "Draft", None, True),
+        ("DPR", "Draft Update", None, True),
+        ("MJO", "Draft", "MJO", True),
+        ("MJO", "Draft", "DPR", False),
+        ("ABR", "Draft", None, False),
+        ("MJO", "In Review", None, False),
+    ],
+)
+def test__user_status_and_lock__action_states__edit_enabled_for_owner_sme_draft(
+    user: str, status: str, holder: str | None, enabled: bool
+) -> None:
+    """Edit is enabled for the Owner/SME of an editable, not foreign-locked record."""
+    # When
+    states = get_action_states(
+        user,
+        "MJO",
+        status,
+        holder is not None,
+        holder,
+        authorized_initials={"MJO", "DPR"},
+    )
 
-    assert edit("MJO", "Draft")
-    assert edit("DPR", "Draft Update")
-    assert edit("MJO", "Draft", holder="MJO")
-    assert not edit("MJO", "Draft", holder="DPR")
-    assert not edit("ABR", "Draft")
-    assert not edit("MJO", "In Review")
+    # Then
+    assert states["edit"].enabled is enabled
 
 
 @pytest.mark.unit
-def test__open_for_edit__acquires_lock_and_reads_document(
+def test__owners_draft__open_for_edit__acquires_lock_and_reads_document(
     draft_id: str, creator: CurrentUser, mock_data_access: MockDataAccess
 ) -> None:
-    session = open_for_edit(mock_data_access, draft_id, creator, "s1", now=NOW)
+    """Opening takes the lock and returns the current version."""
+    # When
+    session = open_for_edit(mock_data_access, draft_id, creator, SESSION_ID, now=NOW)
 
+    # Then
     assert session.one_pager_id == draft_id
     assert session.lock.status is LockStatus.ACQUIRED
     assert session.status_row.version == "0.1.0"
@@ -119,59 +149,75 @@ def test__open_for_edit__acquires_lock_and_reads_document(
 
 
 @pytest.mark.unit
-def test__open_for_edit__locked_by_other_user(
+def test__draft_locked_by_sme__owner_opens__not_acquired(
     draft_id: str, creator: CurrentUser, mock_data_access: MockDataAccess
 ) -> None:
-    sme = make_user("DPR")
-    open_for_edit(mock_data_access, draft_id, sme, "other", now=NOW)
+    """Another user's lock blocks editing."""
+    # Given
+    open_for_edit(mock_data_access, draft_id, make_user("DPR"), "other", now=NOW)
 
-    session = open_for_edit(
-        mock_data_access, draft_id, creator, "s1", now=NOW + timedelta(minutes=1)
-    )
+    # When
+    session = open_for_edit(mock_data_access, draft_id, creator, SESSION_ID, now=LATER)
 
+    # Then
     assert not session.lock.acquired
     assert session.lock.status is LockStatus.LOCKED_BY_OTHER
 
 
 @pytest.mark.unit
-def test__open_for_edit__not_authorized_takes_no_lock(
+def test__user_not_owner_or_sme__open_for_edit__raises_and_takes_no_lock(
     draft_id: str, mock_data_access: MockDataAccess
 ) -> None:
-    stranger = make_user("ABR", "Alice Brown")
+    """An unauthorized user gets no lock."""
+    # When / Then
     with pytest.raises(PermissionDeniedError):
-        open_for_edit(mock_data_access, draft_id, stranger, "s1", now=NOW)
+        open_for_edit(mock_data_access, draft_id, ALICE, SESSION_ID, now=NOW)
     assert mock_data_access.get_lock(draft_id) is None
 
 
 @pytest.mark.unit
-def test__open_for_edit__status_not_editable(mock_data_access: MockDataAccess) -> None:
-    owner = make_user("BSM", "Bob Smith")  # OP-0002 is In Review
+def test__one_pager_in_review__open_for_edit__raises_permission_denied(
+    mock_data_access: MockDataAccess,
+) -> None:
+    """A One Pager In Review is not editable, not even by its Owner."""
+    # When / Then
     with pytest.raises(PermissionDeniedError, match="In Review"):
-        open_for_edit(mock_data_access, "OP-0002", owner, "s1", now=NOW)
+        open_for_edit(mock_data_access, IN_REVIEW_ID, BOB, SESSION_ID, now=NOW)
 
 
 @pytest.mark.unit
-def test__open_for_edit__unknown_id(
+def test__unknown_id__open_for_edit__raises_not_found(
     creator: CurrentUser, mock_data_access: MockDataAccess
 ) -> None:
+    """An unknown One Pager cannot be opened."""
+    # When / Then
     with pytest.raises(NotFoundError):
-        open_for_edit(mock_data_access, "OP-9999", creator, "s1", now=NOW)
+        open_for_edit(mock_data_access, "OP-9999", creator, SESSION_ID, now=NOW)
 
 
 @pytest.mark.unit
-def test__open_for_edit__missing_document(
+def test__version_file_missing__open_for_edit__raises_document_missing(
     draft_id: str, creator: CurrentUser, mock_data_access: MockDataAccess
 ) -> None:
+    """The current version's YAML file must exist."""
+    # Given
     mock_data_access._status_rows[draft_id].version = "0.9.0"
+
+    # When / Then
     with pytest.raises(DocumentMissingError):
-        open_for_edit(mock_data_access, draft_id, creator, "s1", now=NOW)
+        open_for_edit(mock_data_access, draft_id, creator, SESSION_ID, now=NOW)
 
 
 @pytest.mark.unit
-def test__working_copy__is_independent(
+def test__opened_document__change_working_copy__original_unchanged(
     draft_id: str, creator: CurrentUser, mock_data_access: MockDataAccess
 ) -> None:
-    session = open_for_edit(mock_data_access, draft_id, creator, "s1", now=NOW)
-    copy = working_copy(session.document)
-    copy.smes.append({"name": "X"})
+    """The working copy is a deep copy."""
+    # Given
+    session = open_for_edit(mock_data_access, draft_id, creator, SESSION_ID, now=NOW)
+
+    # When
+    working_copy(session.document).smes.append({"name": "X"})
+
+    # Then
     assert len(session.document.smes) == 1

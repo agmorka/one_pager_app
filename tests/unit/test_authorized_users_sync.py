@@ -1,58 +1,53 @@
 """Sync of one_pager_authorized_users with the Owner/SMEs on save (Backend §11)."""
 
-from datetime import UTC, datetime, timedelta
-
 import pytest
 
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
-from onepagerapp.editing import (
-    SaveError,
-    diff_authorized_users,
-    open_for_edit,
-    save_draft,
-    working_copy,
-)
-from onepagerapp.models import (
-    AuthorizedUser,
-    CurrentUser,
-    NewOnePagerInput,
-    OnePagerDocument,
-)
+from onepagerapp.editing import SaveError, diff_authorized_users, open_for_edit
+from onepagerapp.models import AuthorizedUser, CurrentUser, OnePagerDocument
 from onepagerapp.permissions import PermissionDeniedError
-from onepagerapp.workflow import create_one_pager
-from tests.users import CREATOR_ROLES, make_user
-
-NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
+from tests.helpers import LATER, failing_for_event, make_user, save
 
 
 def _user(initials: str, role: str = "sme", name: str = "N") -> AuthorizedUser:
+    """Return an authorized user of OP-0003."""
     return AuthorizedUser("OP-0003", initials, name, f"{initials}@bec.dk", role)
 
 
 def _rows(data_access: MockDataAccess) -> dict[str, str]:
-    return {
-        u.user_initials: u.role for u in data_access.get_authorized_users("OP-0003")
-    }
+    """Return the stored authorized users of OP-0003 as initials → role."""
+    users = data_access.get_authorized_users("OP-0003")
+    return {u.user_initials: u.role for u in users}
 
 
 @pytest.mark.unit
-def test__diff__insert_update_delete() -> None:
+def test__added_renamed_and_removed_users__diff__insert_update_delete() -> None:
+    """New users are inserted, changed ones updated and missing ones deleted."""
+    # Given
     current = [_user("MJO", "owner"), _user("DPR"), _user("OLD")]
     desired = [_user("MJO", "owner"), _user("DPR", name="Renamed"), _user("NEW")]
 
+    # When
     diff = diff_authorized_users(current, desired)
 
+    # Then
     assert [u.user_initials for u in diff.inserts] == ["NEW"]
     assert [u.user_initials for u in diff.updates] == ["DPR"]
     assert diff.deletes == ["OLD"]
 
 
 @pytest.mark.unit
-def test__diff__role_change_is_an_update() -> None:
-    diff = diff_authorized_users(
-        [_user("MJO", "owner"), _user("DPR")], [_user("DPR", "owner"), _user("MJO")]
-    )
+def test__roles_swapped__diff__updates_only() -> None:
+    """A role change is an update."""
+    # Given
+    current = [_user("MJO", "owner"), _user("DPR")]
+    desired = [_user("DPR", "owner"), _user("MJO")]
+
+    # When
+    diff = diff_authorized_users(current, desired)
+
+    # Then
     assert {u.user_initials: u.role for u in diff.updates} == {
         "DPR": "owner",
         "MJO": "sme",
@@ -62,109 +57,122 @@ def test__diff__role_change_is_an_update() -> None:
 
 
 @pytest.mark.unit
-def test__diff__no_change_is_empty() -> None:
+def test__same_users__diff__empty() -> None:
+    """Nothing to do when the users did not change."""
+    # Given
     users = [_user("MJO", "owner"), _user("DPR")]
-    assert diff_authorized_users(users, list(users)).empty
 
+    # When
+    diff = diff_authorized_users(users, list(users))
 
-def _save(data_access, store, doc, user, now=NOW + timedelta(minutes=1)):  # noqa: ANN001, ANN202
-    return save_draft(
-        data_access,
-        store,
-        "OP-0003",
-        doc,
-        "Changed the team",
-        user,
-        "s1",
-        allowed_domains=["Customer"],
-        allowed_types=["Foundational"],
-        now=now,
-    )
-
-
-@pytest.fixture
-def opened(
-    valid_input: NewOnePagerInput,
-    creator: CurrentUser,
-    mock_data_access: MockDataAccess,
-    document_store: OnePagerDocumentStore,
-) -> OnePagerDocument:
-    create_one_pager(
-        valid_input,
-        creator,
-        mock_data_access,
-        document_store,
-        now=NOW,
-        roles=CREATOR_ROLES,
-    )
-    doc = open_for_edit(mock_data_access, "OP-0003", creator, "s1", now=NOW).document
-    return working_copy(doc)
+    # Then
+    assert diff.empty
 
 
 @pytest.mark.unit
-def test__save__syncs_authorized_users(
-    opened,  # noqa: ANN001
+def test__sme_replaced__save__authorized_users_follow(
+    opened_draft: OnePagerDocument,
     creator: CurrentUser,
     mock_data_access: MockDataAccess,
     document_store: OnePagerDocumentStore,
 ) -> None:
+    """Saving replaces the SME rows; initials are upper-cased."""
+    # Given
     assert _rows(mock_data_access) == {"MJO": "owner", "DPR": "sme"}
-    opened.smes = [
-        {"name": "Kim Hansen", "initials": "kha", "email": "kha@bec.dk"},
-    ]
+    opened_draft.smes = [{"name": "Kim Hansen", "initials": "kha", "email": "k@b.dk"}]
 
-    assert _save(mock_data_access, document_store, opened, creator).ok
+    # When
+    result = save(mock_data_access, document_store, opened_draft, creator)
 
+    # Then
+    assert result.ok
     assert _rows(mock_data_access) == {"MJO": "owner", "KHA": "sme"}
 
 
+def _hand_over_to_dpr(document: OnePagerDocument) -> None:
+    """Make DPR the Owner and remove every SME (MJO leaves the One Pager)."""
+    document.owner_name, document.owner_initials = "Diana Prince", "DPR"
+    document.owner_email = "diana@bec.dk"
+    document.smes = []
+
+
 @pytest.mark.unit
-def test__save__removed_user_loses_edit_access(
-    opened,  # noqa: ANN001
+def test__owner_hands_over_and_leaves__save__only_new_owner_authorized(
+    opened_draft: OnePagerDocument,
     creator: CurrentUser,
     mock_data_access: MockDataAccess,
     document_store: OnePagerDocumentStore,
 ) -> None:
-    # MJO hands the One Pager over to DPR and leaves the SME list.
-    opened.owner_name, opened.owner_initials = "Diana Prince", "DPR"
-    opened.owner_email = "diana@bec.dk"
-    opened.smes = []
-    assert _save(mock_data_access, document_store, opened, creator).ok
+    """The former Owner's row is removed."""
+    # Given
+    _hand_over_to_dpr(opened_draft)
+
+    # When
+    result = save(mock_data_access, document_store, opened_draft, creator)
+
+    # Then
+    assert result.ok
     assert _rows(mock_data_access) == {"DPR": "owner"}
-
-    with pytest.raises(PermissionDeniedError):
-        _save(mock_data_access, document_store, opened, creator)
-
-    sme = make_user("DPR")
-    assert open_for_edit(
-        mock_data_access, "OP-0003", sme, "s2", now=NOW + timedelta(hours=1)
-    ).lock.acquired
-
-
-class _ChangeLogFails(MockDataAccess):
-    def append_change_log(self, entry) -> None:  # noqa: ANN001
-        if entry.event_type == "content_save":
-            msg = "boom"
-            raise RuntimeError(msg)
-        super().append_change_log(entry)
 
 
 @pytest.mark.unit
-def test__save__failure_restores_authorized_users(
-    valid_input: NewOnePagerInput,
+def test__former_owner_removed__save_again__raises_permission_denied(
+    opened_draft: OnePagerDocument,
     creator: CurrentUser,
+    mock_data_access: MockDataAccess,
     document_store: OnePagerDocumentStore,
 ) -> None:
-    data_access = _ChangeLogFails(document_store)
-    create_one_pager(
-        valid_input, creator, data_access, document_store, now=NOW, roles=CREATOR_ROLES
-    )
-    doc = working_copy(
-        open_for_edit(data_access, "OP-0003", creator, "s1", now=NOW).document
-    )
-    doc.smes = [{"name": "Kim Hansen", "initials": "KHA", "email": "kha@bec.dk"}]
+    """A user removed from the One Pager loses edit access at once."""
+    # Given
+    _hand_over_to_dpr(opened_draft)
+    save(mock_data_access, document_store, opened_draft, creator)
 
+    # When / Then
+    with pytest.raises(PermissionDeniedError):
+        save(mock_data_access, document_store, opened_draft, creator)
+
+
+@pytest.mark.unit
+def test__new_owner_after_hand_over__open_for_edit__lock_acquired(
+    opened_draft: OnePagerDocument,
+    creator: CurrentUser,
+    mock_data_access: MockDataAccess,
+    document_store: OnePagerDocumentStore,
+) -> None:
+    """The new Owner can edit once the former Owner closed the editor."""
+    # Given
+    _hand_over_to_dpr(opened_draft)
+    save(mock_data_access, document_store, opened_draft, creator)
+    later = LATER.replace(hour=LATER.hour + 1)
+
+    # When
+    session = open_for_edit(
+        mock_data_access, "OP-0003", make_user("DPR"), "s2", now=later
+    )
+
+    # Then
+    assert session.lock.acquired
+
+
+@pytest.mark.unit
+def test__change_log_write_fails__save__authorized_users_restored(
+    opened_draft: OnePagerDocument,
+    creator: CurrentUser,
+    mock_data_access: MockDataAccess,
+    document_store: OnePagerDocumentStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed save rolls the authorized users back."""
+    # Given
+    original = mock_data_access.append_change_log
+    monkeypatch.setattr(
+        mock_data_access,
+        "append_change_log",
+        failing_for_event(original, "content_save"),
+    )
+    opened_draft.smes = [{"name": "Kim Hansen", "initials": "KHA", "email": "k@b.dk"}]
+
+    # When / Then
     with pytest.raises(SaveError):
-        _save(data_access, document_store, doc, creator)
-
-    assert _rows(data_access) == {"MJO": "owner", "DPR": "sme"}
+        save(mock_data_access, document_store, opened_draft, creator)
+    assert _rows(mock_data_access) == {"MJO": "owner", "DPR": "sme"}

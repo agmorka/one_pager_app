@@ -18,10 +18,9 @@ from onepagerapp.permissions import (
     require_identity,
 )
 from onepagerapp.state_machine import Actor
-from tests.users import CREATOR_ROLES, make_user
+from tests.helpers import CREATOR_ROLES, UNRECOGNISED, make_user
 
 ALL_ROLES = frozenset({Actor.APPROVER, Actor.ADMIN})
-UNRECOGNISED = CurrentUser("guest@example.com", "", "Guest")
 
 # Placeholders replaced by the test's data access, document store and user.
 DA, STORE, USER = object(), object(), object()
@@ -97,7 +96,7 @@ ENTRY_POINTS: list[tuple[str, Callable[..., object], tuple, dict]] = [
     ENTRY_POINTS,
     ids=[entry[0] for entry in ENTRY_POINTS],
 )
-def test__entry_point__refuses_unrecognised_user(
+def test__unrecognised_user__service_entry_point__refused_logged_nothing_written(
     action: str,
     entry_point: Callable[..., object],
     args: tuple,
@@ -107,13 +106,15 @@ def test__entry_point__refuses_unrecognised_user(
     document_store: OnePagerDocumentStore,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """Every entry point refuses, logs the denial and changes no row or lock."""
+    # Given
     placeholders = {id(DA): mock_data_access, id(STORE): document_store, id(USER): user}
     rows_before = dict(mock_data_access._status_rows)
     locks_before = dict(mock_data_access._locks)
 
+    # When / Then
     with pytest.raises(PermissionDeniedError, match="not recognised"):
         entry_point(*(placeholders.get(id(a), a) for a in args), **kwargs)
-
     assert mock_data_access._status_rows == rows_before
     assert mock_data_access._locks == locks_before
     assert any(
@@ -123,15 +124,22 @@ def test__entry_point__refuses_unrecognised_user(
 
 
 @pytest.mark.unit
-def test__require_identity__returns_recognised_user() -> None:
+def test__recognised_user__require_identity__returns_the_user() -> None:
+    """A user with initials passes the check unchanged."""
+    # Given
     user = make_user("X0W")
 
-    assert require_identity(user, "anything") is user
+    # When
+    result = require_identity(user, "anything")
+
+    # Then
+    assert result is user
 
 
 @pytest.mark.unit
-def test__require_identity__message() -> None:
+def test__unrecognised_user__require_identity__raises_with_message() -> None:
+    """The refusal tells the user they are not recognised."""
+    # When / Then
     with pytest.raises(PermissionDeniedError) as raised:
         require_identity(UNRECOGNISED, "anything", "OP-0001")
-
     assert str(raised.value) == UNRECOGNISED_USER_MESSAGE

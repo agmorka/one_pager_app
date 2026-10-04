@@ -29,7 +29,7 @@ from onepagerapp.models import (
     PersonRef,
 )
 from onepagerapp.workflow import create_one_pager
-from tests.users import CREATOR_ROLES, make_user
+from tests.helpers import CREATOR_ROLES, make_user
 
 TEST_OP_ID = "OP-9990"
 TEST_SEQUENCE = "T9"

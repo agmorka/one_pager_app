@@ -1,7 +1,5 @@
 """Use Case links (Backend §9), BR IDs and saving a complete document."""
 
-from datetime import UTC, datetime, timedelta
-
 import pytest
 
 from onepagerapp.data_access.mock import MockDataAccess
@@ -10,69 +8,35 @@ from onepagerapp.documents.serialization import document_to_dict
 from onepagerapp.editing import (
     assign_requirement_id,
     link_use_case,
-    open_for_edit,
-    save_draft,
     unlink_use_case,
     validate_new_use_case_links,
-    working_copy,
 )
-from onepagerapp.models import CurrentUser, NewOnePagerInput, OnePagerDocument
+from onepagerapp.models import CurrentUser, OnePagerDocument
 from onepagerapp.permissions import PermissionDeniedError
 from onepagerapp.validation import validate_strict
-from onepagerapp.workflow import create_one_pager
-from tests.users import CREATOR_ROLES, make_user
-
-NOW = datetime(2026, 9, 29, 10, 0, tzinfo=UTC)
-
-
-@pytest.fixture
-def doc(
-    valid_input: NewOnePagerInput,
-    creator: CurrentUser,
-    mock_data_access: MockDataAccess,
-    document_store: OnePagerDocumentStore,
-) -> OnePagerDocument:
-    create_one_pager(
-        valid_input,
-        creator,
-        mock_data_access,
-        document_store,
-        now=NOW,
-        roles=CREATOR_ROLES,
-    )
-    opened = open_for_edit(mock_data_access, "OP-0003", creator, "s1", now=NOW)
-    return working_copy(opened.document)
-
-
-def _save(data_access, store, doc, user):  # noqa: ANN001, ANN202
-    return save_draft(
-        data_access,
-        store,
-        "OP-0003",
-        doc,
-        "Filled in all sections",
-        user,
-        "s1",
-        allowed_domains=["Customer"],
-        allowed_types=["Foundational"],
-        now=NOW + timedelta(minutes=1),
-    )
+from tests.helpers import ALICE, fill_all_sections, save
 
 
 def _deprecate(data_access: MockDataAccess, use_case_id: str) -> None:
+    """Deprecate a seeded Use Case."""
     data_access.set_use_case_deprecated(use_case_id, True, "ABR")
 
 
 @pytest.mark.unit
-def test__validate_new_links__unknown_deprecated_and_duplicates(
+def test__unknown_deprecated_and_duplicate_links__validate_new_links__one_error_each(
     mock_data_access: MockDataAccess,
 ) -> None:
+    """New links must be unique, existing and not deprecated."""
+    # Given
     _deprecate(mock_data_access, "UC-003")
+
+    # When
     errors = validate_new_use_case_links(
         mock_data_access, [], ["UC-001", "UC-001", "UC-003", "UC-999"]
     )
-    messages = [e.message for e in errors]
-    assert messages == [
+
+    # Then
+    assert [e.message for e in errors] == [
         "UC-001 is linked twice.",
         "UC-003 is deprecated and cannot be linked.",
         "UC-999 does not exist.",
@@ -80,144 +44,170 @@ def test__validate_new_links__unknown_deprecated_and_duplicates(
 
 
 @pytest.mark.unit
-def test__validate_new_links__existing_deprecated_link_stays(
+def test__existing_link_to_deprecated_use_case__validate_new_links__no_error(
     mock_data_access: MockDataAccess,
 ) -> None:
+    """A link made before the deprecation may stay."""
+    # Given
     _deprecate(mock_data_access, "UC-002")
-    assert validate_new_use_case_links(mock_data_access, ["UC-002"], ["UC-002"]) == []
+
+    # When
+    errors = validate_new_use_case_links(mock_data_access, ["UC-002"], ["UC-002"])
+
+    # Then
+    assert errors == []
 
 
 @pytest.mark.unit
-def test__link_and_unlink__require_owner_or_sme(
-    doc: OnePagerDocument, creator: CurrentUser, mock_data_access: MockDataAccess
+def test__owners_draft__link_use_case__reference_recorded(
+    draft_id: str, creator: CurrentUser, mock_data_access: MockDataAccess
 ) -> None:
-    link_use_case(mock_data_access, "OP-0003", "UC-001", creator)
-    assert mock_data_access.get_linked_use_case_ids("OP-0003") == ["UC-001"]
-    assert "OP-0003" in mock_data_access.get_use_case_references("UC-001")
+    """Linking records the reference on both sides."""
+    # When
+    link_use_case(mock_data_access, draft_id, "UC-001", creator)
 
-    stranger = make_user("ABR", "Alice Brown")
-    with pytest.raises(PermissionDeniedError):
-        link_use_case(mock_data_access, "OP-0003", "UC-002", stranger)
-    with pytest.raises(PermissionDeniedError):
-        unlink_use_case(mock_data_access, "OP-0003", "UC-001", stranger)
-
-    unlink_use_case(mock_data_access, "OP-0003", "UC-001", creator)
-    assert mock_data_access.get_linked_use_case_ids("OP-0003") == []
+    # Then
+    assert mock_data_access.get_linked_use_case_ids(draft_id) == ["UC-001"]
+    assert draft_id in mock_data_access.get_use_case_references("UC-001")
 
 
 @pytest.mark.unit
-def test__link__refuses_deprecated(
-    doc: OnePagerDocument, creator: CurrentUser, mock_data_access: MockDataAccess
+def test__linked_use_case__unlink_use_case__reference_removed(
+    draft_id: str, creator: CurrentUser, mock_data_access: MockDataAccess
 ) -> None:
+    """Unlinking removes the reference."""
+    # Given
+    link_use_case(mock_data_access, draft_id, "UC-001", creator)
+
+    # When
+    unlink_use_case(mock_data_access, draft_id, "UC-001", creator)
+
+    # Then
+    assert mock_data_access.get_linked_use_case_ids(draft_id) == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("change", [link_use_case, unlink_use_case])
+def test__user_not_owner_or_sme__change_link__raises_permission_denied(
+    draft_id: str, mock_data_access: MockDataAccess, change: object
+) -> None:
+    """Only the Owner or an SME can change Use Case links."""
+    # When / Then
+    with pytest.raises(PermissionDeniedError):
+        change(mock_data_access, draft_id, "UC-001", ALICE)  # type: ignore[operator]
+
+
+@pytest.mark.unit
+def test__deprecated_use_case__link_use_case__raises_value_error(
+    draft_id: str, creator: CurrentUser, mock_data_access: MockDataAccess
+) -> None:
+    """A deprecated Use Case cannot be linked."""
+    # Given
     _deprecate(mock_data_access, "UC-001")
+
+    # When / Then
     with pytest.raises(ValueError, match="deprecated"):
-        link_use_case(mock_data_access, "OP-0003", "UC-001", creator)
+        link_use_case(mock_data_access, draft_id, "UC-001", creator)
 
 
 @pytest.mark.unit
-def test__assign_requirement_id__uses_global_counter(
+def test__two_requirements__assign_requirement_id__global_counter_ids(
     mock_data_access: MockDataAccess,
 ) -> None:
+    """Requirement IDs come from one global counter and are set on the item."""
+    # Given
     first, second = {"requirement": "a"}, {"requirement": "b"}
-    assert assign_requirement_id(mock_data_access, first) == "BR-001"
-    assert assign_requirement_id(mock_data_access, second) == "BR-002"
+
+    # When
+    ids = [
+        assign_requirement_id(mock_data_access, first),
+        assign_requirement_id(mock_data_access, second),
+    ]
+
+    # Then
+    assert ids == ["BR-001", "BR-002"]
     assert first["id"] == "BR-001"
 
 
 @pytest.mark.unit
-def test__save__syncs_use_case_references(
-    doc: OnePagerDocument,
+def test__use_cases_in_document__save__references_added(
+    opened_draft: OnePagerDocument,
     creator: CurrentUser,
     mock_data_access: MockDataAccess,
     document_store: OnePagerDocumentStore,
 ) -> None:
-    doc.use_cases = [{"useCaseId": "UC-001"}, {"useCaseId": "UC-002"}]
-    assert _save(mock_data_access, document_store, doc, creator).ok
+    """Saving links the Use Cases of the document."""
+    # Given
+    opened_draft.use_cases = [{"useCaseId": "UC-001"}, {"useCaseId": "UC-002"}]
+
+    # When
+    result = save(mock_data_access, document_store, opened_draft, creator)
+
+    # Then
+    assert result.ok
     assert mock_data_access.get_linked_use_case_ids("OP-0003") == ["UC-001", "UC-002"]
 
-    doc.use_cases = [{"useCaseId": "UC-002"}]
-    assert _save(mock_data_access, document_store, doc, creator).ok
+
+@pytest.mark.unit
+def test__use_case_dropped_from_document__save__reference_removed(
+    opened_draft: OnePagerDocument,
+    creator: CurrentUser,
+    mock_data_access: MockDataAccess,
+    document_store: OnePagerDocumentStore,
+) -> None:
+    """Saving unlinks a Use Case that is no longer in the document."""
+    # Given
+    opened_draft.use_cases = [{"useCaseId": "UC-001"}, {"useCaseId": "UC-002"}]
+    assert save(mock_data_access, document_store, opened_draft, creator).ok
+    opened_draft.use_cases = [{"useCaseId": "UC-002"}]
+
+    # When
+    result = save(mock_data_access, document_store, opened_draft, creator)
+
+    # Then
+    assert result.ok
     assert mock_data_access.get_linked_use_case_ids("OP-0003") == ["UC-002"]
 
 
 @pytest.mark.unit
-def test__save__refuses_newly_linked_deprecated_use_case(
-    doc: OnePagerDocument,
+def test__newly_linked_deprecated_use_case__save__returns_error_and_no_link(
+    opened_draft: OnePagerDocument,
     creator: CurrentUser,
     mock_data_access: MockDataAccess,
     document_store: OnePagerDocumentStore,
 ) -> None:
+    """A save that newly links a deprecated Use Case is refused."""
+    # Given
     _deprecate(mock_data_access, "UC-001")
-    doc.use_cases = [{"useCaseId": "UC-001"}]
-    result = _save(mock_data_access, document_store, doc, creator)
+    opened_draft.use_cases = [{"useCaseId": "UC-001"}]
+
+    # When
+    result = save(mock_data_access, document_store, opened_draft, creator)
+
+    # Then
     assert [e.field_path for e in result.errors] == ["useCases"]
     assert mock_data_access.get_linked_use_case_ids("OP-0003") == []
 
 
-def fill_all_sections(doc: OnePagerDocument) -> None:
-    """Content that satisfies the strict tier, as the editor tabs produce it."""
-    doc.business_problem_statement = "Customer data is scattered."
-    doc.use_cases = [{"useCaseId": "UC-001"}]
-    doc.business_requirements = [
-        {"id": "BR-001", "requirement": "Daily refresh", "priority": "High"}
-    ]
-    doc.data_sources = [{"name": "CRM", "dataProvided": "Customer master data"}]
-    doc.data_product_preview = [
-        {
-            "elementName": "customer_id",
-            "dataType": "STRING",
-            "isPrimaryKey": True,
-            "containsPII": False,
-            "isCriticalDataElement": True,
-            "cdeCriticalityTiering": "Tier 1",
-            "description": "Customer key",
-            "useCaseLinks": ["UC-001"],
-        },
-        {
-            "elementName": "segment",
-            "dataType": "STRING",
-            "isPrimaryKey": False,
-            "containsPII": False,
-            "isCriticalDataElement": False,
-            "description": "Segment",
-        },
-    ]
-    doc.data_classification = {
-        "classificationLevel": "Internal",
-        "containsPII": True,
-        "containsSensitiveData": False,
-    }
-    doc.retention_requirements = [
-        {"dataCategory": "Customer", "retentionPeriod": "5 years"}
-    ]
-    doc.data_governance_artifacts = {
-        "businessConcepts": [{"name": "Customer", "definition": "A client"}],
-        "cdeQuality": [
-            {"elementName": "customer_id", "dimension": "Uniqueness", "rule": "Unique"}
-        ],
-        "cdeLineage": [],
-    }
-    doc.out_of_scope = ["Prospects"]
-    doc.open_questions = [{"question": "Which CRM?", "status": "Open"}]
-    doc.assumptions = ["CRM is the master"]
-
-
 @pytest.mark.unit
-def test__save__complete_document_passes_strict_validation(
-    doc: OnePagerDocument,
+def test__all_sections_filled__save__stored_document_passes_strict(
+    opened_draft: OnePagerDocument,
     creator: CurrentUser,
     mock_data_access: MockDataAccess,
     document_store: OnePagerDocumentStore,
 ) -> None:
-    fill_all_sections(doc)
+    """A complete document is stored with every section; empty lists drop out."""
+    # Given
+    fill_all_sections(opened_draft)
 
-    result = _save(mock_data_access, document_store, doc, creator)
+    # When
+    result = save(mock_data_access, document_store, opened_draft, creator)
 
+    # Then
     assert result.ok
     stored = document_store.read("OP-0003", result.version)
     assert validate_strict(document_to_dict(stored)) == []
     assert stored.out_of_scope == ["Prospects"]
-    assert stored.data_governance_artifacts["cdeQuality"][0]["dimension"] == (
-        "Uniqueness"
-    )
-    assert "cdeLineage" not in stored.data_governance_artifacts
+    governance = stored.data_governance_artifacts
+    assert governance["cdeQuality"][0]["dimension"] == "Uniqueness"
+    assert "cdeLineage" not in governance

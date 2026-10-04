@@ -1,12 +1,9 @@
 """AppTest smoke tests for the Preview page states (UI_Design.md §4.4)."""
 
-from dataclasses import replace
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
-from typing import NoReturn
+from datetime import timedelta
+from typing import Any
 
 import pytest
-import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from onepagerapp.data_access.connection import (
@@ -14,118 +11,190 @@ from onepagerapp.data_access.connection import (
     SessionExpiredError,
 )
 from onepagerapp.data_access.mock import MockDataAccess
-from onepagerapp.documents import OnePagerDocumentStore
-from onepagerapp.models import CurrentUser, LockInfo
-from onepagerapp.state_machine import Actor
-from tests.conftest import FIXTURES_DIR
-from tests.users import make_user
+from onepagerapp.models import CurrentUser
+from onepagerapp.workflow import reject_one_pager
+from tests.helpers import (
+    ALICE,
+    APPROVED_ID,
+    APPROVER,
+    APPROVER_ROLES,
+    BOB,
+    DIANA,
+    IN_REVIEW_ID,
+    MAJA,
+    failing,
+    live_lock,
+    page_app,
+    update_status_row,
+)
 
-APP_DIR = Path(__file__).resolve().parents[2] / "app"
-
-
-class _FailingDataAccess(MockDataAccess):
-    def get_one_pager(self, one_pager_id: str) -> NoReturn:  # noqa: ARG002
-        msg = "warehouse 4efe1f3d3f86e320 unreachable: secret internals"
-        raise RuntimeError(msg)
-
-
-@pytest.fixture
-def switched(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    targets: list[str] = []
-    monkeypatch.setattr(st, "switch_page", targets.append)
-    monkeypatch.syspath_prepend(str(APP_DIR))
-    return targets
+LOAD_ERROR = "Couldn't load this One Pager. Please retry."
 
 
-class _DeniedDataAccess(MockDataAccess):
-    def get_one_pager(self, one_pager_id: str) -> NoReturn:  # noqa: ARG002
-        msg = "Your role does not have access to table cat.sch.one_pager_status."
-        raise ReadAccessDeniedError(msg)
+def _preview(
+    data_access: MockDataAccess, one_pager_id: str | None = APPROVED_ID
+) -> AppTest:
+    """Return the Preview page for Alice (no group roles) on ``one_pager_id``."""
+    state = {"preview_one_pager_id": one_pager_id} if one_pager_id else {}
+    return page_app("preview.py", data_access, ALICE, frozenset(), **state)
 
 
-class _ExpiredDataAccess(MockDataAccess):
-    def get_one_pager(self, one_pager_id: str) -> NoReturn:  # noqa: ARG002
-        raise SessionExpiredError
+def _review(data_access: MockDataAccess, user: CurrentUser = APPROVER) -> AppTest:
+    """Return the Preview page of OP-0002 in review mode for an Approver."""
+    return page_app(
+        "preview.py",
+        data_access,
+        user,
+        APPROVER_ROLES,
+        preview_one_pager_id=IN_REVIEW_ID,
+        preview_review_mode=IN_REVIEW_ID,
+    )
 
 
-def _services(tmp_path: Path, data_access_cls: type = MockDataAccess) -> dict:
-    store = OnePagerDocumentStore(FIXTURES_DIR, write_path=tmp_path)
-    user = make_user("ABR", "Alice Brown")
-    return {
-        "services_initialized": True,
-        "data_access": data_access_cls(store),
-        "document_store": store,
-        "current_user": user.username,
-        "current_user_info": user,
-    }
+def _expander(at: AppTest, label: str) -> Any:  # noqa: ANN401 - Expander
+    """Return the section expander with ``label``."""
+    return next(e for e in at.expander if e.label == label)
 
 
-def _app(state: dict) -> AppTest:
-    at = AppTest.from_file(str(APP_DIR / "views" / "preview.py"), default_timeout=30)
-    for key, value in state.items():
-        at.session_state[key] = value
-    return at
+def _reject_op_0002(data_access: MockDataAccess) -> None:
+    """Reject OP-0002 with one comment ("Needs work")."""
+    reject_one_pager(
+        data_access, IN_REVIEW_ID, APPROVER, "Needs work", roles=APPROVER_ROLES
+    )
+
+
+# ============================================================================
+# Loading
+# ============================================================================
 
 
 @pytest.mark.unit
-def test__preview__without_id_does_not_default_to_a_one_pager(
-    tmp_path: Path, switched: list[str]
+def test__no_id__open_preview__asks_to_choose_without_default(
+    mock_data_access: MockDataAccess, switched: list[str]
 ) -> None:
-    at = _app(_services(tmp_path)).run()
+    """Without an ID no One Pager is shown by default."""
+    # When
+    at = _preview(mock_data_access, one_pager_id=None).run()
 
+    # Then
     assert not at.exception
     assert "No One Pager selected" in at.info[0].value
     assert "preview_one_pager_id" not in at.session_state
-    assert all(t.value != "OP-0001" for t in at.title)
+    assert all(t.value != APPROVED_ID for t in at.title)
 
+
+@pytest.mark.unit
+def test__no_id__click_go_to_registry__registry_opened(
+    mock_data_access: MockDataAccess, switched: list[str]
+) -> None:
+    """The empty state links to the Registry."""
+    # Given
+    at = _preview(mock_data_access, one_pager_id=None).run()
+
+    # When
     at.button(key="preview_go_to_registry").click().run()
+
+    # Then
     assert switched == ["views/registry.py"]
 
 
 @pytest.mark.unit
-def test__preview__with_id_renders_one_pager(
-    tmp_path: Path, switched: list[str]
+def test__id__open_preview__one_pager_rendered(
+    mock_data_access: MockDataAccess, switched: list[str]
 ) -> None:
-    at = _app({**_services(tmp_path), "preview_one_pager_id": "OP-0001"}).run()
+    """A One Pager renders without errors."""
+    # When
+    at = _preview(mock_data_access).run()
 
+    # Then
     assert not at.exception
     assert not at.error
     assert at.title
 
 
 @pytest.mark.unit
-def test__preview__load_error_is_friendly_with_retry(
-    tmp_path: Path, switched: list[str]
+def test__load_fails__open_preview_and_retry__friendly_error_each_time(
+    mock_data_access: MockDataAccess,
+    switched: list[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    state = {
-        **_services(tmp_path, _FailingDataAccess),
-        "preview_one_pager_id": "OP-0001",
-    }
-    at = _app(state).run()
-
-    assert not at.exception
-    assert at.error[0].value == "Couldn't load this One Pager. Please retry."
+    """A load error hides the internals and Retry tries again."""
+    # Given
+    monkeypatch.setattr(
+        mock_data_access,
+        "get_one_pager",
+        failing("warehouse 4efe1f3d3f86e320 unreachable: secret internals"),
+    )
+    at = _preview(mock_data_access).run()
+    assert at.error[0].value == LOAD_ERROR
     page_text = " ".join(e.value for e in at.error)
     assert "secret internals" not in page_text
     assert "RuntimeError" not in page_text
-
     retry = at.button(key="preview_retry_load")
     assert retry.label == "Retry"
+
+    # When
     retry.click().run()
+
+    # Then
     assert not at.exception
-    assert at.error[0].value == "Couldn't load this One Pager. Please retry."
-
-
-def _expander(at: AppTest, label: str):  # noqa: ANN202
-    return next(e for e in at.expander if e.label == label)
+    assert at.error[0].value == LOAD_ERROR
 
 
 @pytest.mark.unit
-def test__preview__renders_every_content_section(
-    tmp_path: Path, switched: list[str]
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (
+            ReadAccessDeniedError(
+                "Your role does not have access to table cat.sch.one_pager_status."
+            ),
+            "Your role does not have access to table cat.sch.one_pager_status.",
+        ),
+        (
+            SessionExpiredError(),
+            "Your session has expired. Please reload the page.",
+        ),
+    ],
+    ids=["access-denied", "session-expired"],
+)
+def test__user_facing_read_error__open_preview__message_shown(
+    mock_data_access: MockDataAccess,
+    switched: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+    message: str,
 ) -> None:
-    at = _app({**_services(tmp_path), "preview_one_pager_id": "OP-0001"}).run()
+    """Unity Catalog denials and expired sessions are explained as they are."""
 
+    # Given
+    def raise_error(_one_pager_id: str) -> None:
+        raise error
+
+    monkeypatch.setattr(mock_data_access, "get_one_pager", raise_error)
+
+    # When
+    at = _preview(mock_data_access).run()
+
+    # Then
+    assert not at.exception
+    assert at.error[0].value == message
+
+
+# ============================================================================
+# Content
+# ============================================================================
+
+
+@pytest.mark.unit
+def test__complete_one_pager__open_preview__every_section_shown(
+    mock_data_access: MockDataAccess, switched: list[str]
+) -> None:
+    """Each content section has its expander."""
+    # When
+    at = _preview(mock_data_access).run()
+
+    # Then
     assert not at.exception
     labels = [e.label for e in at.expander]
     for label in (
@@ -143,64 +212,76 @@ def test__preview__renders_every_content_section(
 
 
 @pytest.mark.unit
-def test__preview__use_cases_resolved_with_ids(
-    tmp_path: Path, switched: list[str]
+def test__linked_use_cases__open_preview__resolved_with_ids(
+    mock_data_access: MockDataAccess, switched: list[str]
 ) -> None:
-    at = _app({**_services(tmp_path), "preview_one_pager_id": "OP-0001"}).run()
+    """Use Case IDs are resolved to their persona."""
+    # When
+    at = _preview(mock_data_access).run()
 
+    # Then
     table = _expander(at, "Use Cases").dataframe[0].value
     assert list(table["ID"]) == ["UC-001", "UC-002"]
     assert list(table["Persona"]) == ["Analytics Manager", "Compliance Officer"]
 
 
 @pytest.mark.unit
-def test__preview__unknown_use_case_still_shows_its_id(
-    tmp_path: Path, switched: list[str]
+def test__unknown_use_case__open_preview__id_kept_persona_not_available(
+    mock_data_access: MockDataAccess,
+    switched: list[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    services = _services(tmp_path)
-    services["data_access"].get_use_case = lambda _id: None
-    at = _app({**services, "preview_one_pager_id": "OP-0001"}).run()
+    """A Use Case that cannot be read still shows its ID."""
+    # Given
+    monkeypatch.setattr(mock_data_access, "get_use_case", lambda _id: None)
 
+    # When
+    at = _preview(mock_data_access).run()
+
+    # Then
     table = _expander(at, "Use Cases").dataframe[0].value
     assert list(table["ID"]) == ["UC-001", "UC-002"]
     assert set(table["Persona"]) == {"(not available)"}
 
 
 @pytest.mark.unit
-def test__preview__requirement_ids_and_new_sections_shown(
-    tmp_path: Path, switched: list[str]
+def test__v2_document__open_preview__requirement_ids_and_new_sections(
+    mock_data_access: MockDataAccess, switched: list[str]
 ) -> None:
-    at = _app({**_services(tmp_path), "preview_one_pager_id": "OP-0001"}).run()
+    """Requirement IDs, governance, scope and retention tables are shown."""
+    # When
+    at = _preview(mock_data_access).run()
 
+    # Then
     requirements = _expander(at, "Business Requirements").dataframe[0].value
     assert list(requirements["ID"]) == ["BR-001", "BR-002"]
-
     governance = _expander(at, "Governance")
     assert len(governance.dataframe) == 3
     assert list(governance.dataframe[1].value["Dimension"]) == [
         "Uniqueness",
         "Validity",
     ]
-
     scope = _expander(at, "Scope & Questions")
     markdown = " ".join(m.value for m in scope.markdown)
     assert "Corporate customers" in markdown
     assert "SAP ERP remains the system of record" in markdown
     assert list(scope.dataframe[0].value["Status"]) == ["Answered"]
-
     retention = _expander(at, "Classification").dataframe[0].value
     assert list(retention["Legal Basis"]) == ["Danish Bookkeeping Act"]
 
 
 @pytest.mark.unit
-def test__preview__v1_document_uses_legacy_fields(
-    tmp_path: Path, switched: list[str]
+def test__v1_document__open_preview__legacy_fields_shown(
+    mock_data_access: MockDataAccess, switched: list[str]
 ) -> None:
-    services = _services(tmp_path)
-    rows = services["data_access"]._status_rows
-    rows["OP-0001"] = replace(rows["OP-0001"], version="0.2.0")
-    at = _app({**services, "preview_one_pager_id": "OP-0001"}).run()
+    """A v1 version is rendered from its legacy fields."""
+    # Given
+    update_status_row(mock_data_access, APPROVED_ID, version="0.2.0")
 
+    # When
+    at = _preview(mock_data_access).run()
+
+    # Then
     assert not at.exception
     use_cases = _expander(at, "Use Cases").dataframe[0].value
     assert list(use_cases["Persona"]) == ["Analytics Manager", "Compliance Officer"]
@@ -214,106 +295,115 @@ def test__preview__v1_document_uses_legacy_fields(
     assert any("7 years" in m.value for m in classification.markdown)
 
 
-ALICE = make_user("ABR", "Alice Brown")
-MAJA = make_user("MJO")
-
-
-def _lock_services(
-    tmp_path: Path, holder_user: CurrentUser, expires_in: timedelta
-) -> dict:
-    services = _services(tmp_path)
-    now = datetime.now(UTC)
-    services["data_access"]._locks["OP-0001"] = LockInfo(
-        one_pager_id="OP-0001",
-        locked_by_initials=holder_user.initials,
-        locked_by_name=holder_user.display_name,
-        session_id="other-session",
-        acquired_at=now - timedelta(minutes=5),
-        last_heartbeat=now - timedelta(minutes=5),
-        expires_at=now + expires_in,
-    )
-    return {**services, "preview_one_pager_id": "OP-0001"}
+# ============================================================================
+# Locks
+# ============================================================================
 
 
 @pytest.mark.unit
-def test__preview__own_lock_can_be_released(
-    tmp_path: Path, switched: list[str]
+def test__own_lock__click_release__lock_removed(
+    mock_data_access: MockDataAccess, switched: list[str]
 ) -> None:
-    state = _lock_services(tmp_path, ALICE, timedelta(minutes=25))
-    at = _app(state).run()
-
-    assert not at.exception
+    """The holder sees their lock and can release it."""
+    # Given
+    mock_data_access._locks[APPROVED_ID] = live_lock(
+        APPROVED_ID, ALICE, timedelta(minutes=25)
+    )
+    at = _preview(mock_data_access).run()
     assert any("Locked by you" in i.value for i in at.info)
+
+    # When
     at.button(key="preview_release_lock").click().run()
 
+    # Then
     assert not at.exception
-    assert state["data_access"].get_lock("OP-0001") is None
+    assert mock_data_access.get_lock(APPROVED_ID) is None
     assert "Your lock was released." in [s.value for s in at.success]
     assert not any("Locked by you" in i.value for i in at.info)
 
 
 @pytest.mark.unit
-def test__preview__lock_of_other_user_is_read_only(
-    tmp_path: Path, switched: list[str]
+def test__lock_of_other_user__open_preview__warning_without_release(
+    mock_data_access: MockDataAccess, switched: list[str]
 ) -> None:
-    state = _lock_services(tmp_path, MAJA, timedelta(minutes=25))
-    at = _app(state).run()
+    """Another user's lock is shown read-only."""
+    # Given
+    mock_data_access._locks[APPROVED_ID] = live_lock(
+        APPROVED_ID, MAJA, timedelta(minutes=25)
+    )
 
+    # When
+    at = _preview(mock_data_access).run()
+
+    # Then
     assert not at.exception
     assert any("Locked by MJO** (MJO)" in w.value for w in at.warning)
     assert not [b for b in at.button if b.key == "preview_release_lock"]
 
 
 @pytest.mark.unit
-def test__preview__expired_lock_is_not_shown(
-    tmp_path: Path, switched: list[str]
+def test__expired_lock__open_preview__not_shown(
+    mock_data_access: MockDataAccess, switched: list[str]
 ) -> None:
-    state = _lock_services(tmp_path, MAJA, -timedelta(minutes=1))
-    at = _app(state).run()
+    """An expired lock is ignored."""
+    # Given
+    mock_data_access._locks[APPROVED_ID] = live_lock(
+        APPROVED_ID, MAJA, -timedelta(minutes=1)
+    )
 
+    # When
+    at = _preview(mock_data_access).run()
+
+    # Then
     assert not at.exception
     assert not [w for w in at.warning if "Locked by" in w.value]
 
 
-APPROVER = make_user("CJO")
-
-
-def _review_services(tmp_path: Path, user: CurrentUser = APPROVER) -> dict:
-    services = _services(tmp_path)
-    return {
-        **services,
-        "current_user": user.username,
-        "current_user_info": user,
-        "current_user_roles": frozenset({Actor.APPROVER}),
-        "preview_one_pager_id": "OP-0002",
-        "preview_review_mode": "OP-0002",
-    }
+# ============================================================================
+# Review mode
+# ============================================================================
 
 
 @pytest.mark.unit
-def test__preview__review_mode_for_approver(
-    tmp_path: Path, switched: list[str]
+def test__approver_in_review_mode__open_preview__review_actions_enabled(
+    mock_data_access: MockDataAccess, switched: list[str]
 ) -> None:
-    at = _app(_review_services(tmp_path)).run()
+    """An Approver gets Reject and Approve in review mode."""
+    # When
+    at = _review(mock_data_access).run()
 
+    # Then
     assert not at.exception
     assert any("Review mode" in i.value for i in at.info)
-    keys = {b.key for b in at.button}
-    assert {"preview_reject", "preview_approve"} <= keys
+    assert {"preview_reject", "preview_approve"} <= {b.key for b in at.button}
     assert not at.button(key="preview_reject").disabled
 
+
+@pytest.mark.unit
+def test__review_mode__click_back_to_queue__review_page_and_mode_left(
+    mock_data_access: MockDataAccess, switched: list[str]
+) -> None:
+    """Back to queue leaves review mode."""
+    # Given
+    at = _review(mock_data_access).run()
+
+    # When
     at.button(key="preview_back_to_queue").click().run()
+
+    # Then
     assert switched == ["views/review.py"]
     assert "preview_review_mode" not in at.session_state
 
 
 @pytest.mark.unit
-def test__preview__no_review_actions_for_owner_or_sme(
-    tmp_path: Path, switched: list[str]
+def test__sme_in_review_mode__open_preview__no_review_actions(
+    mock_data_access: MockDataAccess, switched: list[str]
 ) -> None:
-    sme = make_user("DPI", "Diana Prince")  # SME of OP-0002
-    at = _app(_review_services(tmp_path, sme)).run()
+    """The SME of the One Pager cannot review it."""
+    # When
+    at = _review(mock_data_access, DIANA).run()
 
+    # Then
     assert not at.exception
     keys = {b.key for b in at.button}
     assert "preview_reject" not in keys
@@ -321,107 +411,90 @@ def test__preview__no_review_actions_for_owner_or_sme(
 
 
 @pytest.mark.unit
-def test__preview__reject_opens_the_dialog(tmp_path: Path, switched: list[str]) -> None:
-    at = _app(_review_services(tmp_path)).run()
+def test__review_mode__click_reject__reason_dialog_open(
+    mock_data_access: MockDataAccess, switched: list[str]
+) -> None:
+    """Reject asks for a reason."""
+    # Given
+    at = _review(mock_data_access).run()
+
+    # When
     at.button(key="preview_reject").click().run()
 
+    # Then
     assert not at.exception
-    assert at.text_area(key="preview_reject_reason")  # the dialog is open
+    assert at.text_area(key="preview_reject_reason")
 
 
 @pytest.mark.unit
-def test__preview__approve_opens_the_dialog(
-    tmp_path: Path, switched: list[str]
+def test__review_mode__click_approve__dialog_shows_new_version_and_dp(
+    mock_data_access: MockDataAccess, switched: list[str]
 ) -> None:
-    at = _app(_review_services(tmp_path)).run()
+    """Approve shows what will happen before confirming."""
+    # Given
+    at = _review(mock_data_access).run()
     assert not at.button(key="preview_approve").disabled
+
+    # When
     at.button(key="preview_approve").click().run()
 
+    # Then
     assert not at.exception
-    assert any("v1.0.0" in m.value for m in at.markdown)  # the dialog is open
+    assert any("v1.0.0" in m.value for m in at.markdown)
     assert any("Ready for Development" in m.value for m in at.markdown)
 
 
 @pytest.mark.unit
-def test__preview__add_comment_opens_the_dialog(
-    tmp_path: Path, switched: list[str]
+def test__review_mode__click_add_comment__dialog_on_whole_document(
+    mock_data_access: MockDataAccess, switched: list[str]
 ) -> None:
-    at = _app(_review_services(tmp_path)).run()
+    """A new comment defaults to the whole document."""
+    # Given
+    at = _review(mock_data_access).run()
+
+    # When
     at.button(key="preview_add_comment").click().run()
 
+    # Then
     assert not at.exception
-    assert at.selectbox(key="preview_comment_section").value is None  # Whole document
+    assert at.selectbox(key="preview_comment_section").value is None
     assert at.text_area(key="preview_comment_text")
 
 
 @pytest.mark.unit
-def test__preview__owner_resolves_review_comments(
-    tmp_path: Path, switched: list[str]
+def test__rejected_one_pager__owner_clicks_resolve__comment_resolved(
+    mock_data_access: MockDataAccess, switched: list[str]
 ) -> None:
-    from onepagerapp.workflow import reject_one_pager  # noqa: PLC0415
-
-    state = _review_services(tmp_path, make_user("BSM", "Bob Smith"))  # Owner
-    data_access = state["data_access"]
-    approver = APPROVER
-    reject_one_pager(
-        data_access, "OP-0002", approver, "Needs work", roles={Actor.APPROVER}
-    )
-    [comment] = data_access.get_review_comments("OP-0002")
-
-    at = _app(state).run()
-    assert not at.exception
+    """The Owner resolves a review comment on the Preview."""
+    # Given
+    _reject_op_0002(mock_data_access)
+    [comment] = mock_data_access.get_review_comments(IN_REVIEW_ID)
+    at = _review(mock_data_access, BOB).run()
     resolve = at.button(key=f"preview_resolve_{comment.id}")
     assert not resolve.disabled
+
+    # When
     resolve.click().run()
 
+    # Then
     assert not at.exception
-    assert data_access.get_review_comments("OP-0002")[0].resolved_by == "BSM"
+    assert mock_data_access.get_review_comments(IN_REVIEW_ID)[0].resolved_by == "BSM"
     assert "The comment was marked as resolved." in [s.value for s in at.success]
     assert not [b for b in at.button if b.key == f"preview_resolve_{comment.id}"]
 
 
 @pytest.mark.unit
-def test__preview__viewers_cannot_resolve(tmp_path: Path, switched: list[str]) -> None:
-    from onepagerapp.workflow import reject_one_pager  # noqa: PLC0415
+def test__rejected_one_pager__viewer_opens_preview__comments_without_resolve(
+    mock_data_access: MockDataAccess, switched: list[str]
+) -> None:
+    """Somebody who is neither Owner nor SME sees but cannot resolve comments."""
+    # Given
+    _reject_op_0002(mock_data_access)
 
-    state = _review_services(tmp_path, MAJA)  # neither Owner nor SME
-    reject_one_pager(
-        state["data_access"],
-        "OP-0002",
-        APPROVER,
-        "Needs work",
-        roles={Actor.APPROVER},
-    )
-    at = _app(state).run()
+    # When
+    at = _review(mock_data_access, MAJA).run()
 
+    # Then
     assert not at.exception
     assert not [b for b in at.button if str(b.key).startswith("preview_resolve_")]
     assert any("Unresolved" in i.value for i in at.info)
-
-
-@pytest.mark.unit
-def test__preview__read_refused_by_unity_catalog_says_so(
-    tmp_path: Path, switched: list[str]
-) -> None:
-    state = _services(tmp_path, _DeniedDataAccess)
-    state["preview_one_pager_id"] = "OP-0001"
-
-    at = _app(state).run()
-
-    assert not at.exception
-    assert at.error[0].value == (
-        "Your role does not have access to table cat.sch.one_pager_status."
-    )
-
-
-@pytest.mark.unit
-def test__preview__expired_session_asks_to_reload(
-    tmp_path: Path, switched: list[str]
-) -> None:
-    state = _services(tmp_path, _ExpiredDataAccess)
-    state["preview_one_pager_id"] = "OP-0001"
-
-    at = _app(state).run()
-
-    assert not at.exception
-    assert at.error[0].value == "Your session has expired. Please reload the page."

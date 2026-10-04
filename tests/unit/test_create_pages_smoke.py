@@ -1,82 +1,74 @@
 """AppTest smoke tests for the create flow in local-mock mode.
 
-Streamlit 1.38's AppTest does not render pages registered via st.navigation,
-so each page script is run on its own with the services injected into session
-state (as app.py would), and st.switch_page is replaced by a recorder.
+Each page script runs on its own with the services injected into session
+state, and st.switch_page is recorded (see ``tests.helpers.page_app``).
 """
 
-from pathlib import Path
-
 import pytest
-import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from onepagerapp.data_access.mock import MockDataAccess
-from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import CurrentUser
-from tests.conftest import FIXTURES_DIR
-from tests.users import CREATOR_ROLES, make_user
-
-APP_DIR = Path(__file__).resolve().parents[2] / "app"
+from tests.helpers import ALICE, NEW_ID, button_labelled, page_app
 
 
-@pytest.fixture
-def switched(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    targets: list[str] = []
-    monkeypatch.setattr(st, "switch_page", targets.append)
-    monkeypatch.syspath_prepend(str(APP_DIR))
-    return targets
+def _create_form(data_access: MockDataAccess, **state: object) -> AppTest:
+    """Return the Editor in create mode for Alice."""
+    return page_app("editor.py", data_access, editor_mode="create", **state)
 
 
-@pytest.fixture
-def services(tmp_path: Path) -> dict:
-    store = OnePagerDocumentStore(FIXTURES_DIR, write_path=tmp_path)
-    user = make_user("ABR", "Alice Brown")
-    return {
-        "services_initialized": True,
-        "data_access": MockDataAccess(store),
-        "document_store": store,
-        "current_user": user.username,
-        "current_user_info": user,
-        "current_user_roles": CREATOR_ROLES,
-    }
-
-
-def _app(page: str, state: dict) -> AppTest:
-    at = AppTest.from_file(str(APP_DIR / "views" / page), default_timeout=30)
-    for key, value in state.items():
-        at.session_state[key] = value
-    return at
-
-
-def _click(at: AppTest, label: str) -> None:
-    next(b for b in at.button if b.label == label).click().run()
+def _fill_and_create(at: AppTest) -> None:
+    """Fill the required create fields and click Create Draft."""
+    at.text_input(key="create_data_product").input("customer_master")
+    at.text_input(key="create_product_name").input("Customer Master")
+    at.selectbox(key="create_business_domain").select("Customer")
+    at.selectbox(key="create_data_product_type").select("Foundational")
+    at.text_area(key="create_description").input("Unified customer view")
+    at.run()
+    button_labelled(at, "Create Draft").click().run()
 
 
 @pytest.mark.unit
-def test__registry__new_button_opens_editor_in_create_mode(
-    services: dict, switched: list[str]
+def test__owner_sme__click_new_on_registry__editor_in_create_mode(
+    mock_data_access: MockDataAccess, switched: list[str]
 ) -> None:
-    at = _app("registry.py", services).run()
+    """+ New opens the Editor in create mode."""
+    # Given
+    at = page_app("registry.py", mock_data_access).run()
     assert not at.exception
 
+    # When
     at.button(key="registry_new").click().run()
 
+    # Then
     assert switched == ["views/editor.py"]
     assert at.session_state["editor_mode"] == "create"
 
 
 @pytest.mark.unit
-def test__viewer__no_new_button_and_editor_refuses_create(
-    services: dict, switched: list[str]
+def test__viewer__open_registry__no_new_button(
+    mock_data_access: MockDataAccess, switched: list[str]
 ) -> None:
-    viewer = {**services, "current_user_roles": frozenset()}
+    """Viewers cannot start a One Pager."""
+    # When
+    at = page_app("registry.py", mock_data_access, roles=frozenset()).run()
 
-    at = _app("registry.py", viewer).run()
+    # Then
     assert not at.exception
     assert not [b for b in at.button if b.key == "registry_new"]
 
-    at = _app("editor.py", {**viewer, "editor_mode": "create"}).run()
+
+@pytest.mark.unit
+def test__viewer__open_editor_in_create_mode__refused(
+    mock_data_access: MockDataAccess, switched: list[str]
+) -> None:
+    """The Editor checks the permission too."""
+    # When
+    at = page_app(
+        "editor.py", mock_data_access, roles=frozenset(), editor_mode="create"
+    ).run()
+
+    # Then
     assert not at.exception
     assert "You don't have permission to create One Pagers." in [
         e.value for e in at.error
@@ -84,45 +76,51 @@ def test__viewer__no_new_button_and_editor_refuses_create(
 
 
 @pytest.mark.unit
-def test__editor__without_intent_shows_start_message(
-    services: dict, switched: list[str]
+def test__no_intent__open_editor__start_from_registry_message(
+    mock_data_access: MockDataAccess, switched: list[str]
 ) -> None:
-    at = _app("editor.py", services).run()
+    """Opened directly, the Editor points to the Registry."""
+    # When
+    at = page_app("editor.py", mock_data_access).run()
+
+    # Then
     assert not at.exception
     assert "Start from the Registry" in at.info[0].value
 
 
 @pytest.mark.unit
-def test__editor__owner_prefilled_from_current_user(
-    services: dict, switched: list[str]
+def test__signed_in_user__open_create_form__owner_prefilled(
+    mock_data_access: MockDataAccess, switched: list[str]
 ) -> None:
-    at = _app("editor.py", {**services, "editor_mode": "create"}).run()
+    """The Owner defaults to the signed-in user."""
+    # When
+    at = _create_form(mock_data_access).run()
+
+    # Then
     assert not at.exception
     assert at.title[0].value == "New One Pager"
     assert at.text_input(key="create_owner_name").value == "Alice Brown"
     assert at.text_input(key="create_owner_initials").value == "ABR"
-    assert at.text_input(key="create_owner_email").value == services["current_user"]
+    assert at.text_input(key="create_owner_email").value == ALICE.username
 
 
 @pytest.mark.unit
-def test__editor__owner_prefilled_from_the_directory(
-    services: dict, switched: list[str]
+def test__user_with_directory_email__open_create_form__directory_values(
+    mock_data_access: MockDataAccess, switched: list[str]
 ) -> None:
+    """The directory name and email are preferred when known."""
+    # Given
     user = CurrentUser(
         username="x0wadm@becoc001.onmicrosoft.com",
         initials="X0W",
         display_name="Agnieszka Kępkowska",
         email="agnieszka.kepkowska@bec.dk",
     )
-    state = {
-        **services,
-        "current_user": user.username,
-        "current_user_info": user,
-        "editor_mode": "create",
-    }
 
-    at = _app("editor.py", state).run()
+    # When
+    at = page_app("editor.py", mock_data_access, user, editor_mode="create").run()
 
+    # Then
     assert not at.exception
     assert at.text_input(key="create_owner_name").value == "Agnieszka Kępkowska"
     assert at.text_input(key="create_owner_initials").value == "X0W"
@@ -132,63 +130,66 @@ def test__editor__owner_prefilled_from_the_directory(
 
 
 @pytest.mark.unit
-def test__editor__empty_submit_shows_errors_and_writes_nothing(
-    services: dict, switched: list[str]
+def test__empty_form__click_create_draft__errors_and_nothing_written(
+    mock_data_access: MockDataAccess, switched: list[str]
 ) -> None:
-    at = _app("editor.py", {**services, "editor_mode": "create"}).run()
-    _click(at, "Create Draft")
+    """Missing fields are reported and no One Pager is created."""
+    # Given
+    at = _create_form(mock_data_access).run()
 
+    # When
+    button_labelled(at, "Create Draft").click().run()
+
+    # Then
     errors = [e.value for e in at.error]
     assert "Data Product is required." in errors
     assert "Description is required." in errors
     assert "5 issue(s)" in at.warning[0].value
     assert switched == []
-    assert services["data_access"].get_one_pager_status("OP-0003") is None
+    assert mock_data_access.get_one_pager_status(NEW_ID) is None
 
 
 @pytest.mark.unit
-def test__editor__valid_submit_creates_and_opens_preview(
-    services: dict, switched: list[str]
+def test__valid_form__click_create_draft__draft_created_preview_opened(
+    mock_data_access: MockDataAccess, switched: list[str]
 ) -> None:
-    at = _app("editor.py", {**services, "editor_mode": "create"}).run()
-    at.text_input(key="create_data_product").input("customer_master")
-    at.text_input(key="create_product_name").input("Customer Master")
-    at.selectbox(key="create_business_domain").select("Customer")
-    at.selectbox(key="create_data_product_type").select("Foundational")
-    at.text_area(key="create_description").input("Unified customer view")
-    at.run()
+    """A valid form creates the Draft and opens its Preview."""
+    # Given
+    at = _create_form(mock_data_access).run()
 
-    _click(at, "Create Draft")
+    # When
+    _fill_and_create(at)
 
+    # Then
     assert not at.exception
     assert switched == ["views/preview.py"]
-    assert at.session_state["preview_one_pager_id"] == "OP-0003"
+    assert at.session_state["preview_one_pager_id"] == NEW_ID
     assert "OP-0003 created" in at.session_state["preview_flash"]
-    header = services["data_access"].get_one_pager_status("OP-0003")
-    assert header.product_name == "Customer Master"
-    assert header.one_pager_status == "Draft"
+    header = mock_data_access.get_one_pager_status(NEW_ID)
+    assert (header.product_name, header.one_pager_status) == (
+        "Customer Master",
+        "Draft",
+    )
 
 
 @pytest.mark.unit
-def test__preview__shows_created_one_pager(services: dict, switched: list[str]) -> None:
-    at = _app("editor.py", {**services, "editor_mode": "create"}).run()
-    at.text_input(key="create_data_product").input("customer_master")
-    at.text_input(key="create_product_name").input("Customer Master")
-    at.selectbox(key="create_business_domain").select("Customer")
-    at.selectbox(key="create_data_product_type").select("Foundational")
-    at.text_area(key="create_description").input("Unified customer view")
-    at.run()
-    _click(at, "Create Draft")
+def test__draft_just_created__open_preview__shown_with_flash(
+    mock_data_access: MockDataAccess, switched: list[str]
+) -> None:
+    """The Preview shows the new One Pager and the success message."""
+    # Given
+    at = _create_form(mock_data_access).run()
+    _fill_and_create(at)
 
-    preview = _app(
+    # When
+    preview = page_app(
         "preview.py",
-        {
-            **services,
-            "preview_one_pager_id": "OP-0003",
-            "preview_flash": at.session_state["preview_flash"],
-        },
+        mock_data_access,
+        preview_one_pager_id=NEW_ID,
+        preview_flash=at.session_state["preview_flash"],
     ).run()
 
+    # Then
     assert not preview.exception
     assert preview.title[0].value == "Customer Master"
     assert "OP-0003 created" in preview.success[0].value

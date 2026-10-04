@@ -125,9 +125,12 @@ OnePagerApp/
 │           └── mock_seed.py        # Seed data of MockDataAccess (matches the test fixtures)
 ├── tests/
 │   ├── __init__.py
-│   ├── unit/                       # Pure pytest — no Streamlit or Databricks dependency
+│   ├── conftest.py                 # Shared pytest fixtures (mock data, new Draft, fakes, pages)
+│   ├── helpers.py                  # Shared constants, users, builders and fakes (no fixtures)
+│   ├── fixtures/sample_one_pagers/ # Read-only sample YAML documents
+│   ├── unit/                       # pytest with mocks and fakes — no live Databricks
 │   │   ├── __init__.py
-│   │   └── test_sample_unit_test.py
+│   │   └── test_*.py
 │   └── integration/                # Tests requiring a live Databricks connection or Streamlit AppTest
 │       ├── __init__.py
 │       └── test_sample_integration_test.py
@@ -150,6 +153,7 @@ OnePagerApp/
 - Views in `app/views/` only import from `onepagerapp` (config, data_access) — no direct Delta table access, volume I/O, or Git operations in views.
 - `app.py` is the composition root: it instantiates shared services (config, data access) once at startup, stores them in `st.session_state`, and wraps view dispatch in a global error boundary that shows user-friendly messages and logs exceptions.
 - `resources/schemas/` is the single location for JSON Schema files; validation always reads from here.
+- Unit tests are plain functions (no test classes) named `test__<given>__<when>__<then>`, each with a docstring and `# Given` / `# When` / `# Then` sections. Shared fixtures live in `tests/conftest.py`; shared constants, builders and fakes in `tests/helpers.py`. Faults are injected by patching single methods of a `MockDataAccess` instance (`monkeypatch.setattr(data_access, "...", failing())`), not by subclassing.
 
 ## 2b. Separation of Core Logic and UI Code
 
@@ -173,7 +177,7 @@ OnePagerApp/
 - Core logic in `src/onepagerapp/` can be unit-tested with `pytest` — **no Streamlit runtime required**
 - Data access implementations can be tested with in-memory mocks via the `MockDataAccess` class
 - No need for Streamlit's `@st.cache` or `st.session_state` fixtures in unit tests
-- Example: [tests/unit/test_sample_unit_test.py](../tests/unit/test_sample_unit_test.py) imports from `onepagerapp.config` and `onepagerapp.data_access` without starting a Streamlit app
+- Example: [tests/unit/test_config.py](../tests/unit/test_config.py) imports from `onepagerapp.config` and `onepagerapp.data_access` without starting a Streamlit app
 
 **2. Reusability and Independence**
 - The `onepagerapp` core package can be imported by other tools or services:
