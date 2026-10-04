@@ -84,6 +84,8 @@ Every setting is an environment variable read by `AppConfig` ([src/onepagerapp/c
 | `ONE_PAGER_APP_USER_DOMAINS`, `ONE_PAGER_APP_USERNAME_SUFFIXES`, `ONE_PAGER_APP_INITIALS_PATTERN` | see User Identity | Username format. |
 | `ONE_PAGER_APP_MOCK_USER`, `ONE_PAGER_APP_MOCK_USER_NAME`, `ONE_PAGER_APP_MOCK_GROUPS` | see User Identity | The `local-mock` user, its name and groups. |
 | `ONE_PAGER_APP_GROUP_OWNER_SME`, `ONE_PAGER_APP_GROUP_APPROVER`, `ONE_PAGER_APP_GROUP_ADMIN` | see User Identity | Role groups. |
+| `ONE_PAGER_APP_EMAIL_DOMAIN` | `bec.dk` | Domain of the corporate email addresses: initials X0W → `x0w@bec.dk` (pre-filled Owner email in the Editor). |
+| `ONE_PAGER_APP_SP_CLIENT_ID`, `ONE_PAGER_APP_SP_CLIENT_SECRET` | empty | OAuth client ID and secret of the service principal that does all writes (Delta tables and registry volume), e.g. `bp-spn-lhx-opa-dev-001`. Set the secret from a secret resource of the app. Empty: the app's own service principal (created by Databricks Apps for the app). |
 | `CLOUD_ROLE_NAME` | `OnePagerApp` | Service name in logs and telemetry. |
 
 ### Option 1: Run with Databricks Apps (recommended)

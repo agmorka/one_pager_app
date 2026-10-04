@@ -130,8 +130,9 @@ def resolve_user() -> CurrentUser | None:
     ``st.session_state.current_user_info`` (CurrentUser with initials and the
     name from the directory), ``st.session_state.current_user_directory``
     (the directory entry, or None) and
-    ``st.session_state.current_user_roles`` (group roles, set by
-    ``resolve_session_roles`` once the data access exists).
+    ``st.session_state.current_user_roles`` (roles in effect: the group
+    roles from ``resolve_session_roles``, or an Admin's "View as" choice,
+    ``apply_view_as``).
     These are set only for a recognised user (non-empty initials).
 
     Returns:
@@ -174,18 +175,90 @@ def resolve_user() -> CurrentUser | None:
 def resolve_session_roles() -> frozenset[Actor]:
     """Group roles of the user, checked once per session (needs the data access).
 
-    A role change applies from the next session. A failed check gives the
-    Viewer role only (``auth.resolve_roles``).
+    A role change applies from the next session. Group names are compared
+    ignoring case; a failed check gives the Viewer role only, unless the
+    directory lists the group (``auth.resolve_roles``). These are the real
+    roles (``current_user_group_roles``); ``apply_view_as`` sets the roles the
+    pages use.
     """
-    roles: frozenset[Actor] | None = st.session_state.get("current_user_roles")
+    roles: frozenset[Actor] | None = st.session_state.get("current_user_group_roles")
     if roles is None:
+        directory_user = st.session_state.get("current_user_directory")
         roles = resolve_roles(
             st.session_state.current_user_info,
             st.session_state.config,
             st.session_state.data_access,
+            directory_user.groups if directory_user else (),
         )
-        st.session_state.current_user_roles = roles
+        st.session_state.current_user_group_roles = roles
     return roles
+
+
+# "View as" choices for Admins (UI_Design.md §2): label -> roles. "All my
+# roles" is the user's real roles; every other choice is one role or none.
+VIEW_AS_ALL = "All my roles"
+VIEW_AS_ROLES: dict[str, frozenset[Actor]] = {
+    "Owner/SME": frozenset({Actor.OWNER_SME_GROUP}),
+    "Approver": frozenset({Actor.APPROVER}),
+    "Admin": frozenset({Actor.ADMIN}),
+    "Viewer": frozenset(),
+}
+VIEW_AS_KEY = "view_as"
+
+
+def view_as_options(roles: frozenset[Actor]) -> list[str]:
+    """"View as" choices: only for Admins, and only roles the user really has.
+
+    Switching can only take roles away, never add one the user does not
+    have, so it is safe for the services, which trust the session's roles.
+    """
+    if Actor.ADMIN not in roles:
+        return []
+    return [VIEW_AS_ALL] + [
+        label for label, view in VIEW_AS_ROLES.items() if view <= roles
+    ]
+
+
+def apply_view_as(roles: frozenset[Actor]) -> frozenset[Actor]:
+    """Roles the pages use: the real roles, or an Admin's "View as" choice.
+
+    Sets ``st.session_state.current_user_roles``. A choice that is not
+    (or no longer) available falls back to all the user's roles.
+    """
+    choice = st.session_state.get(VIEW_AS_KEY, VIEW_AS_ALL)
+    if choice not in view_as_options(roles):
+        st.session_state.pop(VIEW_AS_KEY, None)
+        choice = VIEW_AS_ALL
+    effective = roles if choice == VIEW_AS_ALL else VIEW_AS_ROLES[choice]
+    st.session_state.current_user_roles = effective
+    return effective
+
+
+def _log_view_as() -> None:
+    user: CurrentUser = st.session_state.current_user_info
+    logger.info(
+        "%s switched the view to: %s",
+        user.initials,
+        st.session_state.get(VIEW_AS_KEY, VIEW_AS_ALL),
+    )
+
+
+def render_view_as(roles: frozenset[Actor]) -> None:
+    """Admin-only selector of the user type the app is shown as."""
+    options = view_as_options(roles)
+    if not options:
+        return
+    st.selectbox(
+        "View as",
+        options,
+        key=VIEW_AS_KEY,
+        on_change=_log_view_as,
+        help=(
+            "Show the app as a user with only this role, e.g. to check what "
+            "an Approver or a Viewer sees. It can only remove roles you have. "
+            "Owner/SME rights on your own One Pagers still apply."
+        ),
+    )
 
 
 def render_access_denied(username: str) -> None:
@@ -212,6 +285,50 @@ def sidebar_user_label(user: CurrentUser) -> str:
     if user.display_name and user.display_name != user.initials:
         return f"{user.display_name} ({user.initials})"
     return user.initials
+
+
+LOGO_PATH = Path(__file__).parent / "assets" / "BEC_FINANCIAL_TECHNOLOGIES_LOGO_RGB.png"
+
+
+def render_sidebar_user(
+    config: AppConfig,
+    roles: frozenset[Actor],
+    group_roles: frozenset[Actor] | None = None,
+) -> None:
+    """Top of the sidebar: the logged user, their roles and the environment.
+
+    ``roles`` are the roles in effect (badges); ``group_roles`` the real ones,
+    which decide whether the Admin "View as" selector is shown.
+    """
+    group_roles = roles if group_roles is None else group_roles
+    user_label = sidebar_user_label(st.session_state.current_user_info)
+    st.markdown(f"👤 **{_escape_markdown(user_label)}**")
+    st.markdown(role_badges(role_names(roles)), unsafe_allow_html=True)
+    render_view_as(group_roles)
+    if roles != group_roles:
+        st.caption(
+            f"👁️ Viewing as {', '.join(role_names(roles))} "
+            f"(your roles: {', '.join(role_names(group_roles))})"
+        )
+    badge = environment_badge(config.environment.value)
+    mode = " · mock data" if config.is_mock else ""
+    st.markdown(f"Environment: {badge}{mode}", unsafe_allow_html=True)
+    notice = interim_roles_notice(config)
+    if notice:
+        st.caption(f"⚠️ {notice}")
+
+
+def render_sidebar_logo() -> None:
+    """Company logo at the bottom of the sidebar."""
+    with st.sidebar:
+        st.divider()
+        col1, _ = st.columns(2)
+        col1.image(str(LOGO_PATH), use_column_width=True)
+
+
+def _escape_markdown(text: str) -> str:
+    """Escape the Markdown characters of a name from the directory."""
+    return "".join(f"\\{c}" if c in "\\`*_[]<>|~$" else c for c in text)
 
 
 # Sidebar role badges, in this order (UI_Design.md §2).
@@ -273,13 +390,6 @@ def main() -> None:
         initial_sidebar_state="expanded",
     )
 
-    logo_path = (
-        Path(__file__).parent / "assets" / "BEC_FINANCIAL_TECHNOLOGIES_LOGO_RGB.png"
-    )
-    with st.sidebar:
-        col1, col2 = st.columns(2)
-        col1.image(str(logo_path), use_column_width=True)
-
     apply_theme()
 
     try:
@@ -295,6 +405,7 @@ def main() -> None:
     # who is not recognised.
     if resolve_user() is None:
         render_access_denied(st.session_state.get("unrecognised_user", ""))
+        render_sidebar_logo()
         st.stop()
 
     try:
@@ -302,25 +413,24 @@ def main() -> None:
     except Exception:
         _stop_on_service_error()
 
-    roles = resolve_session_roles()
-    pg = st.navigation(build_pages(roles))
+    group_roles = resolve_session_roles()
+    roles = apply_view_as(group_roles)
+    pages = build_pages(roles)
+    # The page links are rendered below the user info (UI_Design.md §2), so
+    # Streamlit's own navigation menu (always at the top) is hidden.
+    pg = st.navigation(pages, position="hidden")
 
     # Rendered before pg.run() so it stays visible when a page calls st.stop().
     with st.sidebar:
-        badge = environment_badge(config.environment.value)
-        mode = " · mock data" if config.is_mock else ""
-        st.markdown(f"Environment: {badge}{mode}", unsafe_allow_html=True)
+        render_sidebar_user(config, roles, group_roles)
         st.divider()
-        user_label = sidebar_user_label(st.session_state.current_user_info)
-        st.caption(f"Logged user: {user_label}")
-        st.markdown(role_badges(role_names(roles)), unsafe_allow_html=True)
-        notice = interim_roles_notice(config)
-        if notice:
-            st.caption(f"⚠️ {notice}")
+        for page in pages:
+            st.page_link(page)
 
     navigation_guard(
         pg.title, st.session_state.data_access, st.session_state.current_user_info
     )
+    render_sidebar_logo()
 
     pg.run()
 

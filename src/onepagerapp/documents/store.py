@@ -9,9 +9,10 @@ An optional ``write_path`` redirects writes to a separate folder that is read
 before ``base_path``. ``local-mock`` mode uses it with a temporary directory so
 the version-controlled fixtures are never modified.
 
-Deployed, the base path is the volume mount of the Databricks App, so every
-read and write runs as the app's service principal (Architecture.md §8): users
-need no volume grant, and the app checks who may open or change a One Pager.
+Deployed, the base path is the registry volume. Databricks Apps do not mount
+volumes, so the store then uses the Files API (``files.VolumeFiles``) and every
+read and write runs as the service principal (Architecture.md §8): users need
+no volume grant, and the app checks who may open or change a One Pager.
 """
 
 import logging
@@ -19,6 +20,7 @@ from pathlib import Path
 
 import yaml
 
+from onepagerapp.documents.files import FileAccess, LocalFiles
 from onepagerapp.documents.serialization import document_from_dict, document_to_yaml
 from onepagerapp.models import OnePagerDocument
 
@@ -29,8 +31,12 @@ class OnePagerDocumentStore:
     """Reads and writes One Pager YAML documents at a configured base path."""
 
     def __init__(
-        self, base_path: str | Path, write_path: str | Path | None = None
+        self,
+        base_path: str | Path,
+        write_path: str | Path | None = None,
+        files: FileAccess | None = None,
     ) -> None:
+        """Store at ``base_path``; ``files`` defaults to the local filesystem."""
         if not base_path:
             msg = (
                 "One Pager document store requires a base path "
@@ -39,6 +45,7 @@ class OnePagerDocumentStore:
             raise RuntimeError(msg)
         self._base_path = Path(base_path)
         self._write_path = Path(write_path) if write_path else None
+        self._files: FileAccess = files or LocalFiles()
 
     @property
     def _read_paths(self) -> list[Path]:
@@ -94,13 +101,10 @@ class OnePagerDocumentStore:
         Raises:
             RuntimeError: If the file already exists or cannot be written.
         """
-        op_dir = self._dir_for(one_pager_id, self._write_root)
         path = self._file_for(one_pager_id, version, self._write_root)
         content = document_to_yaml(document)
         try:
-            op_dir.mkdir(parents=True, exist_ok=True)
-            with path.open("x", encoding="utf-8") as f:
-                f.write(content)
+            self._files.create(path, content)
         except OSError as e:
             logger.error(f"Failed to write document {path}: {e}")
             raise RuntimeError(
@@ -122,7 +126,7 @@ class OnePagerDocumentStore:
         """
         path = self._file_for(one_pager_id, version, self._write_root)
         try:
-            path.unlink()
+            self._files.delete(path)
         except FileNotFoundError:
             return False
         except OSError:
@@ -139,8 +143,7 @@ class OnePagerDocumentStore:
         """List One Pager IDs (subdirectories) available in all read locations."""
         ids: set[str] = set()
         for root in self._read_paths:
-            if root.exists():
-                ids.update(p.name for p in root.iterdir() if p.is_dir())
+            ids.update(self._files.list_dirs(root))
         return sorted(ids)
 
     @property
@@ -158,7 +161,7 @@ class OnePagerDocumentStore:
     def _existing_file_for(self, one_pager_id: str, version: str) -> Path | None:
         for root in self._read_paths:
             path = self._file_for(one_pager_id, version, root)
-            if path.exists():
+            if self._files.exists(path):
                 return path
         return None
 
@@ -167,7 +170,11 @@ class OnePagerDocumentStore:
         for root in self._read_paths:
             op_dir = self._dir_for(one_pager_id, root)
             try:
-                candidates.extend(op_dir.glob(f"{one_pager_id}_v*.yml"))
+                candidates.extend(
+                    op_dir / name
+                    for name in self._files.list_files(op_dir)
+                    if name.startswith(f"{one_pager_id}_v") and name.endswith(".yml")
+                )
             except OSError as e:
                 logger.warning(f"Cannot list {op_dir}: {e}")
         if not candidates:
@@ -176,7 +183,7 @@ class OnePagerDocumentStore:
 
     def _load(self, path: Path, one_pager_id: str) -> OnePagerDocument | None:
         try:
-            content = path.read_text(encoding="utf-8")
+            content = self._files.read_text(path)
             data = yaml.safe_load(content)
         except (OSError, yaml.YAMLError) as e:
             logger.error(f"Failed to read document for {one_pager_id} from {path}: {e}")

@@ -61,6 +61,9 @@ class _UserMayNotWrite:
             return _response(["num_affected_rows"], [["1"]])
         return _response([], [])
 
+    def find_group_names(self, name: str) -> list[str]:  # noqa: ARG002
+        return []
+
 
 # Read method -> call. read_document is not here: it reads the YAML file
 # through the volume mount, which is always the service principal (§8).

@@ -267,7 +267,7 @@ def test__app__name_from_the_directory(monkeypatch: pytest.MonkeyPatch) -> None:
     user = at.session_state["current_user_info"]
     assert (user.initials, user.display_name) == ("X0W", "Agnieszka Kępkowska")
     assert lookups == ["t"]  # once per session
-    assert "Logged user: Agnieszka Kępkowska (X0W)" in [c.value for c in at.caption]
+    assert "👤 **Agnieszka Kępkowska (X0W)**" in [m.value for m in at.sidebar.markdown]
 
 
 @pytest.mark.unit
@@ -291,7 +291,7 @@ def test__app__directory_failure_shows_the_initials(
     assert not at.exception
     assert not [t for t in at.title if t.value == "Access denied"]
     assert at.session_state["current_user_info"].display_name == "X0W"
-    assert "Logged user: X0W" in [c.value for c in at.caption]
+    assert "👤 **X0W**" in [m.value for m in at.sidebar.markdown]
 
 
 @pytest.mark.unit
@@ -428,3 +428,99 @@ def test__done_when__dataplateng_member_sees_review_and_admin(
     moved_pages = _page_titles(app_module, moved.session_state["current_user_roles"])
     assert "Review" not in moved_pages
     assert "Admin" in moved_pages
+
+
+@pytest.mark.unit
+def test__app__sidebar_user_on_top_and_logo_at_the_bottom(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    at = _run_app(monkeypatch, APP_MODE="local-mock")
+
+    children = list(at.sidebar.children.values())
+    assert not at.exception
+    assert children[0].value == "👤 **Local Dev User (LDU)**"
+    kinds = [child.type for child in children]
+    first_link = kinds.index("page_link")
+    assert "markdown" not in kinds[first_link:]  # user info above the links
+    assert kinds[-1] == "horizontal"  # the logo columns come last
+
+
+ALL_GROUP_ROLES = frozenset({Actor.OWNER_SME_GROUP, Actor.APPROVER, Actor.ADMIN})
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("roles", "expected"),
+    [
+        (
+            ALL_GROUP_ROLES,
+            ["All my roles", "Owner/SME", "Approver", "Admin", "Viewer"],
+        ),
+        (frozenset({Actor.ADMIN}), ["All my roles", "Admin", "Viewer"]),
+        (frozenset({Actor.APPROVER, Actor.OWNER_SME_GROUP}), []),  # no Admin
+        (frozenset(), []),
+    ],
+)
+def test__view_as_options__admins_only_and_never_more_roles(
+    app_module: ModuleType, roles: frozenset[Actor], expected: list[str]
+) -> None:
+    assert app_module.view_as_options(roles) == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("choice", "roles", "pages"),
+    [
+        (
+            "Viewer",
+            frozenset(),
+            ["Registry", "Preview", "Editor", "Use Cases", "Help"],
+        ),
+        (
+            "Approver",
+            frozenset({Actor.APPROVER}),
+            ["Registry", "Preview", "Editor", "Review", "Use Cases", "Help"],
+        ),
+        (
+            "Owner/SME",
+            frozenset({Actor.OWNER_SME_GROUP}),
+            ["Registry", "Preview", "Editor", "Use Cases", "Help"],
+        ),
+    ],
+)
+def test__app__admin_views_the_app_as_another_user_type(
+    monkeypatch: pytest.MonkeyPatch,
+    app_module: ModuleType,
+    choice: str,
+    roles: frozenset[Actor],
+    pages: list[str],
+) -> None:
+    at = _run_app(monkeypatch, APP_MODE="local-mock")  # interim group: every role
+    assert at.session_state["current_user_roles"] == ALL_GROUP_ROLES
+
+    at.sidebar.selectbox(key="view_as").set_value(choice).run()
+
+    assert not at.exception
+    assert at.session_state["current_user_roles"] == roles
+    assert at.session_state["current_user_group_roles"] == ALL_GROUP_ROLES
+    assert _page_titles(app_module, roles) == pages
+    shown = ", ".join(app_module.role_names(roles))
+    assert any(f"Viewing as {shown}" in c.value for c in at.sidebar.caption)
+
+    at.sidebar.selectbox(key="view_as").set_value("All my roles").run()
+
+    assert at.session_state["current_user_roles"] == ALL_GROUP_ROLES
+    assert not any("Viewing as" in c.value for c in at.sidebar.caption)
+
+
+@pytest.mark.unit
+def test__app__no_view_as_for_non_admins(monkeypatch: pytest.MonkeyPatch) -> None:
+    at = _run_app(
+        monkeypatch,
+        APP_MODE="local-mock",
+        ONE_PAGER_APP_GROUP_ADMIN="OPA-Admin-{env}",  # not in the mock groups
+    )
+
+    assert not at.exception
+    assert Actor.ADMIN not in at.session_state["current_user_roles"]
+    assert not [s for s in at.sidebar.selectbox if s.key == "view_as"]

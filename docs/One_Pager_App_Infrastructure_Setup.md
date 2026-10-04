@@ -80,7 +80,7 @@ Application roles come from Entra ID groups (automatic identity management is en
 | Admin | `ONE_PAGER_APP_GROUP_ADMIN` | `BEC_BECOC001_LHX_{env}_DataPlatEng` |
 | Viewer | — | Every employee (no group) |
 
-`{env}` is `DEV`, `INT`, `UAT` or `PRD`. Dedicated groups per role will be requested by the Data Platform Engineering team, which also manages membership; switching to them is a change of the three settings. Each environment's `BEC_BECOC001_LHX_{env}_DataPlatEng` group must exist before the app is deployed there, otherwise every user is only a Viewer.
+`{env}` is `DEV`, `INT`, `UAT` or `PRD`. Group names are compared ignoring case, so `BEC_BECOC001_LHX_DEV_DataPlatEng` matches the real group `BEC_BECOC001_LHX_dev_DataPlatEng`. Dedicated groups per role will be requested by the Data Platform Engineering team, which also manages membership; switching to them is a change of the three settings. Each environment's `BEC_BECOC001_LHX_{env}_DataPlatEng` group must exist before the app is deployed there, otherwise every user is only a Viewer.
 
 ## Required Changes
 
@@ -125,6 +125,17 @@ The application is managed by environment-specific service principals:
 - **PRD**: `bp-spn-lhx-opa-prd-001`
 
 Each SPN:
+- Is the identity of all writes of the app (Delta tables and registry volume) once its OAuth credentials are given to the app (see "Running writes as the SPN" below)
 - Has `CAN_MANAGE` permissions on the app
 - Automatically receives WRITE access to the `onepager_app` schema
 - Can be used for CI/CD deployments and automated management
+
+### Running writes as the SPN
+
+A Databricks App always runs as its **own** service principal, which Databricks creates together with the app (named after the app, not `bp-spn-lhx-opa-{env}-001`). Without further settings, writes run as that principal, and it has none of the grants above. To run the writes as `bp-spn-lhx-opa-{env}-001` instead:
+
+1. Create an OAuth secret for the SPN (account console → Service principals → `bp-spn-lhx-opa-{env}-001` → Secrets) and store its client ID and secret in a secret scope, e.g. keys `opa-spn-client-id` and `opa-spn-client-secret`.
+2. Add both as **secret** resources of the app (Terraform / app resources) with the `READ` permission, with the resource keys `opa-spn-client-id` and `opa-spn-client-secret`.
+3. Uncomment `ONE_PAGER_APP_SP_CLIENT_ID` / `ONE_PAGER_APP_SP_CLIENT_SECRET` in `app/app.yml` and redeploy.
+
+The app log then shows "Writes run as the service principal <client ID>". Alternative without a secret: give the app's own service principal the grants of the table above instead (`USE CATALOG`, `USE SCHEMA`, `SELECT`, `MODIFY`, `READ VOLUME`, `WRITE VOLUME`).

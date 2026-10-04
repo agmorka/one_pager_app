@@ -116,7 +116,41 @@ def test__resolve_roles__query_error_is_viewer(
         )
 
     assert roles == frozenset()
-    assert "Viewer role only" in caplog.text
+    assert "Group membership check failed" in caplog.text
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "group", [DATAPLATENG_DEV, "BEC_BECOC001_LHX_dev_DataPlatEng"]
+)
+def test__resolve_roles__group_names_ignore_case(group: str) -> None:
+    roles = resolve_roles(USER, _config(), _data_access(group))
+
+    assert roles == {Actor.OWNER_SME_GROUP, Actor.APPROVER, Actor.ADMIN}
+
+
+@pytest.mark.unit
+def test__resolve_roles__directory_groups_ignore_case() -> None:
+    roles = resolve_roles(
+        USER,
+        _config(),
+        _Recording({}),
+        directory_groups=["BEC_BECOC001_LHX_dev_DataPlatEng"],
+    )
+
+    assert roles == {Actor.OWNER_SME_GROUP, Actor.APPROVER, Actor.ADMIN}
+
+
+@pytest.mark.unit
+def test__resolve_roles__directory_groups_when_the_query_fails() -> None:
+    roles = resolve_roles(
+        USER,
+        _config(),
+        _Failing(OnePagerDocumentStore(FIXTURES_DIR)),
+        directory_groups=["BEC_BECOC001_LHX_dev_DataPlatEng"],
+    )
+
+    assert roles == {Actor.OWNER_SME_GROUP, Actor.APPROVER, Actor.ADMIN}
 
 
 @pytest.mark.unit

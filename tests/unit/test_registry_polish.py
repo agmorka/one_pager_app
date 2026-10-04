@@ -260,24 +260,13 @@ def _row_ids(at: AppTest) -> list[str]:
 
 
 @pytest.mark.unit
-def test__registry_page__metric_card_filters_by_its_status(
+def test__registry_page__metric_cards_have_no_show_button(
     tmp_path: Path, app_dir_on_path: None
 ) -> None:
     at = _run(tmp_path)
-    assert _row_ids(at) == ["OP-0001", "OP-0002", "OP-0003"]
-    assert at.button(key="registry-metric-All").disabled
 
-    at.button(key="registry-metric-Draft").click().run()
-
-    assert not at.exception
-    assert at.selectbox(key="filter_op_status").value == "Draft"
-    assert _row_ids(at) == ["OP-0003"]
-    assert at.button(key="registry-metric-Draft").disabled
-
-    at.button(key="registry-metric-All").click().run()
-
-    assert at.selectbox(key="filter_op_status").value == "All"
-    assert _row_ids(at) == ["OP-0001", "OP-0002", "OP-0003"]
+    assert not any(str(b.key).startswith("registry-metric-") for b in at.button)
+    assert not any(b.label in ("Show", "✓ Showing") for b in at.button)
 
 
 @pytest.mark.unit
@@ -312,6 +301,6 @@ def test__registry_page__use_case_filter(tmp_path: Path, app_dir_on_path: None) 
     assert not at.exception
     assert _row_ids(at) == ["OP-0002"]
 
-    at.button(key="registry-metric-Approved").click().run()
+    at.selectbox(key="filter_op_status").set_value("Approved").run()
 
     assert any("No One Pagers match your filters" in w.value for w in at.warning)

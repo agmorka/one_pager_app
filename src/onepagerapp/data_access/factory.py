@@ -4,9 +4,11 @@ import tempfile
 
 from onepagerapp.config import AppConfig
 from onepagerapp.data_access.base import DataAccess
+from onepagerapp.data_access.connection import service_client
 from onepagerapp.data_access.lakehouse import LakehouseAccess
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
+from onepagerapp.documents.files import VolumeFiles
 
 
 def create_document_store(config: AppConfig) -> OnePagerDocumentStore:
@@ -15,7 +17,16 @@ def create_document_store(config: AppConfig) -> OnePagerDocumentStore:
     In ``local-mock`` mode ONE_PAGER_APP_VOLUME_PATH points at the
     version-controlled fixtures, so new documents are written to a temporary
     directory that is read before the fixtures (New_One_Pager_Plan D12).
+
+    A registry on a Unity Catalog volume is read and written through the
+    Files API as the service principal (``connection.service_client``):
+    Databricks Apps do not mount volumes.
     """
+    if config.uses_volume_files:
+        return OnePagerDocumentStore(
+            config.ONE_PAGER_APP_VOLUME_PATH,
+            files=VolumeFiles(service_client(config)),
+        )
     if config.uses_databricks:
         return OnePagerDocumentStore(config.ONE_PAGER_APP_VOLUME_PATH)
     return OnePagerDocumentStore(

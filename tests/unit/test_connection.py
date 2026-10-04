@@ -307,3 +307,41 @@ def test__service_principal_auth_failure_is_not_a_session_expiry(
 
     assert not isinstance(raised.value, SessionExpiredError)
     assert "could not authenticate" in caplog.text
+
+
+@pytest.mark.unit
+def test__find_group_names__real_spelling_ignoring_case() -> None:
+    asked: list[str] = []
+
+    def list_groups(
+        *, filter: str, attributes: str  # noqa: A002
+    ) -> list[SimpleNamespace]:
+        asked.append(filter)
+        return [
+            SimpleNamespace(display_name="BEC_BECOC001_LHX_dev_DataPlatEng"),
+            SimpleNamespace(display_name="Other"),
+        ]
+
+    conn = object.__new__(connection_module.DatabricksConnection)
+    conn._config = AppConfig(ONE_PAGER_APP_VOLUME_PATH="/Volumes/x")
+    conn._ws = SimpleNamespace(groups=SimpleNamespace(list=list_groups))
+
+    names = conn.find_group_names('BEC_BECOC001_LHX_DEV_DataPlatEng"')
+
+    assert names == []  # the quote is part of the name, so no match
+    assert asked == ['displayName eq "BEC_BECOC001_LHX_DEV_DataPlatEng\\""']
+    assert conn.find_group_names("BEC_BECOC001_LHX_DEV_DataPlatEng") == [
+        "BEC_BECOC001_LHX_dev_DataPlatEng"
+    ]
+
+
+@pytest.mark.unit
+def test__find_group_names__failure_gives_no_names() -> None:
+    def broken(**_: object) -> list:
+        msg = "forbidden"
+        raise RuntimeError(msg)
+
+    conn = object.__new__(connection_module.DatabricksConnection)
+    conn._ws = SimpleNamespace(groups=SimpleNamespace(list=broken))
+
+    assert conn.find_group_names("G") == []
