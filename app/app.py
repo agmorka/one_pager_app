@@ -214,6 +214,35 @@ def sidebar_user_label(user: CurrentUser) -> str:
     return user.initials
 
 
+LOGO_PATH = Path(__file__).parent / "assets" / "BEC_FINANCIAL_TECHNOLOGIES_LOGO_RGB.png"
+
+
+def render_sidebar_user(config: AppConfig, roles: frozenset[Actor]) -> None:
+    """Top of the sidebar: the logged user, their roles and the environment."""
+    user_label = sidebar_user_label(st.session_state.current_user_info)
+    st.markdown(f"👤 **{_escape_markdown(user_label)}**")
+    st.markdown(role_badges(role_names(roles)), unsafe_allow_html=True)
+    badge = environment_badge(config.environment.value)
+    mode = " · mock data" if config.is_mock else ""
+    st.markdown(f"Environment: {badge}{mode}", unsafe_allow_html=True)
+    notice = interim_roles_notice(config)
+    if notice:
+        st.caption(f"⚠️ {notice}")
+
+
+def render_sidebar_logo() -> None:
+    """Company logo at the bottom of the sidebar."""
+    with st.sidebar:
+        st.divider()
+        col1, _ = st.columns(2)
+        col1.image(str(LOGO_PATH), use_column_width=True)
+
+
+def _escape_markdown(text: str) -> str:
+    """Escape the Markdown characters of a name from the directory."""
+    return "".join(f"\\{c}" if c in "\\`*_[]<>|~$" else c for c in text)
+
+
 # Sidebar role badges, in this order (UI_Design.md §2).
 ROLE_LABELS = {
     Actor.OWNER_SME_GROUP: "Owner/SME",
@@ -273,13 +302,6 @@ def main() -> None:
         initial_sidebar_state="expanded",
     )
 
-    logo_path = (
-        Path(__file__).parent / "assets" / "BEC_FINANCIAL_TECHNOLOGIES_LOGO_RGB.png"
-    )
-    with st.sidebar:
-        col1, col2 = st.columns(2)
-        col1.image(str(logo_path), use_column_width=True)
-
     apply_theme()
 
     try:
@@ -295,6 +317,7 @@ def main() -> None:
     # who is not recognised.
     if resolve_user() is None:
         render_access_denied(st.session_state.get("unrecognised_user", ""))
+        render_sidebar_logo()
         st.stop()
 
     try:
@@ -303,24 +326,22 @@ def main() -> None:
         _stop_on_service_error()
 
     roles = resolve_session_roles()
-    pg = st.navigation(build_pages(roles))
+    pages = build_pages(roles)
+    # The page links are rendered below the user info (UI_Design.md §2), so
+    # Streamlit's own navigation menu (always at the top) is hidden.
+    pg = st.navigation(pages, position="hidden")
 
     # Rendered before pg.run() so it stays visible when a page calls st.stop().
     with st.sidebar:
-        badge = environment_badge(config.environment.value)
-        mode = " · mock data" if config.is_mock else ""
-        st.markdown(f"Environment: {badge}{mode}", unsafe_allow_html=True)
+        render_sidebar_user(config, roles)
         st.divider()
-        user_label = sidebar_user_label(st.session_state.current_user_info)
-        st.caption(f"Logged user: {user_label}")
-        st.markdown(role_badges(role_names(roles)), unsafe_allow_html=True)
-        notice = interim_roles_notice(config)
-        if notice:
-            st.caption(f"⚠️ {notice}")
+        for page in pages:
+            st.page_link(page)
 
     navigation_guard(
         pg.title, st.session_state.data_access, st.session_state.current_user_info
     )
+    render_sidebar_logo()
 
     pg.run()
 

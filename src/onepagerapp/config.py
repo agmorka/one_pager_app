@@ -5,7 +5,7 @@ import re
 from datetime import timedelta
 from enum import Enum
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator
 
 
 class AppMode(str, Enum):
@@ -128,6 +128,29 @@ class AppConfig(BaseModel):
             "Comma-separated groups the local-mock user belongs to, so roles "
             "can be tried locally. {env} is replaced with the environment. The "
             "default is the interim role group: every role. Empty: Viewer only."
+        ),
+    )
+    ONE_PAGER_APP_EMAIL_DOMAIN: str = Field(
+        "bec.dk",
+        description=(
+            "Domain of the corporate email addresses: the email of a user "
+            "with initials X0W is x0w@bec.dk."
+        ),
+    )
+    ONE_PAGER_APP_SP_CLIENT_ID: str = Field(
+        "",
+        description=(
+            "Application (client) ID of the service principal that writes "
+            "the Delta tables and the registry volume, e.g. the one of "
+            "bp-spn-lhx-opa-dev-001. Empty: the app's own service principal "
+            "(the one Databricks Apps creates for the app)."
+        ),
+    )
+    ONE_PAGER_APP_SP_CLIENT_SECRET: SecretStr = Field(
+        SecretStr(""),
+        description=(
+            "OAuth secret of ONE_PAGER_APP_SP_CLIENT_ID. Set from a secret "
+            "resource of the app, never as a plain value."
         ),
     )
     CLOUD_ROLE_NAME: str = "OnePagerApp"
@@ -255,6 +278,35 @@ class AppConfig(BaseModel):
     @property
     def uses_databricks(self) -> bool:
         return self.APP_MODE in (AppMode.DATABRICKS, AppMode.LOCAL_INTEGRATION)
+
+    @property
+    def uses_volume_files(self) -> bool:
+        """Whether the registry is a UC volume read through the Files API.
+
+        Databricks Apps do not mount volumes, so ``/Volumes/...`` cannot be
+        opened as a local folder.
+        """
+        return self.uses_databricks and bool(
+            _volume_catalog(self.ONE_PAGER_APP_VOLUME_PATH)
+        )
+
+    @property
+    def service_principal_credentials(self) -> tuple[str, str] | None:
+        """(client ID, secret) of the configured service principal, or None.
+
+        None means the default authentication: the app's own service
+        principal deployed, the CLI profile locally.
+        """
+        client_id = self.ONE_PAGER_APP_SP_CLIENT_ID.strip()
+        secret = self.ONE_PAGER_APP_SP_CLIENT_SECRET.get_secret_value().strip()
+        if client_id and secret:
+            return client_id, secret
+        return None
+
+    def email_for(self, initials: str) -> str:
+        """Corporate email address of the initials (X0W -> x0w@bec.dk), or ""."""
+        domain = self.ONE_PAGER_APP_EMAIL_DOMAIN.strip().lstrip("@")
+        return f"{initials.lower()}@{domain}" if initials and domain else ""
 
 
 def _volume_catalog(volume_path: str) -> str:

@@ -19,7 +19,6 @@ Per UI_Design.md §4.2, table rows are interactive and ID links navigate to prev
 import logging
 
 import streamlit as st
-from streamlit.delta_generator import DeltaGenerator
 
 from adapters import cache
 from adapters.theme import (
@@ -169,35 +168,10 @@ def _reset_page() -> None:
     st.session_state.registry_page = 1
 
 
-def _filter_by_status(status: str) -> None:
-    """Metric card click: filter the table by that OP status ("All" for Total)."""
-    st.session_state["filter_op_status"] = status
-    _reset_page()
-
-
-def _render_metric_button(
-    col: DeltaGenerator, label: str, status: str, *, active: bool
-) -> None:
-    """Render the button under a metric card that applies the card's status filter."""
-    col.button(
-        "✓ Showing" if active else "Show",
-        key=f"registry-metric-{status}",
-        on_click=_filter_by_status,
-        args=(status,),
-        disabled=active,
-        use_container_width=True,
-        help=(
-            "Show all One Pagers"
-            if status == "All"
-            else f"Show only One Pagers with status {label}"
-        ),
-    )
-
-
 def _render_metrics(
     status_counts: dict, op_status_colors: dict, active_status: str
 ) -> None:
-    """Render the status metrics row; each card filters the table by its status.
+    """Render the status metrics row; the card of the status filter is outlined.
     
     Args:
         status_counts: Dict mapping status → count.
@@ -212,9 +186,6 @@ def _render_metrics(
         ),
         unsafe_allow_html=True,
     )
-    _render_metric_button(
-        metric_cols[0], "Total", "All", active=active_status == "All"
-    )
     status_counts_enriched = {status: status_counts.get(status, 0) for status in op_status_colors.keys()}
     for col, (status, count) in zip(metric_cols[1:], status_counts_enriched.items(), strict=False):
         color = op_status_colors.get(status, "#808080")
@@ -222,7 +193,6 @@ def _render_metrics(
             _render_metric_card(status, count, color, active=active_status == status),
             unsafe_allow_html=True,
         )
-        _render_metric_button(col, status, status, active=active_status == status)
 
 
 def _clear_filters() -> None:

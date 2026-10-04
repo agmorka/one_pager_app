@@ -33,6 +33,33 @@ SqlParameterValue = str | int | bool | datetime | date | None
 USER_TOKEN_HEADER = "x-forwarded-access-token"  # noqa: S105 - a header name
 
 
+def service_client(config: AppConfig) -> WorkspaceClient:
+    """Workspace client of the service principal that does all writes.
+
+    With ``ONE_PAGER_APP_SP_CLIENT_ID`` / ``ONE_PAGER_APP_SP_CLIENT_SECRET``
+    set, OAuth machine-to-machine as that service principal (e.g.
+    ``bp-spn-lhx-opa-dev-001``). Otherwise the default authentication: in
+    Databricks Apps the app's own service principal (``DATABRICKS_CLIENT_ID``
+    / ``DATABRICKS_CLIENT_SECRET`` set by the runtime), locally the CLI
+    profile.
+    """
+    credentials = config.service_principal_credentials
+    if credentials is None:
+        if config.ONE_PAGER_APP_SP_CLIENT_ID.strip():
+            logger.warning(
+                "ONE_PAGER_APP_SP_CLIENT_ID is set without a secret; "
+                "using the app's own service principal"
+            )
+        return WorkspaceClient()
+    client_id, secret = credentials
+    logger.info("Writes run as the service principal %s", client_id)
+    # auth_type is required: the Databricks Apps runtime sets the app's own
+    # OAuth env vars, which would be picked up otherwise.
+    return WorkspaceClient(
+        client_id=client_id, client_secret=secret, auth_type="oauth-m2m"
+    )
+
+
 class Identity(str, Enum):
     """Who a SQL statement runs as (Architecture.md §8, Decision_Log §19).
 
@@ -222,9 +249,9 @@ class DatabricksConnection:
 
     Every statement runs as an explicit ``Identity``:
 
-    - ``APP``: the client built from the default auth. In Databricks Apps that
-      is the app's service principal (``DATABRICKS_CLIENT_ID`` /
-      ``DATABRICKS_CLIENT_SECRET``); one client is reused.
+    - ``APP``: the service principal of ``service_client``: the configured
+      one (``ONE_PAGER_APP_SP_CLIENT_ID``), else the app's own; one client
+      is reused.
     - ``USER``: deployed, a client with the user's token from the
       ``x-forwarded-access-token`` header. A missing token raises
       ``MissingUserTokenError``; there is never a fallback to the service
@@ -245,7 +272,7 @@ class DatabricksConnection:
             config: Application configuration containing warehouse details.
         """
         self._config = config
-        self._ws = WorkspaceClient()
+        self._ws = service_client(config)
 
     def _client(self, identity: Identity) -> WorkspaceClient:
         """Return the workspace client that runs statements as ``identity``.

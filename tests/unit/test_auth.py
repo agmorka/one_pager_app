@@ -130,7 +130,53 @@ def test__resolve_current_user__name_from_the_directory() -> None:
 
     assert user.initials == "X0W"
     assert user.display_name == "Agnieszka Kępkowska"
-    assert user.email == "agnieszka.kepkowska@bec.dk"
+    assert user.email == "x0w@bec.dk"  # from the initials, not the directory
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "directory_user",
+    [
+        DirectoryUser(display_name="Agnieszka Kępkowska (X0WADM)"),
+        DirectoryUser(display_name="X0WADM - Agnieszka Kępkowska"),
+        DirectoryUser(display_name="Agnieszka Kępkowska [x0wadm]"),
+        DirectoryUser(given_name="Agnieszka", family_name="Kępkowska (X0WAdm)"),
+        DirectoryUser(
+            display_name="x0wadm@becoc001.onmicrosoft.com Agnieszka Kępkowska"
+        ),
+    ],
+)
+def test__resolve_current_user__name_without_the_admin_account(
+    directory_user: DirectoryUser,
+) -> None:
+    user = resolve_current_user(
+        "x0wadm@becoc001.onmicrosoft.com", _config(), directory_user
+    )
+
+    assert user.display_name == "Agnieszka Kępkowska"
+
+
+@pytest.mark.unit
+def test__resolve_current_user__only_the_admin_account_falls_back_to_initials() -> (
+    None
+):
+    user = resolve_current_user(
+        "x0wadm@becoc001.onmicrosoft.com",
+        _config(),
+        DirectoryUser(display_name="X0WADM"),
+    )
+
+    assert user.display_name == "X0W"
+
+
+@pytest.mark.unit
+def test__resolve_current_user__email_domain_is_configurable() -> None:
+    user = resolve_current_user(
+        "x0wadm@becoc001.onmicrosoft.com",
+        _config(ONE_PAGER_APP_EMAIL_DOMAIN="example.com"),
+    )
+
+    assert user.email == "x0w@example.com"
 
 
 @pytest.mark.unit

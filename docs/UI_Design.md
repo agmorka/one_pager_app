@@ -28,14 +28,14 @@ flowchart LR
 ```
 
 ### Sidebar
-- BEC logo at the top
-- Current user identity (first name and surname from the directory, or the corporate initials when no name is available, + role badge: Viewer, Owner/SME, Approver, Admin; several can apply)
+- At the top: the logged user as "first name surname (initials)", e.g. "Agnieszka Kępkowska (X0W)" — the name from the directory without the admin account name ("X0WADM"), or only the corporate initials when no name is available — + role badge: Viewer, Owner/SME, Approver, Admin; several can apply
 - While the interim role group is used (Architecture §4), a small notice outside DEV: "Interim roles: DataPlatEng members act as Owner/SME, Approver and Admin"
 - An unrecognised account (no proxy identity, unknown domain or username format) sees only an "account not recognised — contact the platform team" page; no navigation is shown
 - Environment badge (DEV / INT / UAT / PRD) — always visible so testers never confuse environments
 - Navigation links: Registry, Editor, Review (visible to Approvers), Preview, Use Cases, Help, Admin (visible to Admins)
 - The Editor is always registered (Streamlit 1.38 cannot hide a single page and `st.switch_page` needs registered pages). Opened without an edit/create intent, it shows "Start from the Registry (➕ New) or from a One Pager's Edit action" and a button back to the Registry.
 - Active page highlighted
+- BEC logo at the bottom
 
 ### Page visibility by role
 
@@ -118,7 +118,7 @@ Always rendered as `[colored dot] + [text label]`. Colors from `ref_*_statuses` 
 ```
 
 #### Components
-- **Metrics row:** Colored count cards for each OP status (counts from `ref_op_status` ordering). Clicking a card filters the table to that status.
+- **Metrics row:** Colored count cards for each OP status (counts from `ref_op_status` ordering). The card of the status selected in the status filter is outlined; the cards have no buttons (filtering is done with the status filter).
 - **Filter bar:** Dropdowns/text inputs for each filter dimension. Filters combine with AND logic. "Clear filters" link resets all.
 - **Table:** Sortable columns. Click a row to navigate to Preview. Lock icon (🔒) shown next to locked items with the lock holder's initials.
 - **[+ New] button:** Visible only to Owner/SME group members. Opens the Editor with a blank document. Rendered as "➕ New" (Streamlit button labels are Markdown, so a leading "+" would become a bullet). Until the Owner/SME UC group names are decided, `can_create_one_pager()` allows any authenticated user ([Decision_Log.md](Decision_Log.md) §9, New_One_Pager_Plan D7).

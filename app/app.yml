@@ -20,6 +20,18 @@ env:
     value: "adm"
   - name: ONE_PAGER_APP_INITIALS_PATTERN
     value: "^[A-Z0-9]{3}$"
+  # Corporate email addresses: initials X0W -> x0w@bec.dk.
+  - name: ONE_PAGER_APP_EMAIL_DOMAIN
+    value: "bec.dk"
+  # Service principal of all writes (Delta tables, registry volume). Unset:
+  # the app's own service principal. To write as bp-spn-lhx-opa-{env}-001,
+  # add its OAuth client ID and secret as secret resources of the app and
+  # uncomment (One_Pager_App_Infrastructure_Setup.md, "Running writes as the
+  # SPN"):
+  # - name: ONE_PAGER_APP_SP_CLIENT_ID
+  #   valueFrom: opa-spn-client-id
+  # - name: ONE_PAGER_APP_SP_CLIENT_SECRET
+  #   valueFrom: opa-spn-client-secret
   # Role groups: unset while the interim BEC_BECOC001_LHX_{env}_DataPlatEng
   # group is used. Once the dedicated groups exist, add for example:
   # - name: ONE_PAGER_APP_GROUP_APPROVER

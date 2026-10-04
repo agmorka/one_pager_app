@@ -8,6 +8,8 @@ valid initials) is configuration, not code (``AppConfig.user_domains``,
 """
 
 import logging
+import re
+from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 from onepagerapp.config import AppConfig
@@ -55,17 +57,60 @@ def initials_from_username(username: str | None, config: AppConfig) -> str | Non
     return None
 
 
-def display_name(directory_user: DirectoryUser | None, initials: str) -> str:
+def strip_account_name(name: str, account_names: Iterable[str]) -> str:
+    """Remove admin account names such as "X0WADM" from a directory name.
+
+    The directory name of an admin account can carry the account, e.g.
+    "Agnieszka Kępkowska (X0WADM)" or "X0WADM - Agnieszka Kępkowska"; the app
+    shows only the person's name. Brackets and separators left empty are
+    removed too. Matching ignores case and only takes whole words.
+    """
+    accounts = sorted({a for a in account_names if a}, key=len, reverse=True)
+    for account in accounts:
+        pattern = rf"(?<!\w){re.escape(account)}(?!\w)"
+        name = re.sub(pattern, " ", name, flags=re.IGNORECASE)
+    name = re.sub(r"\(\s*\)|\[\s*\]", " ", name)
+    name = re.sub(r"\s+", " ", name)
+    return name.strip(" -\N{EN DASH},;:|/")
+
+
+def display_name(
+    directory_user: DirectoryUser | None,
+    initials: str,
+    account_names: Iterable[str] = (),
+) -> str:
     """Return the name shown for the user: ``givenName familyName``, ``displayName``.
 
-    Falls back to the initials when the directory has no name (or could not be
-    read). A name is never guessed from the username.
+    ``account_names`` (e.g. "X0WADM") are removed from the name
+    (``strip_account_name``). Falls back to the initials when the directory
+    has no name (or could not be read). A name is never guessed from the
+    username.
     """
     if directory_user is not None:
-        name = directory_user.full_name or directory_user.display_name
-        if name:
-            return name
+        for candidate in (directory_user.full_name, directory_user.display_name):
+            name = strip_account_name(candidate or "", account_names)
+            if name:
+                return name
     return initials
+
+
+def admin_account_names(
+    username: str | None, initials: str, config: AppConfig
+) -> set[str]:
+    """Account names that may appear in a directory name: "x0wadm", "X0WADM".
+
+    The username, its user part and the initials with every non-empty suffix;
+    never the bare initials (they are shown next to the name anyway, and
+    could be part of a real name).
+    """
+    username = (username or "").strip()
+    local_part = username.partition("@")[0]
+    names = {username}
+    if local_part.upper() != initials.upper():
+        names.add(local_part)
+    if initials:
+        names.update(initials + suffix for suffix in config.username_suffixes if suffix)
+    return names
 
 
 def resolve_current_user(
@@ -76,14 +121,20 @@ def resolve_current_user(
     ``initials`` is empty when the username is not recognised
     (``initials_from_username`` returns None); such a user matches no Owner,
     SME, Approver or Admin (and app.py refuses them access). The display name
-    comes from ``directory_user`` (``display_name``); it is for display only.
+    comes from ``directory_user`` (``display_name``), without the admin
+    account name; it is for display only. The email is the corporate address
+    of the initials (``AppConfig.email_for``, x0w@bec.dk), not the directory
+    email of the admin account.
     """
-    initials = initials_from_username(username, config)
+    initials = initials_from_username(username, config) or ""
+    name = display_name(
+        directory_user, initials, admin_account_names(username, initials, config)
+    )
     return CurrentUser(
         username=username,
-        initials=initials or "",
-        display_name=display_name(directory_user, initials or "") or username,
-        email=(directory_user.email if directory_user else None) or "",
+        initials=initials,
+        display_name=name or username,
+        email=config.email_for(initials),
     )
 
 
