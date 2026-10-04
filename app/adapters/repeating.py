@@ -353,7 +353,7 @@ def render_repeating_items(
             _render_form(section, items)
             return
         _close_form(section)
-    if st.button(f"➕ Add {section.item_label}", key=f"{section.key}_add"):  # noqa: RUF001
+    if st.button(f"Add {section.item_label}", key=f"{section.key}_add"):
         _open_form(section, "new", {})
         _rerun(section)
 

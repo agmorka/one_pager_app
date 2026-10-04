@@ -344,7 +344,7 @@ def render_pending_prs_section(
         logger.exception("Failed to load the pending PRs")
         render_load_error("admin_retry_pending_prs", e)
         return
-    st.info(RETRY_PR_UNAVAILABLE, icon="ℹ️")  # noqa: RUF001
+    st.info(RETRY_PR_UNAVAILABLE, icon=":material/info:")
     if not rows:
         st.success("No pending PRs: every approved One Pager has its PR.")
         return

@@ -18,7 +18,7 @@ from onepagerapp.state_machine import Actor
 from onepagerapp.timeutils import utc_label
 
 SERVICES_MISSING_MESSAGE = "Services not initialized. Please refresh the page."
-ALERT_ICON = "⚠️"
+ALERT_ICON = ":material/warning:"
 
 
 def require_data_access() -> DataAccess:

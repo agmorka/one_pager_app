@@ -321,7 +321,7 @@ def test__editor__badges_and_summary_link_to_tabs(
     at = _editor(services).run()
 
     badges = next(c.value for c in at.caption if "Needs attention" in c.value)
-    assert "Use Cases 🔴 1" in badges
+    assert "Use Cases (1)" in badges
     assert "Basics" not in badges
     issue = next(b for b in at.button if b.key.startswith("edit_issue_submit_Data S"))
     assert issue.label == "This field is required."
@@ -485,7 +485,7 @@ def test__editor__review_tab_checklist_and_blocked_submit(
     at = _tab(_editor(services).run(), "Review")
 
     assert not at.exception
-    assert any(m.value == "✅ Basics" for m in at.markdown)
+    assert any(m.value == "Basics: no issues" for m in at.markdown)
     check = at.button(key="edit_review_check_Data Sources")
     assert "issue(s)" in check.label
     assert at.button(key="edit_review_submit").disabled

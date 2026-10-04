@@ -260,36 +260,36 @@ def render_content_sections(
 
     st.subheader("Content")
 
-    with st.expander("📝 Description", expanded=True):
+    with st.expander("Description", expanded=True):
         st.write(doc.description or "*No description provided.*")
 
-    with st.expander("🎯 Business Problem Statement"):
+    with st.expander("Business Problem Statement"):
         st.write(
             doc.business_problem_statement
             or "*No business problem statement provided.*"
         )
 
-    with st.expander("💼 Use Cases"):
+    with st.expander("Use Cases"):
         _show_table(use_case_rows, USE_CASE_COLUMNS, "No use cases provided.")
 
-    with st.expander("✅ Business Requirements"):
+    with st.expander("Business Requirements"):
         _show_table(
             doc.business_requirements,
             REQUIREMENT_COLUMNS,
             "No business requirements provided.",
         )
 
-    with st.expander("📊 Data Sources"):
+    with st.expander("Data Sources"):
         _show_table(doc.data_sources, DATA_SOURCE_COLUMNS, "No data sources provided.")
 
-    with st.expander("🔍 Data Product Preview"):
+    with st.expander("Data Product Preview"):
         _show_table(
             doc.data_product_preview,
             DATA_ELEMENT_COLUMNS,
             "No data product preview provided.",
         )
 
-    with st.expander("🔐 Classification"):
+    with st.expander("Classification"):
         dc = doc.data_classification
         if dc:
             st.write(
@@ -312,7 +312,7 @@ def render_content_sections(
                 "No retention requirements provided.",
             )
 
-    with st.expander("🏛️ Governance"):
+    with st.expander("Governance"):
         governance = doc.data_governance_artifacts
         st.markdown("**Business Concepts**")
         _show_table(
@@ -333,7 +333,7 @@ def render_content_sections(
             "No CDE lineage provided.",
         )
 
-    with st.expander("🧭 Scope & Questions"):
+    with st.expander("Scope & Questions"):
         st.markdown("**Out of Scope**")
         _show_list(doc.out_of_scope, "Nothing listed as out of scope.")
         st.markdown("**Open Questions**")
@@ -430,7 +430,7 @@ def render_review_comments(  # noqa: C901 - one branch per comment state
         unresolved = [c for c in comments if not c.resolved]
         resolved = [c for c in comments if c.resolved]
         with st.expander(
-            f"🗨️ {section} ({len(unresolved)} open)", expanded=bool(unresolved)
+            f"{section} ({len(unresolved)} open)", expanded=bool(unresolved)
         ):
             if unresolved:
                 st.markdown("**Unresolved:**")
@@ -446,7 +446,7 @@ def render_review_comments(  # noqa: C901 - one branch per comment state
                         st.write(comment.comment)
                         if can_resolve:
                             st.button(
-                                "✅ Mark resolved",
+                                "Mark resolved",
                                 key=f"preview_resolve_{comment.id}",
                                 disabled=not resolve.enabled,
                                 help=resolve.tooltip
@@ -460,7 +460,7 @@ def render_review_comments(  # noqa: C901 - one branch per comment state
                                 ),
                             )
                         else:
-                            st.info("⚠️ Unresolved — awaiting action")
+                            st.info("Unresolved — awaiting action")
 
             if resolved:
                 st.markdown("**Resolved:**")
@@ -475,7 +475,7 @@ def render_review_comments(  # noqa: C901 - one branch per comment state
                             f"• Resolved by {comment.resolved_by}"
                         )
                         st.write(comment.comment)
-                        st.success("✅ Resolved")
+                        st.success("Resolved")
 
 
 def _release_my_lock(
@@ -534,15 +534,15 @@ def render_lock_indicator(
 
     if not action.enabled:
         st.warning(
-            f"🔒 **Locked by {lock.locked_by_name}** ({lock.locked_by_initials}) "
+            f"**Locked by {lock.locked_by_name}** ({lock.locked_by_initials}) "
             f"since {acquired} (expires {expires}). Read-only mode.",
-            icon="🔒",
+            icon=":material/lock:",
         )
         return
 
     st.info(
-        f"🔒 **Locked by you** since {acquired} (expires {expires}).",
-        icon="🔒",
+        f"**Locked by you** since {acquired} (expires {expires}).",
+        icon=":material/lock:",
     )
     if st.button(
         "Release my lock",
@@ -554,14 +554,14 @@ def render_lock_indicator(
 
 # Preview actions in display order → button label (UI_Design.md §4.4).
 ACTION_BUTTONS = {
-    "edit": "✏️ Edit",
-    "update": "🔄 Update",
-    "change_dp_status": "🚦 Change DP Status",
-    "approve": "✅ Approve",
-    "reject": "❌ Reject",
-    "add_comment": "📝 Add Comment",
-    "cancel": "🛑 Cancel One Pager",
-    "export_pdf": "📄 Export PDF",
+    "edit": "Edit",
+    "update": "Update",
+    "change_dp_status": "Change DP Status",
+    "approve": "Approve",
+    "reject": "Reject",
+    "add_comment": "Add Comment",
+    "cancel": "Cancel One Pager",
+    "export_pdf": "Export PDF",
 }
 
 
@@ -726,7 +726,7 @@ def render_review_banner(one_pager_id: str) -> None:
     """Review-mode notice with the way back to the queue (UI_Design.md §4.3)."""
     col_text, col_back = st.columns([4, 1])
     col_text.info(
-        f"🔎 **Review mode** — you are reviewing {one_pager_id}. Approve or "
+        f"**Review mode** — you are reviewing {one_pager_id}. Approve or "
         "reject it with the actions below.",
     )
     if col_back.button(
@@ -758,7 +758,7 @@ def export_pdf_dialog(
         "Cases and change log."
     )
     st.download_button(
-        f"⬇️ Download {export.filename}",
+        f"Download {export.filename}",
         data=export.content,
         file_name=export.filename,
         mime="application/pdf",
@@ -948,7 +948,7 @@ except Exception as e:
 
 # Not found state
 if not preview_data:
-    st.error(f"❌ One Pager **{one_pager_id}** not found.")
+    st.error(f"One Pager **{one_pager_id}** not found.")
     st.info("Use the **Registry** tab in the sidebar to browse available One Pagers.")
     st.stop()
 

@@ -275,15 +275,15 @@ def _render_checklist(doc: OnePagerDocument) -> int:
         count = len(issues.get(tab, []))
         if count:
             st.button(
-                f"⚠ {tab}: {count} issue(s) — open the tab",
+                f"{tab}: {count} issue(s) — open the tab",
                 key=f"edit_review_check_{tab}",
                 on_click=_go_to_tab,
                 args=(tab,),
             )
         else:
-            st.markdown(f"✅ {tab}")
+            st.markdown(f"{tab}: no issues")
     for error in issues.get("Form", []):
-        st.markdown(f"⚠ {error.message}")
+        st.markdown(error.message)
     return sum(len(v) for v in issues.values())
 
 
@@ -303,7 +303,7 @@ def _render_open_comments(data_access: DataAccess, one_pager_id: str) -> None:
     unresolved = [c for c in comments if not c.resolved]
     resolved = [c for c in comments if c.resolved]
     if not unresolved:
-        st.caption("✅ Every review comment is resolved.")
+        st.caption("Every review comment is resolved.")
     for comment in unresolved:
         with st.container(border=True):
             st.markdown(
@@ -313,7 +313,7 @@ def _render_open_comments(data_access: DataAccess, one_pager_id: str) -> None:
             st.write(comment.comment)
             if user is not None:
                 st.button(
-                    "✅ Mark resolved",
+                    "Mark resolved",
                     key=f"edit_resolve_{comment.id}",
                     on_click=_resolve_in_editor,
                     args=(data_access, one_pager_id, comment.id, user),
@@ -322,7 +322,7 @@ def _render_open_comments(data_access: DataAccess, one_pager_id: str) -> None:
         with st.expander(f"Resolved comments ({len(resolved)})"):
             for comment in resolved:
                 st.markdown(
-                    f"✅ **{section_label(comment.section)}** · "
+                    f"**{section_label(comment.section)}** · "
                     f"{comment.reviewer_name}: {comment.comment} "
                     f"(resolved by {comment.resolved_by})"
                 )
@@ -514,7 +514,9 @@ def navigation_guard(
         _release_quietly(data_access, edit_id, user)
         return
     with st.sidebar:
-        st.warning(f"Unsaved changes in the Editor ({edit_id}).", icon="✏️")
+        st.warning(
+            f"Unsaved changes in the Editor ({edit_id}).", icon=":material/edit:"
+        )
         if st.button("Return to the Editor", key="guard_return"):
             open_in_editor(edit_id)
     if st.session_state.get("guard_prompted") != edit_id:
@@ -553,7 +555,7 @@ def _open(data_access: DataAccess, one_pager_id: str, user: CurrentUser) -> None
         )
 
     if not session.lock.acquired:
-        st.warning(session.lock.message, icon="🔒")
+        st.warning(session.lock.message, icon=":material/lock:")
         st.info("You can view it in Preview mode.")
         _stop_with_preview_link(one_pager_id)
 
@@ -589,7 +591,7 @@ def _heartbeat(data_access: DataAccess, one_pager_id: str, user: CurrentUser) ->
         st.warning(
             f"You no longer hold the edit lock. {result.message} "
             "Your unsaved changes cannot be saved.",
-            icon="🔒",
+            icon=":material/lock:",
         )
         _stop_with_preview_link(one_pager_id)
     st.session_state["edit_lock"] = result.lock
@@ -603,7 +605,7 @@ def render_header(doc: OnePagerDocument) -> None:
         f"**Data Product status:** ● {row.data_product_status} &nbsp;·&nbsp; "
         f"**Version:** v{row.version}"
     )
-    st.caption(f"🔒 Locked by you{_lock_expiry(st.session_state.get('edit_lock'))}")
+    st.caption(f"Locked by you{_lock_expiry(st.session_state.get('edit_lock'))}")
 
 
 # Top-level document key → editor tab (UI_Design.md §4.2).
@@ -665,7 +667,7 @@ def issues_by_tab(errors: list[ValidationError]) -> dict[str, list[ValidationErr
 
 def tab_label(name: str, issue_count: int) -> str:
     """Tab label with a red badge when the tab has issues."""
-    return f"{name} 🔴 {issue_count}" if issue_count else name
+    return f"{name} ({issue_count})" if issue_count else name
 
 
 def _go_to_tab(tab: str) -> None:
@@ -716,7 +718,7 @@ def render_issue_summary(
     count = sum(len(v) for v in issues.values())
     if not count:
         return
-    with st.expander(f"⚠ {count} {title}", expanded=key == "save"):
+    with st.expander(f"{count} {title}", expanded=key == "save"):
         for tab, errors in issues.items():
             st.markdown(f"**{tab}**")
             for i, error in enumerate(errors):
