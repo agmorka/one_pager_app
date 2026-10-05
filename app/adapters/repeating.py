@@ -1,16 +1,18 @@
 """Repeating-items pattern for array sections (UI_Design.md §4.2, §5).
 
-1. A summary table shows the existing items.
-2. **+ Add** opens an inline form below the table.
-3. **Edit** on an item opens the form pre-filled with that item.
-4. **Remove** on an item asks for confirmation, then removes it.
+1. One list shows the existing items: a title and the key fields of each,
+   with **Edit** and **Remove** next to it.
+2. **+ Add** opens an inline form under the list.
+3. **Edit** on an item opens the form pre-filled, right under that item.
+4. **Remove** on an item asks for confirmation (under the item), then removes it.
 5. Changes only touch the editor's working copy; nothing is stored until
    **Save Draft**.
 
 Items are the dicts stored in the document (camelCase keys). A list of plain
 strings (e.g. ``outOfScope``) is edited through ``render_string_items``.
 
-The item-level helpers (``clean_item``, ``item_errors``, ``summary_rows``) are
+The item-level helpers (``clean_item``, ``item_errors``, ``summary_rows``,
+``item_details``) are
 pure so they can be unit tested without Streamlit.
 """
 
@@ -158,6 +160,18 @@ def summary_rows(fields: list[FieldSpec], items: list[dict[str, Any]]) -> pd.Dat
         [{f.label: _display(item.get(f.name)) for f in shown} for item in items],
         columns=[f.label for f in shown],
     )
+
+
+def item_details(section: RepeatingSection, item: dict[str, Any]) -> str:
+    """Describe an item by its other table fields: "Label: value · ..."."""
+    parts = []
+    for spec in section.fields:
+        if not spec.in_table or spec.name == section.title_field:
+            continue
+        value = _display(item.get(spec.name))
+        if value not in ("", None):
+            parts.append(f"{spec.label}: {value}")
+    return " · ".join(parts)
 
 
 def item_title(section: RepeatingSection, item: dict[str, Any], index: int) -> str:
@@ -317,43 +331,56 @@ def _render_remove_confirmation(
         _rerun(section)
 
 
+def _render_item(
+    section: RepeatingSection, items: list[dict[str, Any]], index: int
+) -> None:
+    """One item: number, title, key fields, Edit and Remove."""
+    item = items[index]
+    col_title, col_edit, col_remove = st.columns([6, 1, 1], vertical_alignment="center")
+    col_title.markdown(f"**{index + 1}. {item_title(section, item, index)}**")
+    details = item_details(section, item)
+    if details:
+        col_title.caption(details)
+    if col_edit.button("Edit", key=f"{section.key}_edit_{index}"):
+        _open_form(section, index, item)
+        _rerun(section)
+    if col_remove.button("Remove", key=f"{section.key}_remove_{index}"):
+        st.session_state[f"{section.key}_confirm_remove"] = index
+        _rerun(section)
+
+
 def render_repeating_items(
     section: RepeatingSection, items: list[dict[str, Any]]
 ) -> None:
-    """Render the summary table, per-item actions and the inline form.
+    """Render the item list, per-item actions and the inline form.
 
+    The edit form and the remove confirmation open right under their item.
     ``items`` is the list inside the editor's working copy; it is changed in
     place.
     """
-    if items:
-        st.dataframe(
-            summary_rows(section.fields, items),
-            hide_index=True,
-            use_container_width=True,
-        )
-    else:
-        st.caption(section.empty)
-
-    confirm_index = st.session_state.get(f"{section.key}_confirm_remove")
-    for i, item in enumerate(items):
-        col_title, col_edit, col_remove = st.columns([6, 1, 1])
-        col_title.write(f"{i + 1}. {item_title(section, item, i)}")
-        if col_edit.button("Edit", key=f"{section.key}_edit_{i}"):
-            _open_form(section, i, item)
-            _rerun(section)
-        if col_remove.button("Remove", key=f"{section.key}_remove_{i}"):
-            st.session_state[f"{section.key}_confirm_remove"] = i
-            _rerun(section)
-    if isinstance(confirm_index, int) and 0 <= confirm_index < len(items):
-        _render_remove_confirmation(section, items, confirm_index)
-
-    if _form_key(section) in st.session_state:
-        target = st.session_state[_form_key(section)]
-        if target == "new" or (isinstance(target, int) and target < len(items)):
-            _render_form(section, items)
-            return
+    target = st.session_state.get(_form_key(section))
+    if target is not None and not (
+        target == "new" or (isinstance(target, int) and target < len(items))
+    ):
         _close_form(section)
-    if st.button(f"Add {section.item_label}", key=f"{section.key}_add"):
+        target = None
+    confirm_index = st.session_state.get(f"{section.key}_confirm_remove")
+
+    if not items:
+        st.caption(section.empty)
+    for i in range(len(items)):
+        with st.container(border=True):
+            _render_item(section, items, i)
+            if target == i:
+                _render_form(section, items)
+            elif confirm_index == i:
+                _render_remove_confirmation(section, items, i)
+
+    if target == "new":
+        _render_form(section, items)
+    elif target is None and st.button(
+        f":material/add: Add {section.item_label}", key=f"{section.key}_add"
+    ):
         _open_form(section, "new", {})
         _rerun(section)
 

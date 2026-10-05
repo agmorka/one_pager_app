@@ -28,6 +28,9 @@ REVIEW_FLASH_KEY = "review_flash"
 USE_CASE_SELECTED_KEY = "uc_selected_id"
 # "create" or "edit": what the Editor page shows.
 EDITOR_MODE_KEY = "editor_mode"
+# One-time confirmation shown when the Editor opens (kept outside the
+# editor's own "edit_" state, which is cleared when a One Pager is opened).
+EDITOR_FLASH_KEY = "editor_flash"
 # The One Pager the Editor edits (edit mode).
 EDITOR_ID_KEY = "editor_one_pager_id"
 
