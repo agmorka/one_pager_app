@@ -177,7 +177,11 @@ def acquire_lock(  # noqa: PLR0913 - every argument is part of the lock identity
 
     The write is conditional on the lock row not having changed in between, and
     the row is read back afterwards, so of two sessions racing for the same
-    lock only one ends up holding it.
+    lock only one ends up holding it. A failed write leaves the caller holding
+    the lock when the row read back is still its own: two overlapping re-runs
+    of one session (e.g. a field edit and the **Save** click right after it)
+    can make one heartbeat MERGE fail with a Delta write conflict, and that
+    must not look like another browser tab.
 
     Args:
         data_access: Storage for the ``locks`` table.
@@ -214,13 +218,18 @@ def acquire_lock(  # noqa: PLR0913 - every argument is part of the lock identity
 
     written = data_access.write_lock(lock, now=now)
     stored = data_access.get_lock(one_pager_id)
-    if not written or stored is None or not is_held_by(stored, user, session_id):
+    if stored is None or is_expired(stored, now):
+        msg = f"Lock on {one_pager_id} could not be written"
+        raise RuntimeError(msg)
+    if not is_held_by(stored, user, session_id):
         # Another session won the race between our read and our write.
         logger.info(f"Lock race on {one_pager_id} lost by {user.initials}")
-        if stored is None or is_expired(stored, now):
-            msg = f"Lock on {one_pager_id} could not be written"
-            raise RuntimeError(msg)
         return _blocked(stored, user)
+    if not written:
+        # Our write conflicted, but the active lock is still this session's
+        # (a concurrent write from the same session): keep editing.
+        logger.info(f"Lock write on {one_pager_id} conflicted within the session")
+        return LockResult(LockStatus.REUSED, stored)
 
     if status is LockStatus.OVERRIDDEN and existing is not None:
         log_lock_override(
