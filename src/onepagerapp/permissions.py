@@ -456,6 +456,9 @@ def get_status_path(one_pager_status: str, version: str) -> list[PathStep]:
     Review is a step inside Submit and is shown as In Review. A cancelled One
     Pager ends in Cancelled.
     """
+    if one_pager_status == OP_CANCELLED:
+        # Cancelling raises MAJOR too, and is only possible before approval.
+        return [PathStep(DRAFT, "done"), PathStep(OP_CANCELLED, "cancelled")]
     major = _major(version)
     # The approved version an update started from (an approval itself raises
     # MAJOR, so an Approved vN came from vN-1 when N > 1).
@@ -464,8 +467,6 @@ def get_status_path(one_pager_status: str, version: str) -> list[PathStep]:
         labels = [f"Approved v{base}.0.0", DRAFT_UPDATE, IN_REVIEW, APPROVED]
     else:
         labels = [DRAFT, IN_REVIEW, APPROVED]
-    if one_pager_status == OP_CANCELLED:
-        return [PathStep(labels[0], "done"), PathStep(OP_CANCELLED, "cancelled")]
     position = {
         DRAFT: 0,
         DRAFT_UPDATE: 1,

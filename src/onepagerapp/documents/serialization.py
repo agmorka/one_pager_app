@@ -66,6 +66,9 @@ def document_to_dict(document: OnePagerDocument) -> dict[str, Any]:
     """Build a schema-shaped YAML dict from an OnePagerDocument.
 
     Optional/empty sections are omitted so the output stays close to the schema.
+    No timestamps or user names are written (``createdBy``, ``createdAt``,
+    ``lastUpdated``, the change log's ``date`` and ``author``); older files
+    that have them lose them when a new version is written.
     """
     owner: dict[str, Any] = {
         "name": document.owner_name,
@@ -103,14 +106,23 @@ def document_to_dict(document: OnePagerDocument) -> dict[str, Any]:
         "outOfScope": document.out_of_scope,
         "openQuestions": document.open_questions,
         "assumptions": document.assumptions,
-        "createdBy": document.created_by,
-        "createdAt": document.created_at,
-        "lastUpdated": document.last_updated,
-        "changeLog": document.change_log,
+        "changeLog": [
+            change_log_item(str(e.get("version", "")), str(e.get("summary", "")))
+            for e in document.change_log
+        ],
     }
     data.update({key: value for key, value in optional.items() if value})
 
     return data
+
+
+def change_log_item(version: str, summary: str) -> dict[str, str]:
+    """Entry of the YAML ``changeLog``: the version and what changed.
+
+    The file holds no timestamps and no authors; when and by whom is in the
+    ``change_log`` table.
+    """
+    return {"version": version, "summary": summary}
 
 
 def document_to_yaml(document: OnePagerDocument) -> str:

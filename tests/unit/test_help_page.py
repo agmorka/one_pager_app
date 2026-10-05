@@ -207,7 +207,7 @@ def test__badge_background__text_color__readable(
 def test__viewer__open_help_page__every_section_rendered(
     mock_data_access: MockDataAccess, switched: list[str]
 ) -> None:
-    """The page has the lifecycle, roles, quick reference and badges."""
+    """The page has the lifecycle, roles and quick reference."""
     # When
     at = page_app("help.py", mock_data_access, VIEWER, frozenset()).run()
 
@@ -220,7 +220,6 @@ def test__viewer__open_help_page__every_section_rendered(
         "The two-status lifecycle",
         "Roles and responsibilities",
         "Glossary",
-        "Status badges",
     ]
     expected = {"One Pager status", "Data Product status", "Valid status combinations"}
     assert expected <= {s.value for s in at.subheader}

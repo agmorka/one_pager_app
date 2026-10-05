@@ -121,7 +121,7 @@ def _rejected_and_reworked(data_access: MockDataAccess) -> None:
                 ("Approved", "next"),
             ],
         ),
-        ("Cancelled", "0.3.0", [("Draft", "done"), ("Cancelled", "cancelled")]),
+        ("Cancelled", "1.0.0", [("Draft", "done"), ("Cancelled", "cancelled")]),
     ],
 )
 def test__status__get_status_path__steps_and_position(

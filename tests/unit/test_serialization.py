@@ -12,6 +12,7 @@ from onepagerapp.documents.serialization import (
 )
 from tests.helpers import FIXTURES_DIR
 
+# A document as the app writes it: no timestamps and no user names.
 CREATED = {
     "structureDefinition": "structure_one_pager_v_1.json",
     "dataProduct": "customer_master",
@@ -23,6 +24,11 @@ CREATED = {
     "version": "0.1.0",
     "dataProductOwner": {"name": "A B", "initials": "ABR", "email": "a@b.dk"},
     "description": "d",
+    "changeLog": [{"version": "0.1.0", "summary": "Initial draft created"}],
+}
+# An older document with the audit fields the app no longer writes.
+CREATED_WITH_AUDIT_FIELDS = {
+    **CREATED,
     "createdBy": "A B",
     "createdAt": "2026-09-29T10:00:00+00:00",
     "lastUpdated": "2026-09-29T10:00:00+00:00",
@@ -39,15 +45,15 @@ CREATED = {
 
 def _approved_fixture() -> dict[str, Any]:
     """Return OP-0001 v1.0.0, a complete v2 document, as a dict."""
-    path = FIXTURES_DIR / "OP-0001" / "OP-0001_v1.0.0.yml"
+    path = FIXTURES_DIR / "one_pagers" / "OP-0001" / "OP-0001_v1.0.0.yml"
     return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
 @pytest.mark.unit
-def test__created_document__from_dict__audit_fields_read() -> None:
-    """``createdBy`` and the change log are read."""
+def test__older_document__from_dict__audit_fields_read() -> None:
+    """``createdBy`` and the change log of older files are still read."""
     # When
-    document = document_from_dict(CREATED)
+    document = document_from_dict(CREATED_WITH_AUDIT_FIELDS)
 
     # Then
     assert document.created_by == "A B"
@@ -66,6 +72,21 @@ def test__created_document__round_trip__dict_and_yaml_unchanged() -> None:
     # Then
     assert as_dict == CREATED
     assert yaml.safe_load(as_yaml) == CREATED
+
+
+@pytest.mark.unit
+def test__older_document__to_dict__no_timestamps_or_user_names_written() -> None:
+    """Writing an older document drops its timestamps and user names."""
+    # Given
+    document = document_from_dict(CREATED_WITH_AUDIT_FIELDS)
+
+    # When
+    as_yaml = document_to_yaml(document)
+
+    # Then
+    assert yaml.safe_load(as_yaml) == CREATED
+    for key in ("createdBy", "createdAt", "lastUpdated", "date", "author"):
+        assert key not in as_yaml
 
 
 @pytest.mark.unit

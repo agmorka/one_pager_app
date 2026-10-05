@@ -175,6 +175,7 @@ def test__create_one_pager__end_to_end(
         data_product_type="Foundational",
         description="Created by tests/integration/test_create_one_pager.py",
         owner=PersonRef("Integration Test", "ITT", "it@bec.dk"),
+        business_problem_statement="Integration test of the create flow.",
     )
 
     result = create_one_pager(

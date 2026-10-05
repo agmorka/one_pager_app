@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import html
 import logging
 from typing import TYPE_CHECKING
@@ -124,6 +125,13 @@ def apply_theme() -> None:
         [data-testid="stSidebarNavLink"]:hover {
             background-color: rgba(255, 255, 255, 0.15);
         }
+        /* The page links sit in their own container: list them without the
+           default gap between elements. */
+        [data-testid="stSidebar"] [data-testid="stVerticalBlock"]:has(
+            > [data-testid="element-container"] > [data-testid="stPageLink"]
+        ) {
+            gap: 0.125rem;
+        }
         .status-badge {
             display: inline-flex;
             align-items: center;
@@ -153,6 +161,18 @@ def apply_theme() -> None:
         /* Consistent vertical rhythm instead of empty Markdown spacers. */
         .section-gap {
             height: 0.75rem;
+        }
+        a.download-link {
+            display: block;
+            padding: 0.4rem 0.75rem;
+            border-radius: 0.5rem;
+            background-color: #0c1c49;
+            color: #FFFFFF !important;
+            text-align: center;
+            text-decoration: none;
+        }
+        a.download-link:hover {
+            background-color: #1d3270;
         }
         .status-badge-dot {
             display: inline-block;
@@ -227,3 +247,18 @@ def role_badges(roles: list[str]) -> str:
 def section_gap() -> None:
     """Add a fixed vertical space between page sections."""
     st.markdown('<div class="section-gap"></div>', unsafe_allow_html=True)
+
+
+def download_link(label: str, content: bytes, filename: str, mime: str) -> str:
+    """HTML link that saves ``content`` as ``filename``, styled as a button.
+
+    The file is embedded as a ``data:`` URL, so it downloads in the browser
+    without a rerun or a request to the app. ``st.download_button`` is not
+    used: Streamlit 1.38 loads its frontend code on demand, and when that
+    load fails the user only sees "Cannot load Streamlit frontend code".
+    """
+    data = base64.b64encode(content).decode("ascii")
+    return (
+        f'<a class="download-link" href="data:{mime};base64,{data}" '
+        f'download="{html.escape(filename)}">{html.escape(label)}</a>'
+    )

@@ -3,7 +3,12 @@
 from typing import Any
 
 from onepagerapp.models import ValidationError
-from onepagerapp.validation.rules import MAX_NAME_LENGTH, MAX_TEXT_LENGTH, check_length
+from onepagerapp.validation.rules import (
+    BUSINESS_PROBLEM_REQUIRED_MESSAGE,
+    MAX_NAME_LENGTH,
+    MAX_TEXT_LENGTH,
+    check_length,
+)
 from onepagerapp.validation.schema import (
     load_lenient_schema,
     load_schema,
@@ -15,7 +20,8 @@ from onepagerapp.validation.schema import (
 def validate_lenient(document: dict[str, Any]) -> list[ValidationError]:
     """Validate a document for Save Draft (Backend_Design.md §4).
 
-    Only ``productName`` and ``description`` must be non-empty. Any other field
+    Only ``productName``, ``description`` and ``businessProblemStatement``
+    must be non-empty. Any other field
     may be missing or empty, but what is present must match the schema's
     shapes and types (the document is always validated against its schema,
     Requirements_and_Scope.md §5).
@@ -27,6 +33,12 @@ def validate_lenient(document: dict[str, Any]) -> list[ValidationError]:
     if not str(document.get("description") or "").strip():
         errors.append(ValidationError("description", "Description is required."))
     check_length(errors, "description", document.get("description"), MAX_TEXT_LENGTH)
+    if not str(document.get("businessProblemStatement") or "").strip():
+        errors.append(
+            ValidationError(
+                "businessProblemStatement", BUSINESS_PROBLEM_REQUIRED_MESSAGE
+            )
+        )
 
     structure_definition, version_errors = resolve_structure_definition(document)
     if structure_definition is None:

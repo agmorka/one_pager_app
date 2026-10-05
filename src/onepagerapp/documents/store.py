@@ -1,7 +1,9 @@
 """Filesystem store for One Pager YAML documents.
 
-Reads and writes ``{base}/{id}/{id}_v{version}.yml`` where ``base`` comes from
-ONE_PAGER_APP_VOLUME_PATH. The current version is supplied by the caller (from
+Reads and writes ``{base}/one_pagers/{id}/{id}_v{version}.yml`` where ``base``
+comes from ONE_PAGER_APP_VOLUME_PATH. The One Pager folders are kept in their
+own ``one_pagers`` folder, apart from other content of the volume (e.g. the
+app wheels). The current version is supplied by the caller (from
 the one_pager_status table); a highest-version fallback is used only when no
 version is given.
 
@@ -25,6 +27,9 @@ from onepagerapp.documents.serialization import document_from_dict, document_to_
 from onepagerapp.models import OnePagerDocument
 
 logger = logging.getLogger(__name__)
+
+# Folder under the base path that holds one folder per One Pager.
+ONE_PAGERS_FOLDER = "one_pagers"
 
 
 class OnePagerDocumentStore:
@@ -139,10 +144,10 @@ class OnePagerDocumentStore:
         return self._existing_file_for(one_pager_id, version) is not None
 
     def list_ids(self) -> list[str]:
-        """List One Pager IDs (subdirectories) available in all read locations."""
+        """List One Pager IDs (folders) available in all read locations."""
         ids: set[str] = set()
         for root in self._read_paths:
-            ids.update(self._files.list_dirs(root))
+            ids.update(self._files.list_dirs(root / ONE_PAGERS_FOLDER))
         return sorted(ids)
 
     @property
@@ -150,7 +155,7 @@ class OnePagerDocumentStore:
         return self._write_path or self._base_path
 
     def _dir_for(self, one_pager_id: str, root: Path | None = None) -> Path:
-        return (root or self._base_path) / one_pager_id
+        return (root or self._base_path) / ONE_PAGERS_FOLDER / one_pager_id
 
     def _file_for(
         self, one_pager_id: str, version: str, root: Path | None = None

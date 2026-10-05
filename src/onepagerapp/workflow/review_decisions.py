@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 from onepagerapp.audit import Outcome, log_event, log_permission_denied
 from onepagerapp.data_access.base import DataAccess, require_status_row
-from onepagerapp.documents import OnePagerDocumentStore
+from onepagerapp.documents import OnePagerDocumentStore, change_log_item
 from onepagerapp.models import (
     CurrentUser,
     OnePagerDocument,
@@ -42,6 +42,7 @@ from onepagerapp.workflow.transitions import (
     TRANSITION_FAILED_MESSAGE,
     TransitionError,
     apply_transitions,
+    discard_if_unreferenced,
     plan_transitions,
 )
 
@@ -215,16 +216,13 @@ def plan_approval(row: OnePagerStatusRow) -> ApprovalPlan:
     return ApprovalPlan(version=next_major(row.version), rules=rules)
 
 
-def _approved_document(  # noqa: PLR0913 - every argument ends up in the file
+def _approved_document(
     document: OnePagerDocument,
     row: OnePagerStatusRow,
     plan: ApprovalPlan,
     approved_row: OnePagerStatusRow,
-    user: CurrentUser,
-    now: datetime,
 ) -> OnePagerDocument:
     """Build the approved version file: operational fields from Delta."""
-    timestamp = now.isoformat(timespec="seconds")
     return replace(
         document,
         structure_definition=row.structure_definition,
@@ -234,38 +232,10 @@ def _approved_document(  # noqa: PLR0913 - every argument ends up in the file
         version=plan.version,
         change_log=[
             *document.change_log,
-            *(
-                {
-                    "version": plan.version,
-                    "date": timestamp,
-                    "author": user.display_name,
-                    "summary": rule.summary,
-                }
-                for rule in plan.rules
-            ),
+            *(change_log_item(plan.version, rule.summary) for rule in plan.rules),
         ],
         raw_content="",
     )
-
-
-def _discard_if_unreferenced(
-    data_access: DataAccess,
-    document_store: OnePagerDocumentStore,
-    one_pager_id: str,
-    version: str,
-) -> None:
-    """Remove a version file after a failed action, unless the row points to it.
-
-    If rolling back the status row failed too, the row may still reference
-    the file; then it must stay.
-    """
-    try:
-        current = data_access.get_one_pager_status_row(one_pager_id)
-    except Exception:
-        logger.exception(f"Re-reading {one_pager_id} after a failed action failed")
-        return
-    if current is not None and current.version != version:
-        document_store.discard_unreferenced(one_pager_id, version)
 
 
 def approve_one_pager(  # noqa: PLR0913 - every argument is part of the action
@@ -307,7 +277,7 @@ def approve_one_pager(  # noqa: PLR0913 - every argument is part of the action
     if document is None:
         msg = f"The document of {one_pager_id} v{row.version} could not be found."
         raise TransitionError(msg)
-    approved = _approved_document(document, row, plan, approved_row, user, now)
+    approved = _approved_document(document, row, plan, approved_row)
 
     # A file for this version can only be left over from an approval that
     # failed before the status row pointed to it.
@@ -336,9 +306,7 @@ def approve_one_pager(  # noqa: PLR0913 - every argument is part of the action
             version=plan.version,
         )
     except Exception:
-        _discard_if_unreferenced(
-            data_access, document_store, one_pager_id, plan.version
-        )
+        discard_if_unreferenced(data_access, document_store, one_pager_id, plan.version)
         raise
     log_event(
         "approve",

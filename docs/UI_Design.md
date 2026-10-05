@@ -224,7 +224,7 @@ For sections with arrays (use cases, requirements, sources, data elements, etc.)
 | State | What the user sees |
 |---|---|
 | **Loading** | Spinner while fetching existing document (edit mode) |
-| **New (empty form)** | Blank form with helper placeholder text from schema descriptions. Create mode shows only **Basics** (Data Product, Product Name, Business Domain, Product Type, Description, Owner, SMEs; **Add me as SME**) plus an optional Business Problem Statement, and a bottom bar with **[Create and continue editing]** (opens the new Draft in the Editor) / **[Create Draft]** (opens Preview) / **[Cancel]** (no change summary — creation is logged automatically as "Initial draft created"). The Owner is pre-filled with the current user. The new `OP-####` is Draft, In Definition, v0.1.0. |
+| **New (empty form)** | Blank form with helper placeholder text from schema descriptions. Create mode shows only **Basics** (Data Product, Product Name, Business Domain, Product Type, Description, Owner, SMEs; **Add me as SME**) plus the required Business Problem Statement, and a bottom bar with **[Create and continue editing]** (opens the new Draft in the Editor) / **[Create Draft]** (opens Preview) / **[Cancel]** (no change summary — creation is logged automatically as "Initial draft created"). The Owner is pre-filled with the current user. The new `OP-####` is Draft, In Definition, v0.1.0. |
 | **Editing (populated)** | Pre-filled form with current content |
 | **Validation errors** | Issue counts in the section list; the Review & submit checklist links each section; errors that block a save are listed above the bottom bar, each a link to its section. In edit mode, Basics has **Use my details** (Owner) and **Add me as SME**. |
 | **Save error** | Banner: "Save failed — your changes are preserved, please retry." Content stays in session. |
@@ -427,7 +427,7 @@ Same pattern: Loading / Populated / Empty / Error.
 - **Roles & responsibilities** summary table.
 - **How do I…:** step-by-step guides; the guides for the user's roles are shown, the others are collected in one expander. A page's **Help** button opens this page with that page's guide on top.
 - **Glossary** of the terms and abbreviations (One Pager, Data Product, SME, CDE, PII, Draft Update, edit lock, …).
-- **Status badge legend** with all colors/labels.
+- No separate status badge legend: the state diagrams of the two-status lifecycle already show every status in its badge color.
 
 Data is read from `ref_op_status` / `ref_dp_status` tables for badge colors/labels, and the transition rules are rendered from the service layer's serialized `TRANSITIONS` dict (per backend design §13).
 

@@ -3,12 +3,14 @@
 Three tiers, all derived from the JSON Schema (Requirements_and_Scope.md §5):
 
 - **create** — used when a new One Pager is created (New_One_Pager_Plan D2):
-  ``productName`` + ``description`` plus the keys the storage layer needs
+  ``productName``, ``description`` and ``businessProblemStatement`` plus the
+  keys the storage layer needs
   (``dataProduct``, ``businessDomain``, ``dataProductType``,
   ``dataProductOwner``). Works on the Editor's form input.
-- **lenient** (Save Draft) — only ``productName`` and ``description`` must be
-  non-empty; everything present must still have the right shape (the schema
-  with its ``required`` / ``minItems`` / ``minLength`` keywords removed).
+- **lenient** (Save Draft) — only ``productName``, ``description`` and
+  ``businessProblemStatement`` must be non-empty; everything present must
+  still have the right shape (the schema with its ``required`` /
+  ``minItems`` / ``minLength`` keywords removed).
 - **strict** (Submit for Review) — the full schema, including every
   ``required`` field and ``minItems``, plus the conditional business rules.
 

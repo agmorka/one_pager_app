@@ -548,8 +548,12 @@ def test__signed_in__run_app__logo_and_user_on_top_environment_at_the_bottom(
     kinds = [child.type for child in children]
     assert kinds[0] == "imgs"
     assert children[1].value == "\N{BUST IN SILHOUETTE} **Local Dev User (LDU)**"
-    last_link = len(kinds) - 1 - kinds[::-1].index("page_link")
-    assert kinds[last_link + 1] == "divider"
+    [links] = [
+        i
+        for i, child in enumerate(children)
+        if any(c.type == "page_link" for c in getattr(child, "children", {}).values())
+    ]
+    assert kinds[links + 1] == "divider"
     assert children[-1].value.startswith("Environment: ")
 
 

@@ -39,7 +39,7 @@ ENTRY_POINTS: list[tuple[str, Callable[..., object], tuple, dict]] = [
     (
         "cancel_one_pager",
         workflow.cancel_one_pager,
-        (DA, "OP-0001", USER),
+        (DA, STORE, "OP-0001", USER),
         {"reason": "x", "roles": ALL_ROLES},
     ),
     (

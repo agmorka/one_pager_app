@@ -348,6 +348,7 @@ def test__viewer_on_preview__click_export_pdf__download_offered(
     # Then
     assert not at.exception
     assert not at.error
-    downloads = at.get("download_button")
-    assert len(downloads) == 1
-    assert "OP-0001_v1.0.0.pdf" in downloads[0].proto.label
+    links = [m.value for m in at.markdown if "download-link" in m.value]
+    assert len(links) == 1
+    assert 'download="OP-0001_v1.0.0.pdf"' in links[0]
+    assert 'href="data:application/pdf;base64,JVBERi0' in links[0]  # "%PDF-"

@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 
 from onepagerapp.audit import Outcome, log_event, log_status_transition
 from onepagerapp.data_access.base import DataAccess
+from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.models import ChangeLogEntry, CurrentUser, OnePagerStatusRow
 from onepagerapp.state_machine import (
     TRANSITIONS,
@@ -120,7 +121,7 @@ def apply_transitions(  # noqa: PLR0913 - every argument is part of the change
         note: Text appended to every change-log summary (e.g. a comment).
         reviewed: The action is a review decision (Approve / Reject): sets
             ``reviewed_at`` and ``reviewed_by`` (Data_Model.md §3).
-        version: New document version (Approve); the change-log entries are
+        version: New document version (Approve, Cancel); the change-log entries are
             written for it. By default the version does not change.
 
     Returns:
@@ -220,6 +221,26 @@ def _undo_transition(
             user=user.initials,
             one_pager_id=previous.one_pager_id,
         )
+
+
+def discard_if_unreferenced(
+    data_access: DataAccess,
+    document_store: OnePagerDocumentStore,
+    one_pager_id: str,
+    version: str,
+) -> None:
+    """Remove a version file after a failed action, unless the row points to it.
+
+    If rolling back the status row failed too, the row may still reference
+    the file; then it must stay.
+    """
+    try:
+        current = data_access.get_one_pager_status_row(one_pager_id)
+    except Exception:
+        logger.exception(f"Re-reading {one_pager_id} after a failed action failed")
+        return
+    if current is not None and current.version != version:
+        document_store.discard_unreferenced(one_pager_id, version)
 
 
 def get_workflow_reference() -> dict[str, list[dict[str, object]]]:

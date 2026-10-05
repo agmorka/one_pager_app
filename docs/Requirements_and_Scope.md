@@ -57,7 +57,7 @@ Edit rights are scoped **per Data Product**: only that Data Product's Owner and 
 
 Rather than maintaining a separate, hand-written list of mandatory fields, the application derives field requirements directly from `structure_one_pager_v_1.json`, applied in two tiers:
 
-1. **Save as Draft (lenient)** — only `Product Name` and `Description` are required. All other fields may be left incomplete so the Owner can save partial work at any time.
+1. **Save as Draft (lenient)** — only `Product Name`, `Description` and `Business Problem Statement` are required. All other fields may be left incomplete so the Owner can save partial work at any time.
 2. **Submit for review (strict)** — before a One Pager can move from `Ready for Review` to `In Review`, it must satisfy every `required` field and array `minItems` constraint defined in the JSON Schema (e.g. at least one use case, one business requirement, one data source, one data product preview row, a complete `businessProblemStatement`, etc.).
 
 Beyond field presence, a small set of **conditional business rules** are enforced on top of the schema, matching the schema's own documented constraints, for example:

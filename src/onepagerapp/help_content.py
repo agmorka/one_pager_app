@@ -153,8 +153,7 @@ QUICK_REFERENCE: tuple[QuickReference, ...] = (
         (
             "Choose **New One Pager** on My work or in the Registry.",
             "Fill in the Basics (Data Product name, domain, type, Owner, SMEs; "
-            "**Add me as SME** adds you) and, if you like, the Business "
-            "Problem Statement.",
+            "**Add me as SME** adds you) and the Business Problem Statement.",
             "**Create and continue editing** opens the new Draft in the Editor "
             "for the other sections; **Create Draft** shows it in Preview. It "
             "starts as **Draft** (version 0.1.0) with the Data Product **In "

@@ -24,6 +24,7 @@ def _fill_and_create(at: AppTest) -> None:
     at.selectbox(key="create_business_domain").select("Customer")
     at.selectbox(key="create_data_product_type").select("Foundational")
     at.text_area(key="create_description").input("Unified customer view")
+    at.text_area(key="create_problem").input("Customer data is scattered.")
     at.run()
     button_labelled(at, "Create Draft").click().run()
 
@@ -144,7 +145,8 @@ def test__empty_form__click_create_draft__errors_and_nothing_written(
     errors = [e.value for e in at.error]
     assert "Data Product is required." in errors
     assert "Description is required." in errors
-    assert "5 issue(s)" in at.warning[0].value
+    assert "Business Problem Statement is required." in errors
+    assert "6 issue(s)" in at.warning[0].value
     assert switched == []
     assert mock_data_access.get_one_pager_status(NEW_ID) is None
 
@@ -207,6 +209,7 @@ def test__filled_form__create_and_continue_editing__editor_opens_new_draft(
     at.selectbox(key="create_business_domain").select("Customer")
     at.selectbox(key="create_data_product_type").select("Foundational")
     at.text_area(key="create_description").input("Unified customer view")
+    at.text_area(key="create_problem").input("Customer data is scattered")
     at.run()
 
     # When

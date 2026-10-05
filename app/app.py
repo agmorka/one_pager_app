@@ -21,6 +21,7 @@ from adapters.navigation import (
     REGISTRY_PAGE,
     REVIEW_PAGE,
     USE_CASES_PAGE,
+    reset_preview_on_sidebar_open,
 )
 from adapters.theme import apply_theme, environment_badge, role_badges
 from onepagerapp.audit import log_unrecognised_user
@@ -490,11 +491,13 @@ def main() -> None:
     with st.sidebar:
         render_sidebar_user(roles, group_roles)
         st.divider()
-        render_sidebar_links(pages, roles)
+        with st.container():  # styled as a list without gaps (theme.py)
+            render_sidebar_links(pages, roles)
 
     navigation_guard(
         pg.title, st.session_state.data_access, st.session_state.current_user_info
     )
+    reset_preview_on_sidebar_open(pg.title)
     render_sidebar_environment(config)
 
     pg.run()
