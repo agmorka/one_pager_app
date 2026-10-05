@@ -427,12 +427,23 @@ def table_frame(
     return pd.DataFrame(records, columns=TABLE_COLUMNS)
 
 
+def tint(color: str, strength: float = 0.3) -> str:
+    """Return ``color`` mixed with white, e.g. a light background for text."""
+    value = color.lstrip("#")
+    try:
+        rgb = [int(value[i : i + 2], 16) for i in (0, 2, 4)]
+    except ValueError:
+        return "#FFFFFF"
+    mixed = (round(255 - (255 - c) * strength) for c in rgb)
+    return "#" + "".join(f"{c:02X}" for c in mixed)
+
+
 def _styled(frame: pd.DataFrame, colors: dict[str, str]) -> object:
-    """Status cells with their badge color as a left border (text stays)."""
+    """Status cells on a light tint of their badge color (text stays dark)."""
 
     def style(value: object) -> str:
         color = colors.get(str(value))
-        return f"border-left: 6px solid {color};" if color else ""
+        return f"background-color: {tint(color)}; color: #1B1B1B;" if color else ""
 
     return frame.style.map(style, subset=list(STATUS_COLUMNS))
 
@@ -486,14 +497,14 @@ def _render_pagination(current_page: int, total_pages: int) -> None:
     prev_col, page_col, next_col, _, size_col = st.columns(
         [1, 1.2, 1, 3, 1.3], vertical_alignment="bottom"
     )
-    prev_col.button(
-        "← Prev",
-        disabled=current_page <= 1,
-        on_click=_go_to_page,
-        args=(current_page - 1,),
-        use_container_width=True,
-    )
     if total_pages > 1:
+        prev_col.button(
+            "← Prev",
+            disabled=current_page <= 1,
+            on_click=_go_to_page,
+            args=(current_page - 1,),
+            use_container_width=True,
+        )
         st.session_state["registry_page_choice"] = current_page
         page_col.selectbox(
             "Page",
@@ -503,13 +514,13 @@ def _render_pagination(current_page: int, total_pages: int) -> None:
             on_change=lambda: _go_to_page(st.session_state["registry_page_choice"]),
             label_visibility="collapsed",
         )
-    next_col.button(
-        "Next →",
-        disabled=current_page >= total_pages,
-        on_click=_go_to_page,
-        args=(current_page + 1,),
-        use_container_width=True,
-    )
+        next_col.button(
+            "Next →",
+            disabled=current_page >= total_pages,
+            on_click=_go_to_page,
+            args=(current_page + 1,),
+            use_container_width=True,
+        )
     size_col.selectbox(
         "Rows per page",
         PAGE_SIZES,

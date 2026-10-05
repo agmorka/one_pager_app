@@ -81,14 +81,20 @@ def page_header(title: str, subtitle: str, help_topic: str | None = None) -> Non
         return
     title_col, help_col = st.columns([8, 1], vertical_alignment="center")
     title_col.title(title)
-    if help_col.button(
+    with help_col:
+        help_button(help_topic)
+    st.caption(subtitle)
+
+
+def help_button(help_topic: str) -> None:
+    """**Help** button that opens the Help page on the guide for ``help_topic``."""
+    if st.button(
         ":material/help: Help",
         key=f"help_link_{help_topic}",
         help="How this page works",
         use_container_width=True,
     ):
         open_help(help_topic)
-    st.caption(subtitle)
 
 
 def set_flash(key: str, message: str) -> None:

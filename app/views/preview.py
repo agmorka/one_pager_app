@@ -41,6 +41,7 @@ from adapters.navigation import (
 from adapters.page import (
     ALERT_ICON,
     current_roles,
+    help_button,
     page_header,
     render_error_state,
     require_data_access,
@@ -206,7 +207,7 @@ def render_header(preview_data: PreviewData, op_colors: dict, dp_colors: dict) -
     col1, col2, col3 = st.columns([2, 1, 1])
 
     with col1:
-        page_header(header.product_name, PREVIEW_SUBTITLE, help_topic=TOPIC_PREVIEW)
+        page_header(header.product_name, PREVIEW_SUBTITLE)
         st.markdown(f"**ID:** {header.one_pager_id} | **Version:** {header.version}")
         st.markdown(
             f"**Owner:** {header.owner_name} ({header.owner_email}) | "
@@ -1187,10 +1188,13 @@ show_flash(PREVIEW_FLASH_KEY)
 # Populated state: render all regions
 header = preview_data.header
 review_mode = in_review_mode(one_pager_id, header.one_pager_status, roles)
+back_col, help_col = st.columns([6, 1], vertical_alignment="center")
+with help_col:
+    help_button(TOPIC_PREVIEW)
+if not review_mode and back_col.button("← Back to the Registry", key="preview_back"):
+    go_to_registry()
 if review_mode:
     render_review_banner(one_pager_id)
-elif st.button("← Back to the Registry", key="preview_back"):
-    go_to_registry()
 
 render_header(preview_data, op_colors, dp_colors)
 render_status_timeline(header.one_pager_status, header.version, preview_data.change_log)
