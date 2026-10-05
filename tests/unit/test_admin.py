@@ -665,7 +665,7 @@ def test__new_domain_entered__click_add__stored_with_success(
 
     # Then
     assert not at.exception
-    assert at.success[0].value == "Added Treasury."
+    assert at.toast[0].value == "Added Treasury."
     assert "Treasury" in _domains(mock_data_access)
 
 
@@ -684,7 +684,7 @@ def test__active_unchecked__click_save__value_deactivated(
 
     # Then
     assert not at.exception
-    assert at.success[0].value == "Saved HR."
+    assert at.toast[0].value == "Saved HR."
     assert "HR" not in _active_domains(mock_data_access)
 
 
@@ -722,7 +722,7 @@ def test__status_definitions_section__save_new_color__stored(
 
     # Then
     assert not at.exception
-    assert at.success[0].value == "Saved the status Approved."
+    assert at.toast[0].value == "Saved the status Approved."
     approved = next(
         r
         for r in get_status_definitions(

@@ -114,6 +114,12 @@ def apply_theme() -> None:
         [data-testid="stSidebar"] a {
             color: #FFFFFF !important;
         }
+        /* Inputs keep a light field, so their text stays dark. */
+        [data-testid="stSidebar"] [data-baseweb="select"] *,
+        [data-testid="stSidebar"] input,
+        [data-testid="stSidebar"] textarea {
+            color: #343333 !important;
+        }
         [data-testid="stSidebarNavLink"][aria-current="page"],
         [data-testid="stSidebarNavLink"]:hover {
             background-color: rgba(255, 255, 255, 0.15);
@@ -143,6 +149,10 @@ def apply_theme() -> None:
             font-size: 0.8em;
             font-weight: 700;
             letter-spacing: 0.05em;
+        }
+        /* Consistent vertical rhythm instead of empty Markdown spacers. */
+        .section-gap {
+            height: 0.75rem;
         }
         .status-badge-dot {
             display: inline-block;
@@ -212,3 +222,8 @@ def role_badges(roles: list[str]) -> str:
         f"{html.escape(role)}</span>"
         for role in roles
     )
+
+
+def section_gap() -> None:
+    """Add a fixed vertical space between page sections."""
+    st.markdown('<div class="section-gap"></div>', unsafe_allow_html=True)

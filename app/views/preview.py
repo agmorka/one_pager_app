@@ -19,7 +19,11 @@ Per Backend_Design.md §2, read permission is universal (authenticated users onl
 Per UI_Design.md §4.4, actions depend on role and status.
 """
 
+import html
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
 
 import pandas as pd
 import streamlit as st
@@ -29,9 +33,10 @@ from adapters.navigation import (
     PREVIEW_FLASH_KEY,
     PREVIEW_ID_KEY,
     REVIEW_MODE_KEY,
-    REVIEW_PAGE,
+    back_to_review_queue,
     go_to_registry,
     open_in_editor,
+    open_use_case,
 )
 from adapters.page import (
     ALERT_ICON,
@@ -44,7 +49,7 @@ from adapters.page import (
     signed_in_user,
     timestamp_label,
 )
-from adapters.theme import DEFAULT_BADGE_COLOR
+from adapters.theme import DEFAULT_BADGE_COLOR, section_gap
 from adapters.workflow_actions import (
     add_comment_and_report,
     approve_and_report,
@@ -54,6 +59,12 @@ from adapters.workflow_actions import (
     reject_and_report,
     resolve_comment_and_report,
     update_and_report,
+)
+from onepagerapp.compare import (
+    ComparisonBase,
+    SectionChange,
+    comparison_base,
+    diff_documents,
 )
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.data_access.connection import user_error_message
@@ -73,6 +84,7 @@ from onepagerapp.export import (
 )
 from onepagerapp.locking import active_lock, release_lock
 from onepagerapp.models import (
+    ChangeLogEntry,
     CurrentUser,
     LockInfo,
     PreviewData,
@@ -83,7 +95,7 @@ from onepagerapp.permissions import (
     ActionState,
     PermissionDeniedError,
     get_action_states,
-    get_status_timeline_stages,
+    get_status_path,
 )
 from onepagerapp.review import MAX_COMMENT_LENGTH, SECTION_LABELS, section_label
 from onepagerapp.state_machine import IN_REVIEW, Actor, TransitionRule
@@ -119,60 +131,64 @@ def render_status_badge(status: str, color: str) -> None:
     st.markdown(html, unsafe_allow_html=True)
 
 
-def render_status_timeline(current_status: str) -> None:
-    """Render the One Pager status timeline (Draft → Ready → In Review → Approved).
+_STEP_STYLE = {
+    "done": ("#65B676", "normal", "✓"),
+    "current": ("#0c1c49", "bold", "●"),
+    "next": ("#9E9E9E", "normal", "○"),
+    "cancelled": ("#F34421", "bold", "✕"),
+}
 
-    Shows the linear progression with current stage highlighted.
 
-    Args:
-        current_status: Current one_pager_status value.
-
-    """
-    stages = get_status_timeline_stages()
-    # Find current stage index
-    current_idx = next(
-        (i for i, s in enumerate(stages) if s["status"] == current_status),
-        None,
-    )
-
-    st.subheader("Status Timeline")
-
-    # Render as: ● Draft  →  ● Ready for Review  →  ● In Review  →  ● Approved
-    # Current stage is bold/highlighted
-    timeline_html = (
-        '<div style="display: flex; align-items: center; gap: 10px; '
-        'font-size: 0.9em; margin: 1rem 0;">'
-    )
-
-    for i, stage in enumerate(stages):
-        is_current = i == current_idx
-        is_past = current_idx is not None and i < current_idx
-
-        # Dot color: blue if current, green if past, gray if future
-        if is_current:
-            dot_color = "#3599B8"
-            font_weight = "bold"
-        elif is_past:
-            dot_color = "#65B676"
-            font_weight = "normal"
-        else:
-            dot_color = "#CCCCCC"
-            font_weight = "normal"
-
-        timeline_html += (
-            f'<span style="font-weight: {font_weight}; color: {dot_color};">'
-            f"● {stage['label']}</span>"
-        )
-
-        # Add arrow between stages (not after last one)
-        if i < len(stages) - 1:
-            arrow_color = "#65B676" if is_past else "#CCCCCC"
-            timeline_html += (
-                f'<span style="color: {arrow_color}; margin: 0 5px;">→</span>'
+def last_rejection(change_log: list[ChangeLogEntry]) -> ChangeLogEntry | None:
+    """Return the latest status change if it sent the One Pager back from review."""
+    for entry in change_log:  # newest first
+        if entry.event_type != "status_transition" or entry.status_field not in (
+            None,
+            "one_pager_status",
+        ):
+            continue
+        return (
+            entry
+            if entry.from_status == IN_REVIEW
+            and entry.to_status
+            in (
+                "Draft",
+                "Draft Update",
             )
+            else None
+        )
+    return None
 
-    timeline_html += "</div>"
-    st.markdown(timeline_html, unsafe_allow_html=True)
+
+def render_status_timeline(
+    current_status: str, version: str, change_log: list[ChangeLogEntry] = ()
+) -> None:
+    """Render where the One Pager is on its path (``get_status_path``).
+
+    Done steps are ticked, the current one is bold, the next ones are gray;
+    every step is text, so color is never the only indicator. A rejection
+    that sent it back for rework is noted underneath.
+    """
+    parts = []
+    for i, step in enumerate(get_status_path(current_status, version)):
+        color, weight, mark = _STEP_STYLE[step.state]
+        if i:
+            parts.append('<span style="color:#9E9E9E;margin:0 6px;">→</span>')
+        parts.append(
+            f'<span style="color:{color};font-weight:{weight};">{mark} '
+            f"{html.escape(step.label)}</span>"
+        )
+    st.markdown(
+        '<div style="display:flex;flex-wrap:wrap;align-items:center;'
+        f'font-size:0.95em;margin:0.25rem 0;">{"".join(parts)}</div>',
+        unsafe_allow_html=True,
+    )
+    rejection = last_rejection(list(change_log))
+    if rejection and current_status == rejection.to_status:
+        st.caption(
+            f"Sent back for rework by {rejection.author_name} on "
+            f"{timestamp_label(rejection.created_at)}. See the review comments."
+        )
 
 
 def render_header(preview_data: PreviewData, op_colors: dict, dp_colors: dict) -> None:
@@ -193,17 +209,17 @@ def render_header(preview_data: PreviewData, op_colors: dict, dp_colors: dict) -
         st.markdown(f"**ID:** {header.one_pager_id} | **Version:** {header.version}")
         st.markdown(
             f"**Owner:** {header.owner_name} ({header.owner_email}) | "
-            f"**Last Updated:** {header.last_updated_at.strftime('%Y-%m-%d %H:%M')} "
+            f"**Last updated:** {timestamp_label(header.last_updated_at)} "
             f"by {header.last_updated_by}"
         )
 
     with col2:
-        st.markdown("**One Pager Status**")
+        st.markdown("**One Pager status**")
         color = op_colors.get(header.one_pager_status, DEFAULT_BADGE_COLOR)
         render_status_badge(header.one_pager_status, color)
 
     with col3:
-        st.markdown("**Data Product Status**")
+        st.markdown("**Data Product status**")
         color = dp_colors.get(header.data_product_status, DEFAULT_BADGE_COLOR)
         render_status_badge(header.data_product_status, color)
 
@@ -242,55 +258,138 @@ def _show_list(items: list[str], empty: str) -> None:
         st.write(f"*{empty}*")
 
 
+@dataclass
+class CommentTarget:
+    """What an Approver needs to comment on a section from the content view."""
+
+    data_access: DataAccess
+    one_pager_id: str
+    user: CurrentUser
+    roles: frozenset[Actor]
+
+
+EXPAND_ALL_KEY = "preview_expand_all"
+
+
+@contextmanager
+def section_block(
+    title: str,
+    section: str,
+    *,
+    empty: bool,
+    comment: CommentTarget | None,
+    expanded: bool = False,
+) -> Iterator[None]:
+    """Render the expander of one content section, with "Comment on this section"."""
+    label = f"{title} — empty" if empty else title
+    with st.expander(label, expanded=expanded or st.session_state.get(EXPAND_ALL_KEY)):
+        yield
+        if comment is not None and st.button(
+            ":material/add_comment: Comment on this section",
+            key=f"preview_comment_on_{section}",
+        ):
+            add_comment_dialog(
+                comment.data_access,
+                comment.one_pager_id,
+                comment.user,
+                comment.roles,
+                section=section,
+            )
+
+
+def _render_use_case_links(use_case_rows: list[dict]) -> None:
+    """Render a button per linked Use Case that opens it on the Use Cases page."""
+    ids = [str(row.get("useCaseId")) for row in use_case_rows if row.get("useCaseId")]
+    if not ids:
+        return
+    st.caption("Open a Use Case:")
+    for column, use_case_id in zip(st.columns(min(len(ids), 6)), ids, strict=False):
+        if column.button(use_case_id, key=f"preview_open_uc_{use_case_id}"):
+            open_use_case(use_case_id)
+
+
 def render_content_sections(
-    preview_data: PreviewData, use_case_rows: list[dict]
+    preview_data: PreviewData,
+    use_case_rows: list[dict],
+    comment: CommentTarget | None = None,
 ) -> None:
     """Render the One Pager document content as collapsible sections.
 
-    Sections follow the editor-tab order (UI_Design.md §4.4): Description,
-    Business Problem, Use Cases, Business Requirements, Data Sources, Data
-    Product Preview, Classification, Governance, Scope & Questions.
+    Sections follow the editor-tab order (UI_Design.md §4.4). Empty sections
+    say so in their title; **Expand all** opens every section. With a
+    ``comment`` target (an Approver in review), each section has
+    **Comment on this section**.
 
     Args:
         preview_data: Complete preview data.
         use_case_rows: Use Case rows from ``resolve_use_cases``.
+        comment: Where section comments go, or None when commenting is off.
 
     """
     doc = preview_data.document
+    dc = doc.data_classification
+    governance = doc.data_governance_artifacts
 
-    st.subheader("Content")
+    st.toggle("Expand all sections", key=EXPAND_ALL_KEY)
 
-    with st.expander("Description", expanded=True):
+    with section_block(
+        "Description",
+        "description",
+        empty=not doc.description,
+        comment=comment,
+        expanded=True,
+    ):
         st.write(doc.description or "*No description provided.*")
 
-    with st.expander("Business Problem Statement"):
+    with section_block(
+        "Business Problem Statement",
+        "businessProblemStatement",
+        empty=not doc.business_problem_statement,
+        comment=comment,
+    ):
         st.write(
             doc.business_problem_statement
             or "*No business problem statement provided.*"
         )
 
-    with st.expander("Use Cases"):
+    with section_block(
+        "Use Cases", "useCases", empty=not use_case_rows, comment=comment
+    ):
         _show_table(use_case_rows, USE_CASE_COLUMNS, "No use cases provided.")
+        _render_use_case_links(use_case_rows)
 
-    with st.expander("Business Requirements"):
+    with section_block(
+        "Business Requirements",
+        "businessRequirements",
+        empty=not doc.business_requirements,
+        comment=comment,
+    ):
         _show_table(
             doc.business_requirements,
             REQUIREMENT_COLUMNS,
             "No business requirements provided.",
         )
 
-    with st.expander("Data Sources"):
+    with section_block(
+        "Data Sources", "dataSources", empty=not doc.data_sources, comment=comment
+    ):
         _show_table(doc.data_sources, DATA_SOURCE_COLUMNS, "No data sources provided.")
 
-    with st.expander("Data Product Preview"):
+    with section_block(
+        "Data Product Preview",
+        "dataProductPreview",
+        empty=not doc.data_product_preview,
+        comment=comment,
+    ):
         _show_table(
             doc.data_product_preview,
             DATA_ELEMENT_COLUMNS,
             "No data product preview provided.",
         )
 
-    with st.expander("Classification"):
-        dc = doc.data_classification
+    with section_block(
+        "Classification", "dataClassification", empty=not dc, comment=comment
+    ):
         if dc:
             st.write(
                 f"**Classification Level:** {dc.get('classificationLevel') or 'N/A'}"
@@ -312,8 +411,12 @@ def render_content_sections(
                 "No retention requirements provided.",
             )
 
-    with st.expander("Governance"):
-        governance = doc.data_governance_artifacts
+    with section_block(
+        "Governance",
+        "dataGovernanceArtifacts",
+        empty=not any(governance.values()),
+        comment=comment,
+    ):
         st.markdown("**Business Concepts**")
         _show_table(
             governance.get("businessConcepts", []),
@@ -333,7 +436,12 @@ def render_content_sections(
             "No CDE lineage provided.",
         )
 
-    with st.expander("Scope & Questions"):
+    with section_block(
+        "Scope & Questions",
+        "outOfScope",
+        empty=not (doc.out_of_scope or doc.open_questions or doc.assumptions),
+        comment=comment,
+    ):
         st.markdown("**Out of Scope**")
         _show_list(doc.out_of_scope, "Nothing listed as out of scope.")
         st.markdown("**Open Questions**")
@@ -342,41 +450,46 @@ def render_content_sections(
         _show_list(doc.assumptions, "No assumptions listed.")
 
 
+EVENT_LABELS = {
+    "creation": "Created",
+    "content_save": "Saved",
+    "status_transition": "Status changed",
+    "cancellation": "Cancelled",
+}
+
+STATUS_FIELD_LABELS = {
+    "one_pager_status": "One Pager status",
+    "data_product_status": "Data Product status",
+}
+
+
+def event_label(event_type: str) -> str:
+    """Readable name of a change-log event type."""
+    return EVENT_LABELS.get(event_type, event_type.replace("_", " ").capitalize())
+
+
 def render_change_log(preview_data: PreviewData) -> None:
-    """Render the change log (newest-first).
-
-    Args:
-        preview_data: Complete preview data.
-
-    """
-    st.subheader("Change Log")
-
+    """Render the change log (newest-first), times in UTC."""
     if not preview_data.change_log:
         st.info("No changes recorded yet.")
         return
 
     for entry in preview_data.change_log:
-        # Render each entry as a container
         with st.container(border=True):
             col1, col2, col3 = st.columns([1, 2, 2])
-
             with col1:
                 st.markdown(f"**v{entry.version}**")
-                st.caption(entry.created_at.strftime("%Y-%m-%d %H:%M"))
-
+                st.caption(timestamp_label(entry.created_at))
             with col2:
-                st.markdown(f"**{entry.event_type.replace('_', ' ').title()}**")
+                st.markdown(f"**{event_label(entry.event_type)}**")
                 st.caption(f"By {entry.author_name} ({entry.author_initials})")
-
             with col3:
                 st.write(entry.summary)
-
-                # For status transitions, show the from/to
                 if entry.event_type == "status_transition":
-                    st.caption(
-                        f"{entry.from_status} → {entry.to_status} "
-                        f"({entry.status_field.replace('_', ' ').title()})"
+                    field = STATUS_FIELD_LABELS.get(
+                        entry.status_field or "", entry.status_field or ""
                     )
+                    st.caption(f"{field}: {entry.from_status} → {entry.to_status}")
 
 
 def _resolve(
@@ -408,7 +521,6 @@ def render_review_comments(  # noqa: C901 - one branch per comment state
         resolve: State of the resolve action for this user and One Pager.
 
     """
-    st.subheader("Review Comments")
     error = st.session_state.pop("preview_comment_error", None)
     if error:
         st.error(error, icon=ALERT_ICON)
@@ -441,7 +553,7 @@ def render_review_comments(  # noqa: C901 - one branch per comment state
                         )
                         st.caption(
                             f"v{comment.version} • "
-                            f"{comment.created_at.strftime('%Y-%m-%d %H:%M')}"
+                            f"{timestamp_label(comment.created_at)}"
                         )
                         st.write(comment.comment)
                         if can_resolve:
@@ -471,7 +583,7 @@ def render_review_comments(  # noqa: C901 - one branch per comment state
                         )
                         st.caption(
                             f"v{comment.version} • "
-                            f"{comment.created_at.strftime('%Y-%m-%d %H:%M')} "
+                            f"{timestamp_label(comment.created_at)} "
                             f"• Resolved by {comment.resolved_by}"
                         )
                         st.write(comment.comment)
@@ -556,7 +668,7 @@ def render_lock_indicator(
 ACTION_BUTTONS = {
     "edit": "Edit",
     "update": "Update",
-    "change_dp_status": "Change DP Status",
+    "change_dp_status": "Change Data Product status",
     "approve": "Approve",
     "reject": "Reject",
     "add_comment": "Add Comment",
@@ -618,6 +730,13 @@ def confirm_update(
         st.rerun()
 
 
+def _after_decision(*, from_queue: bool) -> None:
+    """After Approve/Reject: back to the Review queue if it was opened there."""
+    if from_queue:
+        back_to_review_queue(st.session_state.pop(PREVIEW_FLASH_KEY, None))
+    st.rerun()
+
+
 @st.dialog("Reject this One Pager?")
 def confirm_reject(
     data_access: DataAccess,
@@ -638,11 +757,12 @@ def confirm_reject(
     )
     col_confirm, col_back = st.columns(2)
     if col_confirm.button("Confirm Reject", type="primary", use_container_width=True):
+        from_queue = st.session_state.get(REVIEW_MODE_KEY) == one_pager_id
         error = reject_and_report(data_access, one_pager_id, user, reason, roles)
         if error:
             st.error(error, icon=ALERT_ICON)
             return
-        st.rerun()
+        _after_decision(from_queue=from_queue)
     if col_back.button("Cancel", key="preview_reject_back", use_container_width=True):
         st.rerun()
 
@@ -669,13 +789,14 @@ def confirm_approve(
         )
     col_confirm, col_back = st.columns(2)
     if col_confirm.button("Approve", type="primary", use_container_width=True):
+        from_queue = st.session_state.get(REVIEW_MODE_KEY) == one_pager_id
         error = approve_and_report(
             data_access, document_store, one_pager_id, user, roles
         )
         if error:
             st.error(error, icon=ALERT_ICON)
             return
-        st.rerun()
+        _after_decision(from_queue=from_queue)
     if col_back.button("Cancel", key="preview_approve_back", use_container_width=True):
         st.rerun()
 
@@ -686,13 +807,22 @@ def add_comment_dialog(
     one_pager_id: str,
     user: CurrentUser,
     roles: frozenset[Actor],
+    section: str | None = None,
 ) -> None:
-    """Section-level review comment (UI_Design.md §4.4, Approver in review)."""
+    """Section-level review comment (UI_Design.md §4.4, Approver in review).
+
+    ``section`` preselects the section (from "Comment on this section").
+    """
+    options = list(SECTION_LABELS)
+    preset = section
     section = st.selectbox(
         "Section",
-        options=list(SECTION_LABELS),
+        options=options,
+        index=options.index(preset) if preset in options else 0,
         format_func=section_label,
-        key="preview_comment_section",
+        key=f"preview_comment_section_{preset}"
+        if preset
+        else "preview_comment_section",
     )
     text = st.text_area(
         "Comment *",
@@ -726,14 +856,58 @@ def render_review_banner(one_pager_id: str) -> None:
     """Review-mode notice with the way back to the queue (UI_Design.md §4.3)."""
     col_text, col_back = st.columns([4, 1])
     col_text.info(
-        f"**Review mode** — you are reviewing {one_pager_id}. Approve or "
-        "reject it with the actions below.",
+        f"**Review mode** — you are reviewing {one_pager_id}. See **What "
+        "changed**, comment on sections, then Approve or Reject.",
     )
     if col_back.button(
         "Back to Review queue", key="preview_back_to_queue", use_container_width=True
     ):
-        st.session_state.pop(REVIEW_MODE_KEY, None)
-        st.switch_page(REVIEW_PAGE)
+        back_to_review_queue()
+
+
+def comparison_for(
+    data_access: DataAccess, preview_data: PreviewData
+) -> tuple[ComparisonBase, list[SectionChange]] | None:
+    """Return the base version and the changes since it; None for a first version.
+
+    Read fresh; a version that cannot be read hides the tab (logged).
+    """
+    header = preview_data.header
+    base = comparison_base(preview_data.change_log, header.version)
+    if base is None:
+        return None
+    try:
+        old = data_access.read_document(header.one_pager_id, base.version)
+    except Exception:
+        logger.exception(f"Failed to read v{base.version} of {header.one_pager_id}")
+        return None
+    if old is None:
+        return None
+    return base, diff_documents(old, preview_data.document)
+
+
+_CHANGE_KIND_LABELS = {"added": "Added", "removed": "Removed", "changed": "Changed"}
+
+
+def render_what_changed(base: ComparisonBase, changes: list[SectionChange]) -> None:
+    """Sections that differ from the base version, before and after."""
+    st.caption(f"Compared with {base.label}.")
+    if not changes:
+        st.info("No content changes since that version.")
+        return
+    st.markdown(
+        f"**{len(changes)} section(s) changed:** "
+        + ", ".join(change.label for change in changes)
+    )
+    for change in changes:
+        with st.expander(
+            f"{change.label} — {_CHANGE_KIND_LABELS[change.kind]}", expanded=True
+        ):
+            before_col, after_col = st.columns(2)
+            before_col.markdown(f"**Before (v{base.version})**")
+            before_col.code(change.before or "(empty)", language=None, wrap_lines=True)
+            after_col.markdown("**Now**")
+            after_col.code(change.after or "(empty)", language=None, wrap_lines=True)
 
 
 @st.dialog("Export PDF")
@@ -812,6 +986,45 @@ def change_dp_status_dialog(
         st.rerun()
 
 
+# Actions in the "More" menu: rarely used or destructive.
+MORE_ACTIONS = ("change_dp_status", "export_pdf", "cancel")
+
+# The first of these the user can do is the page's primary action.
+PRIMARY_ACTIONS = ("approve", "edit", "update")
+
+
+def primary_action(actions: dict[str, ActionState]) -> str | None:
+    """Return the action to highlight: Approve, Edit or Update, whichever applies."""
+    return next(
+        (
+            name
+            for name in PRIMARY_ACTIONS
+            if actions[name].visible and actions[name].enabled
+        ),
+        None,
+    )
+
+
+def unavailable_reasons(actions: dict[str, ActionState]) -> list[str]:
+    """List "**Edit**: <reason>" for the shown actions that are disabled."""
+    return [
+        f"**{ACTION_BUTTONS[name]}**: {actions[name].tooltip}"
+        for name in ACTION_BUTTONS
+        if actions[name].visible and not actions[name].enabled and actions[name].tooltip
+    ]
+
+
+def _action_button(name: str, state: ActionState, *, primary: bool) -> bool:
+    return st.button(
+        ACTION_BUTTONS[name],
+        key=f"preview_{name}",
+        disabled=not state.enabled,
+        help=state.tooltip or None,
+        type="primary" if primary else "secondary",
+        use_container_width=True,
+    )
+
+
 def render_action_bar(  # noqa: C901, PLR0912, PLR0913 - one branch per action
     data_access: DataAccess,
     preview_data: PreviewData,
@@ -821,10 +1034,12 @@ def render_action_bar(  # noqa: C901, PLR0912, PLR0913 - one branch per action
     roles: frozenset[Actor] = frozenset(),
     status_colors: dict[str, str] | None = None,
 ) -> None:
-    """Render the action button bar.
+    """Render the action buttons (UI_Design.md §4.4).
 
-    Per UI_Design.md §4.4, buttons depend on role and status; actions that
-    are not implemented yet stay disabled with a "coming soon" tooltip.
+    The main actions are buttons, the one the user most likely wants
+    (Approve, Edit or Update) highlighted; Change DP Status, Export PDF and
+    the destructive Cancel One Pager sit in the **More** menu. Why a shown
+    action is unavailable is written under the buttons, not only in a tooltip.
 
     Args:
         data_access: Data access for the actions.
@@ -847,21 +1062,24 @@ def render_action_bar(  # noqa: C901, PLR0912, PLR0913 - one branch per action
         data_product_status=header.data_product_status,
         roles=roles,
     )
+    primary = primary_action(actions)
+    main = [n for n in ACTION_BUTTONS if n not in MORE_ACTIONS and actions[n].visible]
+    more = [n for n in MORE_ACTIONS if actions[n].visible]
 
-    st.subheader("Actions")
-    shown = [name for name in ACTION_BUTTONS if actions[name].visible]
     clicked = None
-    for column, name in zip(st.columns(max(len(shown), 1)), shown, strict=False):
-        state = actions[name]
+    columns = st.columns([1.2] * len(main) + [1] + [max(1, 6 - len(main))])
+    for column, name in zip(columns, main, strict=False):
         with column:
-            if st.button(
-                ACTION_BUTTONS[name],
-                key=f"preview_{name}",
-                disabled=not state.enabled,
-                help=state.tooltip or None,
-                use_container_width=True,
-            ):
+            if _action_button(name, actions[name], primary=name == primary):
                 clicked = name
+    if more:
+        with columns[len(main)].popover("More", use_container_width=True):
+            for name in more:
+                if _action_button(name, actions[name], primary=False):
+                    clicked = name
+
+    for reason in unavailable_reasons(actions):
+        st.caption(reason)
     if header.one_pager_status == "Cancelled":
         st.caption("This One Pager is cancelled (read-only).")
     elif header.one_pager_status == "In Review" and not actions["approve"].visible:
@@ -966,22 +1184,33 @@ except Exception as e:
 show_flash(PREVIEW_FLASH_KEY)
 
 # Populated state: render all regions
-if in_review_mode(one_pager_id, preview_data.header.one_pager_status, roles):
+header = preview_data.header
+review_mode = in_review_mode(one_pager_id, header.one_pager_status, roles)
+if review_mode:
     render_review_banner(one_pager_id)
+elif st.button("← Back to the Registry", key="preview_back"):
+    go_to_registry()
 
 render_header(preview_data, op_colors, dp_colors)
+render_status_timeline(header.one_pager_status, header.version, preview_data.change_log)
 
-st.divider()
-
-render_status_timeline(preview_data.header.one_pager_status)
-
-st.divider()
-
-# Expired locks count as "not locked" (Backend_Design.md §6).
+# Expired locks count as "not locked" (Backend_Design.md §6). The lock notice
+# sits next to the actions, since it explains why Edit may be unavailable.
 lock = active_lock(preview_data.lock)
-
 authorized_initials = load_authorized_initials(data_access, one_pager_id)
+action_states = get_action_states(
+    current_user_initials=user.initials,
+    owner_initials=header.owner_initials,
+    one_pager_status=header.one_pager_status,
+    is_locked=lock is not None,
+    lock_holder_initials=lock.locked_by_initials if lock else None,
+    authorized_initials=authorized_initials,
+    data_product_status=header.data_product_status,
+    roles=roles,
+)
 
+st.divider()
+render_lock_indicator(data_access, preview_data, lock, user)
 render_action_bar(
     data_access,
     preview_data,
@@ -991,35 +1220,39 @@ render_action_bar(
     roles,
     {**dp_colors, **op_colors},
 )
+section_gap()
 
-st.divider()
-
-render_content_sections(
-    preview_data, resolve_use_cases(data_access, preview_data.document)
+comparison = comparison_for(data_access, preview_data)
+unresolved = sum(1 for c in preview_data.review_comments if not c.resolved)
+tab_names = ["Content"]
+if comparison is not None:
+    tab_names.insert(1 if not review_mode else 0, "What changed")
+tab_names.append(f"Change log ({len(preview_data.change_log)})")
+tab_names.append(
+    f"Review comments ({unresolved} open)" if unresolved else "Review comments"
 )
+tabs = dict(zip(tab_names, st.tabs(tab_names), strict=True))
 
-st.divider()
+with tabs["Content"]:
+    comment_target = (
+        CommentTarget(data_access, one_pager_id, user, roles)
+        if action_states["add_comment"].visible and action_states["add_comment"].enabled
+        else None
+    )
+    render_content_sections(
+        preview_data,
+        resolve_use_cases(data_access, preview_data.document),
+        comment_target,
+    )
 
-render_change_log(preview_data)
+if comparison is not None:
+    with tabs["What changed"]:
+        render_what_changed(*comparison)
 
-st.divider()
+with tabs[tab_names[-2]]:
+    render_change_log(preview_data)
 
-render_review_comments(
-    preview_data,
-    data_access,
-    user,
-    get_action_states(
-        current_user_initials=user.initials,
-        owner_initials=preview_data.header.owner_initials,
-        one_pager_status=preview_data.header.one_pager_status,
-        is_locked=lock is not None,
-        lock_holder_initials=lock.locked_by_initials if lock else None,
-        authorized_initials=authorized_initials,
-        data_product_status=preview_data.header.data_product_status,
-        roles=roles,
-    )["resolve_comment"],
-)
-
-st.divider()
-
-render_lock_indicator(data_access, preview_data, lock, user)
+with tabs[tab_names[-1]]:
+    render_review_comments(
+        preview_data, data_access, user, action_states["resolve_comment"]
+    )

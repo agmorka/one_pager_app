@@ -80,10 +80,10 @@ def set_flash(key: str, message: str) -> None:
 
 
 def show_flash(key: str) -> None:
-    """Show (once) the success message queued under ``key``."""
+    """Show (once) the success message queued under ``key``, as a toast."""
     flash = st.session_state.pop(key, None)
     if flash:
-        st.success(flash)
+        st.toast(flash, icon=":material/check_circle:")
 
 
 def render_retry_banner(message: str, key: str) -> bool:

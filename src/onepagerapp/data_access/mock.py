@@ -244,10 +244,30 @@ class MockDataAccess(DataAccess):
             for op_id, uc_id in self._use_case_references
             if uc_id == filter.use_case_id
         }
+        mine = {
+            op_id
+            for op_id, users in self._authorized_users.items()
+            if any(u.user_initials == filter.authorized_initials for u in users)
+        }
+
+        def matches_search(r: RegistryRow) -> bool:
+            return not filter.search or any(
+                contains(value, filter.search)
+                for value in (
+                    r.one_pager_id,
+                    r.product_name,
+                    r.owner_name,
+                    r.owner_email,
+                )
+            )
+
         return [
             r
             for r in self._get_sample_registry_data()
             if contains(r.product_name, filter.product_name)
+            and matches_search(r)
+            and (not filter.authorized_initials or r.one_pager_id in mine)
+            and (filter.op_statuses is None or r.one_pager_status in filter.op_statuses)
             and equals(r.one_pager_status, filter.op_status)
             and equals(r.data_product_status, filter.dp_status)
             and (

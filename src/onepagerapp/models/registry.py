@@ -22,6 +22,12 @@ class RegistryFilter:
         domain: Business domain (exact match after normalization).
         data_product_type: Data product type: "Foundational", "Integrated", "Augmented".
         use_case_id: Only One Pagers linked to this Use Case (use_case_references).
+        search: Partial match (case-insensitive) on ID, product name, owner
+            name or owner email; one search box for all of them.
+        authorized_initials: Only One Pagers where these initials are Owner
+            or SME (one_pager_authorized_users), e.g. "My One Pagers".
+        op_statuses: One Pager status is one of these (e.g. the statuses that
+            need the user's action).
 
     """
 
@@ -32,6 +38,9 @@ class RegistryFilter:
     domain: str | None = None
     data_product_type: str | None = None
     use_case_id: str | None = None
+    search: str | None = None
+    authorized_initials: str | None = None
+    op_statuses: tuple[str, ...] | None = None
 
 
 # RegistryRow fields the Registry table can be sorted by (UI_Design.md §4.1).

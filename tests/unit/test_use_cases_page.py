@@ -167,7 +167,7 @@ def test__deprecated_use_case__click_restore__active_again(
     restored = data_access.get_use_case("UC-005")
     assert not restored.deprecated
     assert restored.last_updated_by == "MJO"
-    assert any("Restored UC-005" in s.value for s in at.success)
+    assert any("Restored UC-005" in s.value for s in at.toast)
 
 
 @pytest.mark.unit

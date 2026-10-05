@@ -235,7 +235,7 @@ def test__registry_page_shown__write_then_rerun__registry_read_again(
 
     # Then
     assert calls["registry"] == registry_queries + 1
-    assert "Draft Update" in [m.value for m in at.markdown]
+    assert "Draft Update" in list(at.dataframe[0].value["One Pager status"])
 
 
 @pytest.mark.unit

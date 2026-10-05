@@ -52,8 +52,15 @@ def _preview(data_access: MockDataAccess, one_pager_id: str = NEW_ID) -> AppTest
 
 
 def _action_keys(at: AppTest) -> set[str]:
-    """Return the keys of the Preview action buttons."""
-    return {b.key for b in at.button if b.key and b.key.startswith("preview_")}
+    """Return the keys of the Preview action buttons (not navigation/links)."""
+    return {
+        b.key
+        for b in at.button
+        if b.key
+        and b.key.startswith("preview_")
+        and b.key != "preview_back"
+        and not b.key.startswith("preview_open_uc_")
+    }
 
 
 def _needs_attention(at: AppTest) -> str:
@@ -442,7 +449,7 @@ def test__renamed_with_summary__click_save_draft__new_version_lock_kept(
 
     # Then
     assert not at.exception
-    assert "Saved as v0.2.0" in at.success[0].value
+    assert "Saved as v0.2.0" in at.toast[0].value
     assert at.text_input(key="edit_change_summary").value == ""
     row = alices_draft.get_one_pager_status_row(NEW_ID)
     assert (row.version, row.product_name) == ("0.2.0", "Customer Master v2")
@@ -592,7 +599,7 @@ def test__rejected_with_comment__click_resolve_on_review_tab__resolved(
     assert not at.exception
     comment = alices_draft.get_review_comments(NEW_ID)[0]
     assert (comment.resolved, comment.resolved_by) == (True, "ABR")
-    assert "The comment was marked as resolved." in [s.value for s in at.success]
+    assert "The comment was marked as resolved." in [s.value for s in at.toast]
     assert f"edit_resolve_{comment_id}" not in {b.key for b in at.button}
 
 

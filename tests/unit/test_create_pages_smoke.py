@@ -192,4 +192,4 @@ def test__draft_just_created__open_preview__shown_with_flash(
     # Then
     assert not preview.exception
     assert preview.title[0].value == "Customer Master"
-    assert "OP-0003 created" in preview.success[0].value
+    assert "OP-0003 created" in preview.toast[0].value

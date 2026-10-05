@@ -1,8 +1,10 @@
 """Registry polish (UI_Design.md §4.1): Use Case filter, metric cards, sorting."""
 
+from collections.abc import Callable
 from dataclasses import replace
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
+import pandas as pd
 import pytest
 from streamlit.testing.v1 import AppTest
 
@@ -57,12 +59,10 @@ def _ids(
 
 
 def _row_ids(at: AppTest) -> list[str]:
-    """Return the One Pager IDs in the order the page shows them."""
-    return [
-        b.key.removeprefix("opview-")
-        for b in at.button
-        if str(b.key).startswith("opview-")
-    ]
+    """Return the One Pager IDs in the order the table shows them."""
+    if not at.dataframe:
+        return []
+    return list(at.dataframe[0].value["ID"])
 
 
 # ============================================================================
@@ -264,63 +264,116 @@ def test__no_sort__lakehouse_registry__ordered_by_id(
 
 
 @pytest.mark.unit
-def test__registry__open_page__metric_cards_have_no_show_button(
+def test__registry__click_status_card__filtered_then_cleared(
     registry: MockDataAccess, switched: list[str]
 ) -> None:
-    """Metric cards are not filters any more."""
+    """A status card filters the table; clicking it again shows all again."""
+    # Given
+    at = page_app("registry.py", registry, roles=frozenset()).run()
+
+    # When
+    at.button(key="registry-card-Draft").click().run()
+
+    # Then
+    assert at.session_state["filter_op_status"] == "Draft"
+    assert at.button(key="registry-card-Draft").label == "✓ Showing"
+    assert _row_ids(at) == ["OP-0003"]
+
+    # When
+    at.button(key="registry-card-Draft").click().run()
+
+    # Then
+    assert at.session_state["filter_op_status"] == "All"
+    assert len(_row_ids(at)) == 3
+
+
+@pytest.mark.unit
+def test__nobody_ready_for_review__open_registry__no_card_for_it(
+    registry: MockDataAccess, switched: list[str]
+) -> None:
+    """The transient Ready for Review status has no card while it is empty."""
     # When
     at = page_app("registry.py", registry, roles=frozenset()).run()
 
     # Then
-    assert not any(str(b.key).startswith("registry-metric-") for b in at.button)
-    assert not any(b.label in ("Show", "✓ Showing") for b in at.button)
+    keys = [str(b.key) for b in at.button]
+    assert "registry-card-Ready for Review" not in keys
+    assert "registry-card-Draft" in keys
 
 
 @pytest.mark.unit
 def test__registry__open_page__sorted_by_id_ascending(
     registry: MockDataAccess, switched: list[str]
 ) -> None:
-    """The ID header shows the current sort."""
+    """The default sort is ID, ascending."""
     # When
     at = page_app("registry.py", registry, roles=frozenset()).run()
 
     # Then
-    assert at.button(key="registry-sort-one_pager_id").label == "ID ▲"
+    assert at.selectbox(key="registry_sort_choice").value == RegistrySort()
+    assert _row_ids(at) == ["OP-0001", "OP-0002", "OP-0003"]
 
 
 @pytest.mark.unit
-def test__registry__click_product_header__sorted_by_product(
+def test__registry__sort_by_product_both_ways__rows_reordered(
     registry: MockDataAccess, switched: list[str]
 ) -> None:
-    """Clicking a header sorts by it, ascending."""
+    """Choosing a sort order reorders the rows on the server side."""
     # Given
     at = page_app("registry.py", registry, roles=frozenset()).run()
 
     # When
-    at.button(key="registry-sort-product_name").click().run()
+    at.selectbox(key="registry_sort_choice").set_value(
+        RegistrySort("product_name")
+    ).run()
 
     # Then
     assert not at.exception
-    assert at.button(key="registry-sort-product_name").label == "Product ▲"
-    assert at.button(key="registry-sort-one_pager_id").label == "ID"
     assert _row_ids(at) == ["OP-0003", "OP-0002", "OP-0001"]
+
+    # When
+    at.selectbox(key="registry_sort_choice").set_value(
+        RegistrySort("product_name", descending=True)
+    ).run()
+
+    # Then
+    assert _row_ids(at) == ["OP-0001", "OP-0002", "OP-0003"]
 
 
 @pytest.mark.unit
-def test__sorted_by_product__click_product_header_again__reversed(
+def test__registry__search_box__matches_id_name_and_owner(
     registry: MockDataAccess, switched: list[str]
 ) -> None:
-    """A second click reverses the order."""
+    """One search box finds by ID, product name or owner."""
     # Given
     at = page_app("registry.py", registry, roles=frozenset()).run()
-    at.button(key="registry-sort-product_name").click().run()
+
+    # When / Then
+    at.text_input(key="filter_search").set_value("op-0002").run()
+    assert _row_ids(at) == ["OP-0002"]
+    at.text_input(key="filter_search").set_value("carol").run()
+    assert _row_ids(at) == ["OP-0003"]
+
+
+@pytest.mark.unit
+def test__owner__my_one_pagers_view__only_own_rows(
+    registry: MockDataAccess, switched: list[str]
+) -> None:
+    """The "My One Pagers" view lists the One Pagers the user is Owner/SME of."""
+    # Given (Alice owns OP-0001)
+    at = page_app("registry.py", registry).run()
 
     # When
-    at.button(key="registry-sort-product_name").click().run()
+    at.radio(key="filter_view").set_value("My One Pagers").run()
 
     # Then
-    assert at.button(key="registry-sort-product_name").label == "Product ▼"
-    assert _row_ids(at) == ["OP-0001", "OP-0002", "OP-0003"]
+    assert _row_ids(at) == ["OP-0001"]
+
+    # When
+    at.radio(key="filter_view").set_value("My drafts").run()
+
+    # Then
+    assert any("No One Pagers match your filters" in w.value for w in at.warning)
 
 
 @pytest.mark.unit
@@ -340,6 +393,7 @@ def test__registry__choose_use_case_filter__only_referencing_rows(
     # Then
     assert not at.exception
     assert _row_ids(at) == ["OP-0002"]
+    assert any("More filters (1 active)" in e.label for e in at.expander)
 
 
 @pytest.mark.unit
@@ -356,3 +410,19 @@ def test__use_case_filter__add_status_filter_without_match__empty_warning(
 
     # Then
     assert any("No One Pagers match your filters" in w.value for w in at.warning)
+
+
+@pytest.mark.unit
+def test__click_on_second_row__selected_value__its_id(
+    import_app_module: Callable[[str], ModuleType],
+) -> None:
+    """A row click (dataframe selection) resolves to that row's ID."""
+    # Given
+    frame = pd.DataFrame({"ID": ["OP-0001", "OP-0002"]})
+    event = SimpleNamespace(selection=SimpleNamespace(rows=[1]))
+
+    tables = import_app_module("adapters.tables")
+
+    # Then
+    assert tables.selected_value(event, frame, "ID") == "OP-0002"
+    assert tables.selected_value(SimpleNamespace(), frame, "ID") is None
