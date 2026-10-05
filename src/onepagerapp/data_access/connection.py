@@ -275,6 +275,9 @@ class DatabricksConnection:
         """
         self._config = config
         self._ws = service_client(config)
+        # The user's client, reused while the forwarded token stays the same:
+        # building one per statement costs a new HTTP connection each time.
+        self._user_client: tuple[str, WorkspaceClient] | None = None
 
     def find_group_names(self, name: str) -> list[str]:
         """Real names of the workspace groups called ``name``, ignoring case.
@@ -311,9 +314,15 @@ class DatabricksConnection:
                 "Check that user authorization (scope sql) is enabled for the app."
             )
             raise MissingUserTokenError(msg)
+        if self._user_client is not None and self._user_client[0] == token:
+            return self._user_client[1]
         # auth_type is required: the Databricks Apps runtime sets OAuth env vars,
         # which conflict with this explicit token unless we pin the auth method
-        return WorkspaceClient(host=self._ws.config.host, token=token, auth_type="pat")
+        client = WorkspaceClient(
+            host=self._ws.config.host, token=token, auth_type="pat"
+        )
+        self._user_client = (token, client)
+        return client
 
     def execute_statement(
         self,
@@ -352,6 +361,7 @@ class DatabricksConnection:
 
         last_err: Exception | None = None
         for attempt in range(1, _MAX_RETRIES + 1):
+            started = time.perf_counter()
             try:
                 response = client.statement_execution.execute_statement(
                     statement=statement,
@@ -377,6 +387,7 @@ class DatabricksConnection:
                 )
                 time.sleep(_RETRY_DELAY_SECONDS)
             else:
+                _log_timing(statement, identity, time.perf_counter() - started)
                 try:
                     _raise_if_failed(response)
                 except StatementFailedError as exc:
@@ -388,6 +399,22 @@ class DatabricksConnection:
                 return response
         msg = "All connection attempts failed"
         raise RuntimeError(msg) from last_err
+
+
+# Statements slower than this are logged at WARNING (shown by default in the
+# app logs), the others at DEBUG.
+SLOW_STATEMENT_SECONDS = 2.0
+
+
+def _log_timing(statement: str, identity: Identity, seconds: float) -> None:
+    """Log how long a statement took, to find the slow and the frequent ones.
+
+    Only the start of the SQL text is logged, never the parameter values.
+    """
+    level = logging.WARNING if seconds >= SLOW_STATEMENT_SECONDS else logging.DEBUG
+    if logger.isEnabledFor(level):
+        sql_start = " ".join(statement.split())[:120]
+        logger.log(level, "SQL %.2fs as %s: %s", seconds, identity.value, sql_start)
 
 
 def _raise_if_failed(response: StatementResponse) -> None:

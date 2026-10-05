@@ -191,6 +191,32 @@ def test__update_started__open_editor__approved_version_opened(
 
 
 @pytest.mark.unit
+def test__editor_open__type_in_field__no_lock_write(
+    alices_draft: MockDataAccess,
+    switched: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A re-run soon after the lock was written does not write the heartbeat."""
+    # Given
+    at = editor_page(alices_draft).run()
+    writes: list[object] = []
+    write_lock = alices_draft.write_lock
+    monkeypatch.setattr(
+        alices_draft,
+        "write_lock",
+        lambda lock, **kw: writes.append(lock) or write_lock(lock, **kw),
+    )
+
+    # When
+    at.text_input(key="edit_product_name").input("Customer Master v2").run()
+
+    # Then
+    assert not at.exception
+    assert writes == []
+    assert alices_draft.get_lock(NEW_ID).locked_by_initials == "ABR"
+
+
+@pytest.mark.unit
 def test__changed_product_name__switch_tabs_and_back__input_kept(
     alices_draft: MockDataAccess, switched: list[str]
 ) -> None:

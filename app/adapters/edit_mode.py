@@ -6,8 +6,10 @@ widget values back into it on every run, so switching tabs never loses input.
 Only one tab is rendered at a time (a radio "tab bar"), which lets other parts
 of the page switch tabs programmatically.
 
-The edit lock is acquired when the editor opens and re-acquired on every
-re-run, which is the lock heartbeat (Backend_Design.md §6).
+The edit lock is acquired when the editor opens and re-acquired on re-runs,
+which is the lock heartbeat (Backend_Design.md §6). The heartbeat is written
+at most every ``ttl / HEARTBEAT_TTL_FRACTION``; Save and Submit check the lock
+fresh either way.
 """
 
 import logging
@@ -58,7 +60,12 @@ from onepagerapp.editing import (
     submission_issues,
     working_copy,
 )
-from onepagerapp.locking import DEFAULT_LOCK_TTL, acquire_lock, release_lock
+from onepagerapp.locking import (
+    DEFAULT_LOCK_TTL,
+    acquire_lock,
+    heartbeat_due,
+    release_lock,
+)
 from onepagerapp.models import (
     CurrentUser,
     LockInfo,
@@ -573,7 +580,14 @@ def _lock_ttl() -> timedelta:
 
 
 def _heartbeat(data_access: DataAccess, one_pager_id: str, user: CurrentUser) -> None:
-    """Re-acquire the lock on every re-run; stop editing if it was lost."""
+    """Re-acquire the lock when the heartbeat is due; stop editing if it was lost."""
+    if not heartbeat_due(
+        st.session_state.get("edit_lock"),
+        one_pager_id,
+        current_session_id(),
+        ttl=_lock_ttl(),
+    ):
+        return
     try:
         result = acquire_lock(
             data_access, one_pager_id, user, current_session_id(), ttl=_lock_ttl()

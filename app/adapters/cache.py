@@ -1,4 +1,4 @@
-"""Short-lived caches for the Registry and Use Case lists (UI_Design.md §6).
+"""Caches of the lists and the reference data (UI_Design.md §6).
 
 The Registry list, its status counts and the Use Case lists are cached for
 ``LIST_CACHE_TTL_SECONDS`` and cleared after every write that can change them.
@@ -8,14 +8,20 @@ editor content are never cached.
 Cache entries are keyed by ``DataAccess.cache_scope``: sessions that read the
 same tables share them, and a write in one session clears them for all.
 Other app instances catch up when the TTL expires.
+
+The status reference tables (badge colours, legends) change only through the
+Admin page, which clears every cache; they are kept for
+``REFERENCE_CACHE_TTL_SECONDS`` so other app instances catch up too.
 """
 
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import astuple
 
+import pandas as pd
 import streamlit as st
 
+from adapters.theme import get_dp_status_colors, get_op_status_colors
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.models import (
     RegistryFilter,
@@ -26,6 +32,7 @@ from onepagerapp.models import (
 )
 
 LIST_CACHE_TTL_SECONDS = 30
+REFERENCE_CACHE_TTL_SECONDS = 3600
 
 
 # Arguments with a leading underscore are not hashed by st.cache_data; the
@@ -102,6 +109,46 @@ def get_use_cases(
     return _use_cases(
         data_access.cache_scope, astuple(filter), data_access, filter, page, page_size
     )
+
+
+@st.cache_data(ttl=REFERENCE_CACHE_TTL_SECONDS, show_spinner=False)
+def _ref_op_status(scope: str, _data_access: DataAccess) -> pd.DataFrame:  # noqa: ARG001 - cache key
+    return _data_access.get_ref_op_status()
+
+
+@st.cache_data(ttl=REFERENCE_CACHE_TTL_SECONDS, show_spinner=False)
+def _ref_dp_status(scope: str, _data_access: DataAccess) -> pd.DataFrame:  # noqa: ARG001 - cache key
+    return _data_access.get_ref_dp_status()
+
+
+@st.cache_data(ttl=REFERENCE_CACHE_TTL_SECONDS, show_spinner=False)
+def _op_status_colors(scope: str, _data_access: DataAccess) -> dict[str, str]:  # noqa: ARG001 - cache key
+    return get_op_status_colors(_data_access)
+
+
+@st.cache_data(ttl=REFERENCE_CACHE_TTL_SECONDS, show_spinner=False)
+def _dp_status_colors(scope: str, _data_access: DataAccess) -> dict[str, str]:  # noqa: ARG001 - cache key
+    return get_dp_status_colors(_data_access)
+
+
+def get_ref_op_status(data_access: DataAccess) -> pd.DataFrame:
+    """Return ``DataAccess.get_ref_op_status``, cached."""
+    return _ref_op_status(data_access.cache_scope, data_access)
+
+
+def get_ref_dp_status(data_access: DataAccess) -> pd.DataFrame:
+    """Return ``DataAccess.get_ref_dp_status``, cached."""
+    return _ref_dp_status(data_access.cache_scope, data_access)
+
+
+def op_status_colors(data_access: DataAccess) -> dict[str, str]:
+    """Return ``theme.get_op_status_colors``, cached."""
+    return _op_status_colors(data_access.cache_scope, data_access)
+
+
+def dp_status_colors(data_access: DataAccess) -> dict[str, str]:
+    """Return ``theme.get_dp_status_colors``, cached."""
+    return _dp_status_colors(data_access.cache_scope, data_access)
 
 
 def invalidate_list_caches() -> None:

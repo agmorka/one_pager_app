@@ -32,11 +32,7 @@ from adapters.page import (
     render_error_state,
     require_data_access,
 )
-from adapters.theme import (
-    TOTAL_CARD_COLOR,
-    get_dp_status_colors,
-    get_op_status_colors,
-)
+from adapters.theme import TOTAL_CARD_COLOR
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.data_access.connection import user_error_message
 from onepagerapp.locking import get_active_locks
@@ -104,34 +100,6 @@ LOCKS_UNAVAILABLE = "?"
 # ============================================================================
 # Cached Data
 # ============================================================================
-
-
-@st.cache_data
-def _get_cached_op_status_colors(_data_access: DataAccess) -> dict[str, str]:
-    """Load and cache One Pager status colors for the session.
-
-    Args:
-        _data_access: Data access instance (used for cache key).
-
-    Returns:
-        Dict mapping One Pager status → hex color code.
-
-    """
-    return get_op_status_colors(_data_access)
-
-
-@st.cache_data
-def _get_cached_dp_status_colors(_data_access: DataAccess) -> dict[str, str]:
-    """Load and cache Data Product status colors for the session.
-
-    Args:
-        _data_access: Data access instance (used for cache key).
-
-    Returns:
-        Dict mapping Data Product status → hex color code.
-
-    """
-    return get_dp_status_colors(_data_access)
 
 
 @st.cache_data
@@ -592,8 +560,8 @@ st.markdown("")
 
 # Load reference data (status colors)
 try:
-    op_status_colors = _get_cached_op_status_colors(data_access)
-    dp_status_colors = _get_cached_dp_status_colors(data_access)
+    op_status_colors = cache.op_status_colors(data_access)
+    dp_status_colors = cache.dp_status_colors(data_access)
 except Exception as e:
     logger.exception("Failed to load reference data")
     render_error_state(
