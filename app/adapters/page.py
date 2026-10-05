@@ -68,6 +68,12 @@ def current_roles() -> frozenset[Actor]:
     return roles
 
 
+def page_header(title: str, subtitle: str) -> None:
+    """Page title with a one-line subtitle in gray underneath (as on Help)."""
+    st.title(title)
+    st.caption(subtitle)
+
+
 def set_flash(key: str, message: str) -> None:
     """Queue a success message for the next run (``st.rerun`` discards this one)."""
     st.session_state[key] = message

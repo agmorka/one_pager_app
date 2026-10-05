@@ -220,6 +220,28 @@ def test__concurrent_writer_wins__acquire__reports_the_winner(
 
 
 @pytest.mark.unit
+def test__write_conflict_within_own_session__acquire__still_held(
+    mock_data_access: MockDataAccess, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A heartbeat whose write conflicts with the same session keeps the lock."""
+    # Given
+    _acquire(mock_data_access)
+
+    def conflicting_write(lock: LockInfo, *, now: datetime) -> bool:
+        return False
+
+    monkeypatch.setattr(mock_data_access, "write_lock", conflicting_write)
+
+    # When
+    result = _acquire(mock_data_access, now=NOW + timedelta(seconds=5))
+
+    # Then
+    assert (result.status, result.acquired) == (LockStatus.REUSED, True)
+    assert result.message == ""
+    assert result.lock.session_id == SESSION_ID
+
+
+@pytest.mark.unit
 def test__unreadable_lock_table__acquire__raises(
     mock_data_access: MockDataAccess, monkeypatch: pytest.MonkeyPatch
 ) -> None:

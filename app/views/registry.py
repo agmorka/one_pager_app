@@ -28,6 +28,7 @@ from adapters.navigation import open_editor, open_preview
 from adapters.page import (
     current_roles,
     current_user,
+    page_header,
     render_error_state,
     require_data_access,
 )
@@ -583,12 +584,10 @@ data_access = require_data_access()
 # Page title and description, with [+ New] on the right
 title_col, new_col = st.columns([6, 1])
 with title_col:
-    st.title("One Pager Registry")
+    page_header("One Pager Registry", "Browse, search, and filter all One Pagers.")
 with new_col:
     st.markdown("")
     _render_new_button("registry_new")
-st.markdown("Browse, search, and filter all One Pagers.")
-st.markdown("")
 st.markdown("")
 
 # Load reference data (status colors)

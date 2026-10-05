@@ -16,7 +16,7 @@ import logging
 import pandas as pd
 import streamlit as st
 
-from adapters.page import ALERT_ICON, require_data_access
+from adapters.page import ALERT_ICON, page_header, require_data_access
 from adapters.theme import status_badge
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.data_access.connection import user_error_message
@@ -100,8 +100,7 @@ def render_machine(
 
 data_access = require_data_access()
 
-st.title("Help")
-st.caption("How One Pagers move through their lifecycle, and who does what.")
+page_header("Help", "How One Pagers move through their lifecycle, and who does what.")
 
 op_badges, dp_badges = load_legends(data_access)
 reference = get_workflow_reference()

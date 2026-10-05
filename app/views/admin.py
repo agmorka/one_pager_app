@@ -27,6 +27,7 @@ import streamlit as st
 from adapters.page import (
     ALERT_ICON,
     current_roles,
+    page_header,
     render_retry_banner,
     require_data_access,
     set_flash,
@@ -380,7 +381,11 @@ data_access = require_data_access()
 user = signed_in_user()
 roles = current_roles()
 
-st.title("Administration")
+page_header(
+    "Administration",
+    "Manage reference data, status definitions and approved One Pagers "
+    "waiting for a pull request.",
+)
 try:
     check_can_administer(user, roles)
 except PermissionDeniedError as e:
