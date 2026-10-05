@@ -257,7 +257,7 @@ def render_basics_tab(doc: OnePagerDocument, data_access: DataAccess) -> None:
 def render_problem_tab(doc: OnePagerDocument, data_access: DataAccess) -> None:  # noqa: ARG001
     """Render the Business Problem tab (the problem statement)."""
     doc.business_problem_statement = st.text_area(
-        "Business Problem Statement",
+        "Business Problem Statement *",
         key=bound("edit_problem", doc.business_problem_statement),
         max_chars=MAX_TEXT_LENGTH,
         height=250,

@@ -142,8 +142,10 @@ def test__valid_input__create__writes_a_lenient_valid_v2_yaml(
     assert validate_lenient(raw) == []
     assert validate_strict(raw) != []
     assert raw["structureDefinition"] == CURRENT_STRUCTURE_DEFINITION
-    assert raw["createdBy"] == creator.display_name
-    assert raw["changeLog"][0]["summary"] == "Initial draft created"
+    assert raw["changeLog"] == [
+        {"version": "0.1.0", "summary": "Initial draft created"}
+    ]
+    assert not {"createdBy", "createdAt", "lastUpdated"} & raw.keys()
     assert raw["smes"] == [
         {"name": "Diana Prince", "initials": "DPR", "email": "diana@bec.dk"}
     ]

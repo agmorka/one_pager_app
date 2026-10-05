@@ -154,16 +154,18 @@ flowchart LR
 
 ### Volume file layout
 
-Each Data Product has exactly one One Pager (1:1 relationship) — the One Pager ID (`OP-####`) is immutable and stable across all lifecycle stages. YAML files in the UC external volume are organized by OP-ID, with all versions stored as immutable files in a single directory. The current version is read from the Delta `one_pager_status.version` column — there is no pointer file.
+Each Data Product has exactly one One Pager (1:1 relationship) — the One Pager ID (`OP-####`) is immutable and stable across all lifecycle stages. YAML files in the UC external volume are kept in its `one_pagers/` folder (apart from other volume content such as the app wheels) and organized by OP-ID, with all versions stored as immutable files in a single directory. The current version is read from the Delta `one_pager_status.version` column — there is no pointer file.
 
 ```
 <volume_root>/
-  <OP-ID>/
-    <OP-ID>_v0.1.0.yml       # All versions stored as immutable files
-    <OP-ID>_v0.2.0.yml
-    <OP-ID>_v0.3.0.yml
-    <OP-ID>_v1.0.0.yml       # Approved versions also here (no separate folder)
-    <OP-ID>_v2.0.0.yml
+  one_pagers/
+    <OP-ID>/
+      <OP-ID>_v0.1.0.yml     # All versions stored as immutable files
+      <OP-ID>_v0.2.0.yml
+      <OP-ID>_v0.3.0.yml
+      <OP-ID>_v1.0.0.yml     # Approved versions also here (no separate folder)
+      <OP-ID>_v2.0.0.yml
+  wheels/                    # App wheels (deploy pipeline), not One Pagers
 ```
 
 **Key design properties:**

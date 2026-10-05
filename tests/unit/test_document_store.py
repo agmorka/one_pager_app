@@ -38,8 +38,9 @@ def test__write_path__write__file_written_outside_the_fixtures(
     path = document_store.write(IN_REVIEW_ID, document, "0.4.0")
 
     # Then
-    assert path == tmp_path / "written" / IN_REVIEW_ID / "OP-0002_v0.4.0.yml"
-    assert not (FIXTURES_DIR / IN_REVIEW_ID / "OP-0002_v0.4.0.yml").exists()
+    file = Path("one_pagers") / IN_REVIEW_ID / "OP-0002_v0.4.0.yml"
+    assert path == tmp_path / "written" / file
+    assert not (FIXTURES_DIR / file).exists()
 
 
 @pytest.mark.unit

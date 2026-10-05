@@ -9,6 +9,7 @@ import streamlit as st
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from tests.helpers import (
+    ADMIN_ROLES,
     ALICE,
     APPROVED_ID,
     APPROVER,
@@ -32,11 +33,15 @@ def actions(
 
 @pytest.mark.unit
 def test__owners_draft__cancel_and_report__cancelled_with_flash(
-    actions: ModuleType, alices_draft: MockDataAccess
+    actions: ModuleType,
+    alices_draft: MockDataAccess,
+    document_store: OnePagerDocumentStore,
 ) -> None:
     """A successful cancel reports no error and flashes a message."""
     # When
-    error = actions.cancel_and_report(alices_draft, NEW_ID, ALICE, "Dup")
+    error = actions.cancel_and_report(
+        alices_draft, document_store, NEW_ID, ALICE, "Dup"
+    )
 
     # Then
     assert error is None
@@ -46,8 +51,28 @@ def test__owners_draft__cancel_and_report__cancelled_with_flash(
 
 
 @pytest.mark.unit
+def test__admin_not_owner_or_sme__cancel_and_report__cancelled(
+    actions: ModuleType,
+    alices_draft: MockDataAccess,
+    document_store: OnePagerDocumentStore,
+) -> None:
+    """An Admin may cancel any One Pager, not only their own."""
+    # When
+    error = actions.cancel_and_report(
+        alices_draft, document_store, NEW_ID, make_user("ADM"), "", ADMIN_ROLES
+    )
+
+    # Then
+    assert error is None
+    row = alices_draft.get_one_pager_status_row(NEW_ID)
+    assert row.one_pager_status == "Cancelled"
+
+
+@pytest.mark.unit
 def test__cancelled_one_pager__cancel_and_report__returns_transition_error(
-    actions: ModuleType, alices_draft: MockDataAccess
+    actions: ModuleType,
+    alices_draft: MockDataAccess,
+    document_store: OnePagerDocumentStore,
 ) -> None:
     """Cancelling twice reports why."""
     # Given
@@ -59,7 +84,7 @@ def test__cancelled_one_pager__cancel_and_report__returns_transition_error(
     )
 
     # When
-    error = actions.cancel_and_report(alices_draft, NEW_ID, ALICE, "")
+    error = actions.cancel_and_report(alices_draft, document_store, NEW_ID, ALICE, "")
 
     # Then
     assert "cannot change from Cancelled" in error
@@ -67,11 +92,15 @@ def test__cancelled_one_pager__cancel_and_report__returns_transition_error(
 
 @pytest.mark.unit
 def test__stranger__cancel_and_report__returns_permission_message(
-    actions: ModuleType, alices_draft: MockDataAccess
+    actions: ModuleType,
+    alices_draft: MockDataAccess,
+    document_store: OnePagerDocumentStore,
 ) -> None:
     """A permission error is shown as a message."""
     # When
-    error = actions.cancel_and_report(alices_draft, NEW_ID, make_user("XYZ"), "")
+    error = actions.cancel_and_report(
+        alices_draft, document_store, NEW_ID, make_user("XYZ"), ""
+    )
 
     # Then
     assert error == "Only the Owner, an SME or an Admin can cancel this One Pager."

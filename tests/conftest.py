@@ -115,6 +115,7 @@ def alices_draft(
             description="Unified customer view",
             owner=PersonRef("Alice Brown", "ABR", "alice.brown@company.com"),
             smes=[PersonRef("Diana Prince", "DPR", "diana@bec.dk")],
+            business_problem_statement="Customer data is scattered.",
         ),
         ALICE,
         mock_data_access,

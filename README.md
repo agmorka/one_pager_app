@@ -75,7 +75,7 @@ Every setting is an environment variable read by `AppConfig` ([src/onepagerapp/c
 | Setting | Default | Meaning |
 |---|---|---|
 | `APP_MODE` | `databricks` | `local-mock`, `local-integration` or `databricks` (see App Modes). |
-| `ONE_PAGER_APP_VOLUME_PATH` | — (required) | Folder of the One Pager YAML files: the registry volume (`/Volumes/<catalog>/onepager_app/one_pager_registry`) or, in `local-mock`, a local folder such as `tests/fixtures/sample_one_pagers`. |
+| `ONE_PAGER_APP_VOLUME_PATH` | — (required) | Root of the One Pager YAML files, which are kept in its `one_pagers/<OP-ID>/` folders: the registry volume (`/Volumes/<catalog>/onepager_app/one_pager_registry`) or, in `local-mock`, a local folder such as `tests/fixtures/sample_one_pagers`. |
 | `ONE_PAGER_APP_DATABRICKS_CATALOG` | `dev_bia_meta` | Catalog of the app tables. |
 | `ONE_PAGER_APP_DATABRICKS_SCHEMA` | `onepager_app` | Schema of the app tables. |
 | `DATABRICKS_WAREHOUSE_ID` | — | SQL warehouse for the Delta tables (any value in `local-mock`). |

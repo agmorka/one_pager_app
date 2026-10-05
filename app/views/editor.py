@@ -417,11 +417,11 @@ smes_df = st.data_editor(
 _show_sme_errors()
 
 # ---------------------------------------------------------------------------
-# Business problem (optional)
+# Business problem
 # ---------------------------------------------------------------------------
 st.subheader("Business Problem Statement")
 st.text_area(
-    "Business Problem Statement (optional)",
+    "Business Problem Statement *",
     key="create_problem",
     max_chars=MAX_TEXT_LENGTH,
     placeholder="Current state, desired state and impact of inaction.",

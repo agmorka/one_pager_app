@@ -101,7 +101,7 @@ def test__document__write_to_volume__stored_through_the_files_api(
     path = volume_store.write("OP-0003", document, "0.1.0")
 
     # Then
-    assert str(path) == f"{BASE}/OP-0003/OP-0003_v0.1.0.yml"
+    assert str(path) == f"{BASE}/one_pagers/OP-0003/OP-0003_v0.1.0.yml"
     assert str(path) in files_api.files
 
 

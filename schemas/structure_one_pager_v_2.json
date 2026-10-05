@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "One Pager Structure Definition v2",
-  "description": "Schema for Data Product One Pager documents. The top-level 'required' list and every 'minItems' / 'minLength' define the strict (Submit for Review) tier; the lenient (Save Draft) tier ignores them and only requires productName and description (Requirements_and_Scope.md §5). Changes from v1: useCases hold Use Case ID references only (content lives in the use_cases table); businessRequirements carry BR-### IDs; the data element grid (dataProductPreview), retentionRequirements, dataGovernanceArtifacts, outOfScope, openQuestions and assumptions are added.",
+  "description": "Schema for Data Product One Pager documents. The top-level 'required' list and every 'minItems' / 'minLength' define the strict (Submit for Review) tier; the lenient (Save Draft) tier ignores them and only requires productName, description and businessProblemStatement (Requirements_and_Scope.md §5). Changes from v1: useCases hold Use Case ID references only (content lives in the use_cases table); businessRequirements carry BR-### IDs; the data element grid (dataProductPreview), retentionRequirements, dataGovernanceArtifacts, outOfScope, openQuestions and assumptions are added.",
   "type": "object",
   "required": [
     "structureDefinition",

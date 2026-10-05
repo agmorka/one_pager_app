@@ -8,6 +8,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 from onepagerapp.data_access.mock import MockDataAccess
+from onepagerapp.documents import OnePagerDocumentStore
 from onepagerapp.locking import acquire_lock
 from onepagerapp.review import add_review_comment
 from onepagerapp.workflow import (
@@ -407,12 +408,14 @@ def test__issue_in_summary__click_it__its_tab_opened(
 
 
 @pytest.mark.unit
-def test__problem_statement_missing__type_it__badge_cleared(
+def test__problem_statement_cleared__type_it__badge_cleared(
     alices_draft: MockDataAccess, switched: list[str]
 ) -> None:
     """Badges follow the input without saving."""
     # Given
     at = switch_tab(editor_page(alices_draft).run(), "Business Problem")
+    at.text_area(key="edit_problem").input("").run()
+    assert "Business Problem" in _needs_attention(at)
 
     # When
     at.text_area(key="edit_problem").input("Scattered data").run()
@@ -672,11 +675,13 @@ def test__owners_draft__click_cancel__asks_for_reason_first(
 
 @pytest.mark.unit
 def test__cancelled_one_pager__open_preview__read_only(
-    alices_draft: MockDataAccess, switched: list[str]
+    alices_draft: MockDataAccess,
+    document_store: OnePagerDocumentStore,
+    switched: list[str],
 ) -> None:
     """A cancelled One Pager can only be exported."""
     # Given
-    cancel_one_pager(alices_draft, NEW_ID, ALICE)
+    cancel_one_pager(alices_draft, document_store, NEW_ID, ALICE)
 
     # When
     at = _preview(alices_draft).run()

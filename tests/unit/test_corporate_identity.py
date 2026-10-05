@@ -125,7 +125,7 @@ def test__own_one_pager__edit_and_save__saved_by_x0w(
 
 
 @pytest.mark.unit
-def test__directory_name__create__name_in_change_log_and_document(
+def test__directory_name__create__name_in_change_log_not_in_document(
     config: AppConfig,
     valid_input: NewOnePagerInput,
     data_access: MockDataAccess,
@@ -148,4 +148,7 @@ def test__directory_name__create__name_in_change_log_and_document(
     [entry] = data_access.get_change_log(created.one_pager_id)
     assert (entry.author_initials, entry.author_name) == ("X0W", "Agnieszka Kępkowska")
     document = store.read(created.one_pager_id, "0.1.0")
-    assert document.created_by == "Agnieszka Kępkowska"
+    assert document.created_by is None  # the YAML holds no audit fields
+    assert document.change_log == [
+        {"version": "0.1.0", "summary": "Initial draft created"}
+    ]

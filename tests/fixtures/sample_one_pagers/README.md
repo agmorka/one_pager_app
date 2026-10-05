@@ -5,13 +5,14 @@ This directory contains sample One Pager YAML documents organized by OP-ID for u
 ## Directory Structure
 
 ```
-tests/fixtures/sample_one_pagers/
-├── OP-0001/                     # Person Master Data (Approved)
-│   ├── OP-0001_v0.1.0.yml       # Initial draft (v0.1.0)
-│   ├── OP-0001_v0.2.0.yml       # Updated draft (v0.2.0)
-│   └── OP-0001_v1.0.0.yml       # Approved version (v1.0.0, current)
-└── OP-0002/                     # Order Master Data (In Review)
-    └── OP-0002_v0.3.0.yml
+tests/fixtures/sample_one_pagers/   # ONE_PAGER_APP_VOLUME_PATH in local-mock
+└── one_pagers/                     # Same layout as the registry volume
+    ├── OP-0001/                    # Person Master Data (Approved)
+    │   ├── OP-0001_v0.1.0.yml      # Initial draft (v0.1.0)
+    │   ├── OP-0001_v0.2.0.yml      # Updated draft (v0.2.0)
+    │   └── OP-0001_v1.0.0.yml      # Approved version (v1.0.0, current)
+    └── OP-0002/                    # Order Master Data (In Review)
+        └── OP-0002_v0.3.0.yml
 ```
 
 The current version, product name, owner, and status of each fixture match the corresponding row seeded by `MockDataAccess` (see `_seed_status_rows` in `mock.py`), so the Registry list and each One Pager document stay consistent.
@@ -48,7 +49,7 @@ Tests can reference these fixtures directly:
 import yaml
 from pathlib import Path
 
-fixture_path = Path(__file__).parent / "sample_one_pagers" / "OP-0001" / "OP-0001_v0.2.0.yml"
+fixture_path = Path(__file__).parent / "sample_one_pagers" / "one_pagers" / "OP-0001" / "OP-0001_v0.2.0.yml"
 with open(fixture_path) as f:
     one_pager = yaml.safe_load(f)
 ```
@@ -87,13 +88,13 @@ To add a new sample One Pager:
 
 1. Create a new directory:
    ```
-   mkdir tests/fixtures/sample_one_pagers/OP-XXXX
+   mkdir tests/fixtures/sample_one_pagers/one_pagers/OP-XXXX
    ```
 
 2. Create version files:
    ```
-   tests/fixtures/sample_one_pagers/OP-XXXX/OP-XXXX_v0.1.0.yml
-   tests/fixtures/sample_one_pagers/OP-XXXX/OP-XXXX_v0.2.0.yml
+   tests/fixtures/sample_one_pagers/one_pagers/OP-XXXX/OP-XXXX_v0.1.0.yml
+   tests/fixtures/sample_one_pagers/one_pagers/OP-XXXX/OP-XXXX_v0.2.0.yml
    ```
 
 3. Ensure YAML content matches the schema it declares in `structureDefinition` (new fixtures: `schemas/structure_one_pager_v_2.json`).
