@@ -273,6 +273,7 @@ def render_view_as(roles: frozenset[Actor]) -> None:
 def render_access_denied(username: str) -> None:
     """Page shown instead of the app to a user who is not recognised."""
     st.title("Access denied")
+    st.caption("The One Pager App is available to recognised accounts only.")
     if username:
         shown = username.replace("`", "'")
         st.error(
@@ -297,21 +298,22 @@ def sidebar_user_label(user: CurrentUser) -> str:
 
 
 LOGO_PATH = Path(__file__).parent / "assets" / "BEC_FINANCIAL_TECHNOLOGIES_LOGO_RGB.png"
+LOGO_WIDTH = 120
+USER_ICON = "\N{BUST IN SILHOUETTE}"
 
 
 def render_sidebar_user(
-    config: AppConfig,
     roles: frozenset[Actor],
     group_roles: frozenset[Actor] | None = None,
 ) -> None:
-    """Top of the sidebar: the logged user, their roles and the environment.
+    """Top of the sidebar, under the logo: the logged user and their roles.
 
     ``roles`` are the roles in effect (badges); ``group_roles`` the real ones,
     which decide whether the Admin "View as" selector is shown.
     """
     group_roles = roles if group_roles is None else group_roles
     user_label = sidebar_user_label(st.session_state.current_user_info)
-    st.markdown(f"**{_escape_markdown(user_label)}**")
+    st.markdown(f"{USER_ICON} **{_escape_markdown(user_label)}**")
     st.markdown(role_badges(role_names(roles)), unsafe_allow_html=True)
     render_view_as(group_roles)
     if roles != group_roles:
@@ -319,20 +321,24 @@ def render_sidebar_user(
             f"Viewing as {', '.join(role_names(roles))} "
             f"(your roles: {', '.join(role_names(group_roles))})"
         )
-    badge = environment_badge(config.environment.value)
-    mode = " · mock data" if config.is_mock else ""
-    st.markdown(f"Environment: {badge}{mode}", unsafe_allow_html=True)
-    notice = interim_roles_notice(config)
-    if notice:
-        st.caption(notice)
+
+
+def render_sidebar_environment(config: AppConfig) -> None:
+    """Bottom of the sidebar: the environment badge and the interim roles notice."""
+    with st.sidebar:
+        st.divider()
+        badge = environment_badge(config.environment.value)
+        mode = " · mock data" if config.is_mock else ""
+        st.markdown(f"Environment: {badge}{mode}", unsafe_allow_html=True)
+        notice = interim_roles_notice(config)
+        if notice:
+            st.caption(notice)
 
 
 def render_sidebar_logo() -> None:
-    """Company logo at the bottom of the sidebar."""
+    """Company logo, small, at the top of the sidebar."""
     with st.sidebar:
-        st.divider()
-        col1, _ = st.columns(2)
-        col1.image(str(LOGO_PATH), use_column_width=True)
+        st.image(str(LOGO_PATH), width=LOGO_WIDTH)
 
 
 def _escape_markdown(text: str) -> str:
@@ -412,9 +418,10 @@ def main() -> None:
 
     # Fail closed (Architecture.md §4): no page and no data access for a user
     # who is not recognised.
+    render_sidebar_logo()
     if resolve_user() is None:
         render_access_denied(st.session_state.get("unrecognised_user", ""))
-        render_sidebar_logo()
+        render_sidebar_environment(config)
         st.stop()
 
     try:
@@ -431,7 +438,7 @@ def main() -> None:
 
     # Rendered before pg.run() so it stays visible when a page calls st.stop().
     with st.sidebar:
-        render_sidebar_user(config, roles, group_roles)
+        render_sidebar_user(roles, group_roles)
         st.divider()
         for page in pages:
             st.page_link(page)
@@ -439,7 +446,7 @@ def main() -> None:
     navigation_guard(
         pg.title, st.session_state.data_access, st.session_state.current_user_info
     )
-    render_sidebar_logo()
+    render_sidebar_environment(config)
 
     pg.run()
 

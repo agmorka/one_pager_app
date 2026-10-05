@@ -28,15 +28,15 @@ flowchart LR
 ```
 
 ### Sidebar
-- At the top: the logged user as "first name surname (initials)", e.g. "Agnieszka Kępkowska (X0W)" — the name from the directory without the admin account name ("X0WADM"), or only the corporate initials when no name is available — + role badge: Viewer, Owner/SME, Approver, Admin; several can apply
-- While the interim role group is used (Architecture §4), a small notice outside DEV: "Interim roles: DataPlatEng members act as Owner/SME, Approver and Admin"
+- At the very top: a small BEC logo
+- Under it: a user icon (👤) and the logged user as "first name surname (initials)", e.g. "Agnieszka Kępkowska (X0W)" — the name from the directory without the admin account name ("X0WADM"), or only the corporate initials when no name is available — + role badge: Viewer, Owner/SME, Approver, Admin; several can apply
 - An unrecognised account (no proxy identity, unknown domain or username format) sees only an "account not recognised — contact the platform team" page; no navigation is shown
-- Environment badge (DEV / INT / UAT / PRD) — always visible so testers never confuse environments
 - Navigation links: Registry, Editor, Review (visible to Approvers), Preview, Use Cases, Help, Admin (visible to Admins)
 - The Editor is always registered (Streamlit 1.38 cannot hide a single page and `st.switch_page` needs registered pages). Opened without an edit/create intent, it shows "Start from the Registry (➕ New) or from a One Pager's Edit action" and a button back to the Registry.
 - Active page highlighted
 - **View as (Admins only):** a "View as" selector under the role badges switches the user type the app is shown as: All my roles (default), Owner/SME, Approver, Admin or Viewer. Only roles the Admin really has are offered, so it can take roles away but never add one; pages, buttons and service checks all use the chosen role. A caption "Viewing as … (your roles: …)" is shown while a single role is chosen. Per-record Owner/SME rights (One Pagers where the Admin is listed as Owner or SME) still apply. The choice lasts for the session and each switch is logged.
-- BEC logo at the bottom
+- At the bottom: the environment badge (DEV / INT / UAT / PRD) — always visible so testers never confuse environments — and, while the interim role group is used (Architecture §4), a small notice outside DEV: "Interim roles: DataPlatEng members act as Owner/SME, Approver and Admin"
+- Every page starts with a title and a one-line subtitle in gray (`page_header`)
 
 ### Page visibility by role
 

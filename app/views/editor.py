@@ -23,6 +23,7 @@ from adapters.page import (
     ALERT_ICON,
     current_roles,
     current_user,
+    page_header,
     render_retry_banner,
     require_data_access,
     require_document_store,
@@ -46,6 +47,8 @@ from onepagerapp.workflow import (
 )
 
 logger = logging.getLogger(__name__)
+
+NEW_SUBTITLE = "Fill in the basics to create a Draft."
 
 SME_COLUMNS = ["name", "initials", "email", "team"]
 _ERRORS_KEY = "create_errors"
@@ -274,14 +277,14 @@ if st.session_state.get(EDITOR_MODE_KEY) == "edit":
     st.stop()
 
 if st.session_state.get(EDITOR_MODE_KEY) != "create":
-    st.title("Editor")
+    page_header("Editor", "Create a new One Pager or edit an existing one.")
     st.info("Start from the Registry (New) or from a One Pager's Edit action.")
     if st.button("Go to the Registry"):
         go_to_registry()
     st.stop()
 
 if not can_create_one_pager(user, current_roles()):
-    st.title("New One Pager")
+    page_header("New One Pager", NEW_SUBTITLE)
     st.error("You don't have permission to create One Pagers.")
     st.stop()
 
@@ -301,7 +304,7 @@ except Exception as e:
     st.stop()
 
 # Header
-st.title("New One Pager")
+page_header("New One Pager", NEW_SUBTITLE)
 st.markdown(
     "**Status:** ● Draft &nbsp;·&nbsp; **Data Product status:** ● In Definition "
     "&nbsp;·&nbsp; **Version:** v0.1.0"
@@ -312,8 +315,8 @@ if banner:
     st.error(banner)
 
 st.caption(
-    "Fill in the basics to create a Draft. The remaining sections are completed "
-    "in the Editor after creation. Fields marked * are required."
+    "The remaining sections are completed in the Editor after creation. "
+    "Fields marked * are required."
 )
 
 # ---------------------------------------------------------------------------

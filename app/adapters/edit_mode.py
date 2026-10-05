@@ -38,6 +38,7 @@ from adapters.navigation import (
 from adapters.page import (
     ALERT_ICON,
     current_user,
+    page_header,
     render_error_state,
     show_flash,
     timestamp_label,
@@ -599,7 +600,10 @@ def _heartbeat(data_access: DataAccess, one_pager_id: str, user: CurrentUser) ->
 
 def render_header(doc: OnePagerDocument) -> None:
     row = st.session_state[STATUS_ROW_KEY]
-    st.title(f"Editing: {doc.product_name or row.product_name} ({row.one_pager_id})")
+    page_header(
+        f"Editing: {doc.product_name or row.product_name} ({row.one_pager_id})",
+        "Update the sections, then save a new draft version or submit for review.",
+    )
     st.markdown(
         f"**Status:** ● {row.one_pager_status} &nbsp;·&nbsp; "
         f"**Data Product status:** ● {row.data_product_status} &nbsp;·&nbsp; "
@@ -862,7 +866,7 @@ def render_edit_mode(
     """Render the Editor for the One Pager in ``editor_one_pager_id``."""
     one_pager_id = st.session_state.get(EDITOR_ID_KEY)
     if not one_pager_id or user is None:
-        st.title("Editor")
+        page_header("Editor", "Create a new One Pager or edit an existing one.")
         st.info("Open a One Pager in Preview and choose **Edit**.")
         st.stop()
 

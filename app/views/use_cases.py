@@ -24,6 +24,7 @@ from adapters.page import (
     current_initials,
     current_roles,
     current_user,
+    page_header,
     render_error_state,
     require_data_access,
     set_flash,
@@ -402,8 +403,10 @@ data_access = require_data_access()
 can_manage = can_manage_use_cases(current_initials(), current_roles())
 
 title_col, new_col = st.columns([5, 1])
-title_col.title("Use Case Registry")
-title_col.markdown("Browse the shared Use Cases referenced by One Pagers.")
+with title_col:
+    page_header(
+        "Use Case Registry", "Browse the shared Use Cases referenced by One Pagers."
+    )
 with new_col:
     st.markdown("")
     st.markdown("")

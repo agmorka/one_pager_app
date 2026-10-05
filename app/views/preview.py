@@ -35,6 +35,7 @@ from adapters.navigation import (
 from adapters.page import (
     ALERT_ICON,
     current_roles,
+    page_header,
     render_error_state,
     require_data_access,
     set_flash,
@@ -92,6 +93,8 @@ from onepagerapp.state_machine import IN_REVIEW, Actor, TransitionRule
 from onepagerapp.workflow import data_product_options, plan_approval
 
 logger = logging.getLogger(__name__)
+
+PREVIEW_SUBTITLE = "Read-only view of a One Pager, its change log and review comments."
 
 
 LOAD_ERROR_MESSAGE = "Couldn't load this One Pager. Please retry."
@@ -189,7 +192,7 @@ def render_header(preview_data: PreviewData, op_colors: dict, dp_colors: dict) -
     col1, col2, col3 = st.columns([2, 1, 1])
 
     with col1:
-        st.title(header.product_name)
+        page_header(header.product_name, PREVIEW_SUBTITLE)
         st.markdown(f"**ID:** {header.one_pager_id} | **Version:** {header.version}")
         st.markdown(
             f"**Owner:** {header.owner_name} ({header.owner_email}) | "
@@ -921,7 +924,7 @@ elif query_one_pager_id:
     )
 else:
     # No silent default (UI_Design.md §4.4): ask the user to pick a One Pager.
-    st.title("Preview")
+    page_header("Preview", PREVIEW_SUBTITLE)
     st.info(
         "No One Pager selected. Open one from the Registry with the **View** button."
     )

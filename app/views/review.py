@@ -15,6 +15,7 @@ import streamlit as st
 from adapters.navigation import PREVIEW_ID_KEY, PREVIEW_PAGE, REVIEW_MODE_KEY
 from adapters.page import (
     current_roles,
+    page_header,
     render_error_state,
     require_data_access,
     signed_in_user,
@@ -28,6 +29,7 @@ from onepagerapp.review import get_review_queue
 logger = logging.getLogger(__name__)
 
 LOAD_ERROR_MESSAGE = "Couldn't load the review queue. Please retry."
+REVIEW_SUBTITLE = "One Pagers waiting for review, oldest submission first."
 EMPTY_MESSAGE = "Nothing waiting for your review."
 
 QUEUE_COLUMNS = ["ID", "Product", "Domain", "Owner", "Submitted", "Version", ""]
@@ -92,16 +94,17 @@ try:
     with st.spinner("Loading the review queue..."):
         queue = get_review_queue(data_access, user, roles)
 except PermissionDeniedError as e:
-    st.title("Review Queue")
+    page_header("Review Queue", REVIEW_SUBTITLE)
     st.info(str(e))
     st.stop()
 except Exception as e:
     logger.exception("Failed to load the review queue")
-    st.title("Review Queue")
+    page_header("Review Queue", REVIEW_SUBTITLE)
     render_error_state(user_error_message(e, LOAD_ERROR_MESSAGE), key="review_retry")
 
 title_col, count_col = st.columns([4, 1])
-title_col.title("Review Queue")
+with title_col:
+    page_header("Review Queue", REVIEW_SUBTITLE)
 count_col.metric("Pending", len(queue))
 
 if not queue:

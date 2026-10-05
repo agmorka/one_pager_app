@@ -343,7 +343,9 @@ def test__directory_has_name__run_app_twice__name_shown_looked_up_once(
     user = at.session_state["current_user_info"]
     assert (user.initials, user.display_name) == ("X0W", "Agnieszka Kępkowska")
     assert lookups == ["t"]
-    assert "**Agnieszka Kępkowska (X0W)**" in [m.value for m in at.sidebar.markdown]
+    assert "\N{BUST IN SILHOUETTE} **Agnieszka Kępkowska (X0W)**" in [
+        m.value for m in at.sidebar.markdown
+    ]
 
 
 @pytest.mark.unit
@@ -367,7 +369,7 @@ def test__directory_fails__run_app__signed_in_with_initials(
     assert not at.exception
     assert not _is_denied(at)
     assert at.session_state["current_user_info"].display_name == "X0W"
-    assert "**X0W**" in [m.value for m in at.sidebar.markdown]
+    assert "\N{BUST IN SILHOUETTE} **X0W**" in [m.value for m in at.sidebar.markdown]
 
 
 # ============================================================================
@@ -533,21 +535,22 @@ def test__session_groups__run_app__pages_follow_the_groups(
 
 
 @pytest.mark.unit
-def test__signed_in__run_app__user_on_top_and_logo_at_the_bottom(
+def test__signed_in__run_app__logo_and_user_on_top_environment_at_the_bottom(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The sidebar starts with the user and ends with the logo columns."""
+    """The sidebar starts with the logo and the user, and ends with the environment."""
     # When
     at = _run_app(monkeypatch, APP_MODE="local-mock")
 
     # Then
     assert not at.exception
     children = list(at.sidebar.children.values())
-    assert children[0].value == "**Local Dev User (LDU)**"
     kinds = [child.type for child in children]
-    first_link = kinds.index("page_link")
-    assert "markdown" not in kinds[first_link:]
-    assert kinds[-1] == "horizontal"
+    assert kinds[0] == "imgs"
+    assert children[1].value == "\N{BUST IN SILHOUETTE} **Local Dev User (LDU)**"
+    last_link = len(kinds) - 1 - kinds[::-1].index("page_link")
+    assert kinds[last_link + 1] == "divider"
+    assert children[-1].value.startswith("Environment: ")
 
 
 # ============================================================================
