@@ -17,23 +17,32 @@ import pandas as pd
 import streamlit as st
 
 from adapters import cache
-from adapters.page import ALERT_ICON, page_header, require_data_access
+from adapters.navigation import HELP_TOPIC_KEY
+from adapters.page import ALERT_ICON, current_roles, page_header, require_data_access
 from adapters.theme import status_badge
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.data_access.connection import user_error_message
 from onepagerapp.help_content import (
+    ADMIN,
+    APPROVER,
+    GLOSSARY,
     LIFECYCLE_INTRO,
+    OWNER_SME,
     QUICK_REFERENCE,
     ROLE_REQUEST,
     ROLES,
     VERSIONING_NOTE,
     BadgeInfo,
+    QuickReference,
     combinations_table,
     dp_legend,
+    guide_for_topic,
+    guides_for,
     op_legend,
     state_diagram_dot,
     transition_table,
 )
+from onepagerapp.state_machine import Actor
 from onepagerapp.workflow import get_workflow_reference
 
 logger = logging.getLogger(__name__)
@@ -95,16 +104,58 @@ def render_machine(
         )
 
 
+# Help guide roles of the session's roles.
+GUIDE_ROLES = {
+    Actor.OWNER_SME_GROUP: OWNER_SME,
+    Actor.APPROVER: APPROVER,
+    Actor.ADMIN: ADMIN,
+}
+
+
+def render_guide(guide: QuickReference, *, expanded: bool = False) -> None:
+    """One "How do I…" guide as numbered steps in an expander."""
+    with st.expander(guide.title, expanded=expanded):
+        st.markdown(
+            "\n".join(f"{number}. {step}" for number, step in enumerate(guide.steps, 1))
+        )
+
+
 # ============================================================================
 # Help Page
 # ============================================================================
 
 data_access = require_data_access()
 
-page_header("Help", "How One Pagers move through their lifecycle, and who does what.")
+page_header(
+    "Help",
+    "How the app works: guides for your role, the lifecycle, roles and terms.",
+)
+
+topic_guide = guide_for_topic(st.session_state.pop(HELP_TOPIC_KEY, "") or "")
+if topic_guide is not None:
+    st.info("Help for the page you came from:", icon=":material/help:")
+    render_guide(topic_guide, expanded=True)
 
 op_badges, dp_badges = load_legends(data_access)
 reference = get_workflow_reference()
+
+st.header("How do I…")
+my_roles = [GUIDE_ROLES[r] for r in GUIDE_ROLES if r in current_roles()]
+mine = guides_for(my_roles)
+st.caption(
+    "Guides for your role" + (f" ({', '.join(my_roles)})" if my_roles else "") + "."
+)
+for guide in mine:
+    if guide != topic_guide:
+        render_guide(guide)
+others = [q for q in QUICK_REFERENCE if q not in mine]
+if others:
+    with st.expander(f"Guides for other roles ({len(others)})"):
+        for guide in others:
+            st.markdown(f"**{guide.title}**")
+            st.markdown(
+                "\n".join(f"{n}. {step}" for n, step in enumerate(guide.steps, 1))
+            )
 
 st.header("The two-status lifecycle")
 st.markdown(LIFECYCLE_INTRO)
@@ -156,12 +207,13 @@ with st.expander(ROLE_REQUEST.title):
         "\n".join(f"{n}. {step}" for n, step in enumerate(ROLE_REQUEST.steps, 1))
     )
 
-st.header("Workflow quick reference")
-for item in QUICK_REFERENCE:
-    with st.expander(item.title):
-        st.markdown(
-            "\n".join(f"{number}. {step}" for number, step in enumerate(item.steps, 1))
-        )
+st.header("Glossary")
+st.dataframe(
+    pd.DataFrame(GLOSSARY, columns=["Term", "Meaning"]),
+    hide_index=True,
+    use_container_width=True,
+    column_config={"Meaning": st.column_config.TextColumn(width="large")},
+)
 
 st.header("Status badges")
 col_op, col_dp = st.columns(2)
@@ -170,6 +222,6 @@ with col_op:
 with col_dp:
     render_legend("Data Product status", dp_badges)
 st.caption(
-    "Lock column: initials of the person editing the One Pager; it is read-only "
-    "for others."
+    "Being edited by (Registry): initials of the person holding the edit lock, "
+    "and since when; the One Pager is read-only for others meanwhile."
 )

@@ -37,6 +37,7 @@ from adapters.page import (
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.data_access.connection import user_error_message
 from onepagerapp.documents import OnePagerDocumentStore
+from onepagerapp.help_content import TOPIC_CREATE
 from onepagerapp.models import CurrentUser, NewOnePagerInput, PersonRef, ValidationError
 from onepagerapp.permissions import PermissionDeniedError, can_create_one_pager
 from onepagerapp.validation import (
@@ -327,7 +328,7 @@ except Exception as e:
     st.stop()
 
 # Header
-page_header("New One Pager", NEW_SUBTITLE)
+page_header("New One Pager", NEW_SUBTITLE, help_topic=TOPIC_CREATE)
 st.markdown(
     "**Status:** ● Draft &nbsp;·&nbsp; **Data Product status:** ● In Definition "
     "&nbsp;·&nbsp; **Version:** v0.1.0"

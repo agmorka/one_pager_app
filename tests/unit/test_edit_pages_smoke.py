@@ -254,9 +254,10 @@ def test__open_editor__visit_every_tab__each_renders(
     # Given
     at = editor_page(alices_draft).run()
     labels = list(at.radio(key="edit_active_tab").options)
-    assert [label.startswith(name) for name, label in zip(TAB_NAMES, labels)] == [
-        True
-    ] * len(TAB_NAMES)
+    assert len(labels) == len(TAB_NAMES)
+    assert all(
+        label.startswith(name) for name, label in zip(TAB_NAMES, labels, strict=True)
+    )
 
     # When / Then
     for name in TAB_NAMES:

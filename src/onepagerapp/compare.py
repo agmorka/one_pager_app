@@ -138,7 +138,7 @@ def _as_text(value: Any) -> str:  # noqa: ANN401 - any YAML value
         return ""
     if isinstance(value, str):
         return value
-    return yaml.safe_dump(value, sort_keys=False, allow_unicode=True).strip()
+    return str(yaml.safe_dump(value, sort_keys=False, allow_unicode=True)).strip()
 
 
 def diff_documents(old: OnePagerDocument, new: OnePagerDocument) -> list[SectionChange]:

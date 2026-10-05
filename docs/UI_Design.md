@@ -31,12 +31,14 @@ flowchart LR
 - At the very top: a small BEC logo
 - Under it: a user icon (👤) and the logged user as "first name surname (initials)", e.g. "Agnieszka Kępkowska (X0W)" — the name from the directory without the admin account name ("X0WADM"), or only the corporate initials when no name is available — + role badge: Viewer, Owner/SME, Approver, Admin; several can apply
 - An unrecognised account (no proxy identity, unknown domain or username format) sees only an "account not recognised — contact the platform team" page; no navigation is shown
-- Navigation links: Registry, Editor, Review (visible to Approvers), Preview, Use Cases, Help, Admin (visible to Admins)
-- The Editor is always registered (Streamlit 1.38 cannot hide a single page and `st.switch_page` needs registered pages). Opened without an edit/create intent, it shows "Start from the Registry (➕ New) or from a One Pager's Edit action" and a button back to the Registry.
+- Navigation links (with icons): My work (the landing page), Registry, Review (visible to Approvers, with the number of One Pagers waiting, e.g. "Review (3)"), Use Cases, Help, Admin (visible to Admins)
+- Preview and Editor are registered (`st.switch_page` needs registered pages) but have no sidebar link: they always show one One Pager and are opened from My work, the Registry, the Review queue or Preview. Opened without an edit/create intent, the Editor shows "Start from the Registry (New) or from a One Pager's Edit action" and a button back to the Registry.
 - Active page highlighted
 - **View as (Admins only):** a "View as" selector under the role badges switches the user type the app is shown as: All my roles (default), Owner/SME, Approver, Admin or Viewer. Only roles the Admin really has are offered, so it can take roles away but never add one; pages, buttons and service checks all use the chosen role. A caption "Viewing as … (your roles: …)" is shown while a single role is chosen. Per-record Owner/SME rights (One Pagers where the Admin is listed as Owner or SME) still apply. The choice lasts for the session and each switch is logged.
 - At the bottom: the environment badge (DEV / INT / UAT / PRD) — always visible so testers never confuse environments — and, while the interim role group is used (Architecture §4), a small notice outside DEV: "Interim roles: DataPlatEng members act as Owner/SME, Approver and Admin"
-- Every page starts with a title and a one-line subtitle in gray (`page_header`)
+- Every page starts with a title and a one-line subtitle in gray (`page_header`); pages with a Help guide have a **Help** button next to the title that opens the Help page on that guide
+- Sidebar inputs (the View as selector) keep dark text on their light field
+- Confirmations after an action (saved, created, approved, …) are toasts
 
 ### Page visibility by role
 
@@ -89,6 +91,17 @@ Always rendered as `[colored dot] + [text label]`. Colors from `ref_*_statuses` 
 
 ## 4. Page Designs
 
+### 4.0 My work (`views/my_work.py`)
+
+**Purpose:** Landing page: what needs the signed-in user's attention (`onepagerapp.my_work`).
+
+- Counts: Drafts to finish, Comments to resolve, Waiting for review, and for Approvers Waiting for your review.
+- **Waiting for your review** (Approvers): the first five of the queue (their own One Pagers left out), submitted date and how long each has waited, **Review** opens Preview in review mode; a button leads to the full queue.
+- **Continue editing:** the user's One Pagers in Draft / Draft Update (Owner or SME), with unresolved review comments and "you are editing" (own lock) noted; **Open** and **Edit**.
+- **Waiting for review** and **Approved** (collapsed): the user's other One Pagers.
+- **New One Pager** for the Owner/SME group; a button to the Registry. With nothing to show, a hint and the Registry button.
+
+
 ### 4.1 Registry (`1_Registry.py`)
 
 **Purpose:** Browse, search, and filter all One Pagers. Landing page for all users.
@@ -119,11 +132,11 @@ Always rendered as `[colored dot] + [text label]`. Colors from `ref_*_statuses` 
 ```
 
 #### Components
-- **Metrics row:** Colored count cards for each OP status (counts from `ref_op_status` ordering). The card of the status selected in the status filter is outlined; the cards have no buttons (filtering is done with the status filter).
-- **Filter bar:** Dropdowns/text inputs for each filter dimension. Filters combine with AND logic. "Clear filters" link resets all.
-- **Table:** Sortable columns. Click a row to navigate to Preview. Lock icon (🔒) shown next to locked items with the lock holder's initials.
+- **Status cards:** Colored count cards for each One Pager status (all One Pagers, `ref_op_status` ordering; text color chosen for contrast). Each card has a **Show** button that filters the table to that status; the active card is outlined, its button reads "✓ Showing", and clicking it again shows all statuses. Ready for Review (transient) has a card only while a One Pager is in it.
+- **Filter bar:** Quick views (All One Pagers / My One Pagers / My drafts — "mine" = Owner or SME), one **Search** box (ID, product name, owner name or email), One Pager status and Data Product status; Domain, Product type and Use Case under **More filters** (its title counts the active ones). Filters combine with AND logic. "Clear filters" resets all.
+- **Table:** `st.dataframe` with single-row selection: clicking a row opens Preview. Status cells carry their badge color as a left border (the text stays). **Sort by** (server side) above the table. **Being edited by** shows 🔒, the lock holder's initials and since when.
 - **[+ New] button:** Visible only to Owner/SME group members. Opens the Editor with a blank document. Rendered as "➕ New" (Streamlit button labels are Markdown, so a leading "+" would become a bullet). Until the Owner/SME UC group names are decided, `can_create_one_pager()` allows any authenticated user ([Decision_Log.md](Decision_Log.md) §9, New_One_Pager_Plan D7).
-- **Pagination:** Page-based navigation below the table.
+- **Pagination:** "Showing 21-40 of 134 One Pagers", Prev / page selector / Next, and Rows per page (20, 50, 100).
 
 #### States
 | State | What the user sees |
@@ -188,18 +201,22 @@ Always rendered as `[colored dot] + [text label]`. Colors from `ref_*_statuses` 
 | **Classification** | `dataClassification`, `retentionRequirements` | Classification level dropdown, PII/sensitive checkboxes. Retention requirements repeating form (conditional — required if PII/sensitive or non-Public). |
 | **Governance** | `dataGovernanceArtifacts` (business concepts, CDE quality, CDE lineage) | Three sub-sections with repeating forms for each artifact type. |
 | **Scope & Questions** | `outOfScope`, `openQuestions`, `assumptions` | Three lists with add/remove. Open questions have owner, due date, status fields. |
-| **Review** | (read-only summary) | Validation results checklist; review comments from prior cycles with [Resolve] action per comment (Owner can mark comments as addressed here); Submit button (enabled only when strict validation passes). The Submit button in this tab is the same action as the bottom bar's [Submit for Review] — having it here gives a final confirmation point after reviewing all issues. |
+| **Review & submit** | (read-only summary) | Validation results checklist (each section with issues links to it); review comments from prior cycles with [Resolve] action per comment (Owner can mark comments as addressed here); Submit button (enabled only when strict validation passes). The Submit button in this tab is the same action as the bottom bar's [Submit for Review] — having it here gives a final confirmation point after reviewing all issues. |
+
+#### Section list
+The sections are a vertical list left of the form (not a tab bar): each entry shows ✓ when complete or "· N to fix" with its strict-tier issues; "Review & submit" shows how many are left. The selection is kept in `edit_selected_tab`, because Streamlit resets a radio whose labels change.
 
 #### Repeating items pattern
 For sections with arrays (use cases, requirements, sources, data elements, etc.):
-- A summary table at the top of the tab shows existing items.
-- An [+ Add] button opens an inline form (or expander) below the table.
-- Each existing item has [Edit] (opens inline form pre-filled) and [Remove] actions.
+- One list shows the items: title and the other key fields, with [Edit] and [Remove] beside each.
+- [Edit] opens the form pre-filled right under its item; [Remove] asks for confirmation under the item.
+- An [Add] button under the list opens an inline form there.
 
 #### Bottom bar
-- **Change summary:** Required text field on Save Draft — the Owner describes what changed (becomes the change log entry). Not required on Submit for Review (system generates the transition entry).
-- **[Save Draft]:** Saves with lenient validation. Always enabled. Does not release the lock.
-- **[Submit for Review]:** Runs strict validation. If validation fails, shows the error list with links to the offending tabs/fields. If validation passes, performs the atomic submit (Draft → Ready for Review → In Review). Releases the lock.
+- **Change summary:** Required text field on Save Draft — becomes the change log entry. Suggested from the changed sections ("Updated Description, Data Sources") until the user writes their own. Not required on Submit for Review (system generates the transition entry).
+- **[Save Draft]:** Saves with lenient validation. Enabled when there are unsaved changes. Does not release the lock.
+- **[Submit for Review]:** Disabled, with the reason written under the bar, while strict validation finds issues. With unsaved changes it reads **Save & submit for review** and saves first. Performs the atomic submit (Draft → Ready for Review → In Review). Releases the lock.
+- **Lock line:** "Locked by you until HH:MM UTC", refreshed every minute (`st.fragment(run_every=60)`); five minutes before expiry a warning with **Keep editing** (renews the lock); an expired lock is reported.
 - **[Cancel]:** Discards unsaved changes, releases the lock, navigates back to Preview/Registry. Confirmation dialog if there are unsaved changes.
 - **Sidebar navigation guard:** If the user clicks a sidebar link while the editor has unsaved changes, a confirmation dialog appears ("You have unsaved changes. Leave without saving?") before navigating away. This prevents accidental data loss.
 
@@ -207,9 +224,9 @@ For sections with arrays (use cases, requirements, sources, data elements, etc.)
 | State | What the user sees |
 |---|---|
 | **Loading** | Spinner while fetching existing document (edit mode) |
-| **New (empty form)** | Blank form with helper placeholder text from schema descriptions. In the current release create mode shows only **Basics** (Data Product, Product Name, Business Domain, Product Type, Description, Owner, SMEs) plus an optional Business Problem Statement, and a bottom bar with **[Create Draft]** / **[Cancel]** (no change summary — creation is logged automatically as "Initial draft created"). The Owner is pre-filled with the current user. On success the user lands on Preview for the new `OP-####` (Draft, In Definition, v0.1.0). Other tabs arrive with the full Editor. |
+| **New (empty form)** | Blank form with helper placeholder text from schema descriptions. Create mode shows only **Basics** (Data Product, Product Name, Business Domain, Product Type, Description, Owner, SMEs; **Add me as SME**) plus an optional Business Problem Statement, and a bottom bar with **[Create and continue editing]** (opens the new Draft in the Editor) / **[Create Draft]** (opens Preview) / **[Cancel]** (no change summary — creation is logged automatically as "Initial draft created"). The Owner is pre-filled with the current user. The new `OP-####` is Draft, In Definition, v0.1.0. |
 | **Editing (populated)** | Pre-filled form with current content |
-| **Validation errors** | Red dot badge next to each tab label that has issues; validation summary panel at bottom listing all errors as clickable links (clicking scrolls to the relevant tab + field) |
+| **Validation errors** | Issue counts in the section list; the Review & submit checklist links each section; errors that block a save are listed above the bottom bar, each a link to its section. In edit mode, Basics has **Use my details** (Owner) and **Add me as SME**. |
 | **Save error** | Banner: "Save failed — your changes are preserved, please retry." Content stays in session. |
 | **Lock conflict (different user)** | "This One Pager is currently being edited by {name}. You can view it in Preview mode." + link to Preview. |
 | **Lock conflict (same user, different tab)** | "You have this document open in another browser tab. Editing in multiple tabs simultaneously is not supported. Please close one tab." Lock is not acquired; editor is read-only until the other session is closed or the lock expires. |
@@ -238,7 +255,7 @@ For sections with arrays (use cases, requirements, sources, data elements, etc.)
 ```
 
 #### Components
-- **Table:** Filtered to `one_pager_status = 'In Review'`. Sorted by submission date (oldest first). Click a row → navigate to Preview in "review mode" (with Approve/Reject actions visible).
+- **Table:** Filtered to `one_pager_status = 'In Review'`. Sorted by submission date (oldest first), with how long each has waited. **Review** → Preview in "review mode" (with Approve/Reject actions visible). After Approve or Reject the Approver returns here, with the outcome as a toast.
 - **Pending count** in the header.
 
 #### States
@@ -316,8 +333,16 @@ For sections with arrays (use cases, requirements, sources, data elements, etc.)
 └─────────────────────────────────────────────────────────────┘
 ```
 
+#### Layout (current)
+Back link (or the review-mode banner) → header (ID, version, owner, last updated in UTC, both status badges) → status path → lock notice → actions → tabs.
+
+- **Status path** (`permissions.get_status_path`): Draft → In Review → Approved for a first version; Approved vN → Draft Update → In Review → Approved for an update; Cancelled ends the path. Ready for Review is shown as In Review. Done steps are ticked, the current one bold. After a rejection: "Sent back for rework by … on …".
+- **Lock notice** sits right above the actions, since it explains why Edit may be unavailable.
+- **Tabs:** Content, **What changed** (first in review mode), Change log (count), Review comments (open count).
+- **What changed** (`onepagerapp.compare`): sections that differ from the last approved version, else from the last rejected version, as before / now; hidden for a first version.
+
 #### Sections
-Content sections are rendered as collapsible blocks (`st.expander`), each showing the One Pager's content in a clean, business-readable format (not raw YAML/JSON). Sections follow the same order as the editor tabs.
+Content sections are rendered as collapsible blocks (`st.expander`), each showing the One Pager's content in a clean, business-readable format (not raw YAML/JSON). Sections follow the same order as the editor tabs. **Expand all sections** opens them all; an empty section says so in its title. In review mode each section has **Comment on this section** (the comment dialog with that section preselected). Linked Use Cases have a button that opens them on the Use Cases page. Change-log events read Created / Saved / Status changed / Cancelled.
 
 #### Actions (conditional)
 
@@ -332,6 +357,8 @@ Content sections are rendered as collapsible blocks (`st.expander`), each showin
 | Any | Any | Export PDF, view change log, view review comments |
 
 > **Note:** `Ready for Review` is a transient state (part of the atomic submit action) — users never rest in it, so no actions are shown for it.
+
+**Button layout:** Edit, Update, Approve, Reject and Add Comment are buttons; the first of Approve, Edit, Update that the user can do is the primary (highlighted) button. Change Data Product status, Export PDF and Cancel One Pager are in a **More** menu. For every shown action that is disabled, the reason is written under the buttons ("**Edit**: …"), not only in the tooltip.
 
 **[Update] confirmation dialog:** When the Owner clicks [Update] on an Approved One Pager, a confirmation dialog appears: "This will create a working copy for editing. The current approved version remains in Git until you complete the review cycle. Proceed?" [Confirm] / [Cancel].
 
@@ -381,9 +408,9 @@ Content sections are rendered as collapsible blocks (`st.expander`), each showin
 ```
 
 #### Components
-- **[+ New UC]:** Visible to Owner/SME group. Opens inline form below the table.
-- **Table:** All use cases, showing linked OP count. Deprecated UCs shown grayed out (filterable).
-- **Detail expander:** Click a row to expand full details + Edit/Deprecate actions (Owner/SME only).
+- **[+ New UC]:** Visible to Owner/SME group. Opens the form in a dialog.
+- **Table:** `st.dataframe`; all use cases with the number of One Pagers using each ("2 One Pagers"); Status says Active or Deprecated (deprecated hidden unless "Show deprecated"). "Showing 1-20 of 57 Use Cases".
+- **Detail panel:** Click a row to show the details beside the table, with an **Open OP-…** button per referencing One Pager and Edit / Deprecate / Restore (Owner/SME only) and Close.
 
 #### States
 Same pattern: Loading / Populated / Empty / Error.
@@ -398,7 +425,8 @@ Same pattern: Loading / Populated / Empty / Error.
 - **Two-status lifecycle explanation** with visual Mermaid state diagrams (OP + DP status machines from backend design §2/§3).
 - **Valid status combinations table** (from requirements doc §6).
 - **Roles & responsibilities** summary table.
-- **Workflow quick-reference:** step-by-step for common actions (create → submit → approve → update).
+- **How do I…:** step-by-step guides; the guides for the user's roles are shown, the others are collected in one expander. A page's **Help** button opens this page with that page's guide on top.
+- **Glossary** of the terms and abbreviations (One Pager, Data Product, SME, CDE, PII, Draft Update, edit lock, …).
 - **Status badge legend** with all colors/labels.
 
 Data is read from `ref_op_status` / `ref_dp_status` tables for badge colors/labels, and the transition rules are rendered from the service layer's serialized `TRANSITIONS` dict (per backend design §13).
@@ -473,10 +501,10 @@ Used for destructive/irreversible actions: Cancel One Pager, Reject, Deprecate U
 - Form save errors preserve all in-progress content in `st.session_state`.
 
 ### Repeating items (add/edit/remove pattern)
-1. Summary table showing existing items.
-2. [+ Add] button below the table → inline form appears.
-3. [Edit] on a row → inline form pre-filled with that item's data.
-4. [Remove] on a row → confirmation, then remove.
+1. One list of the existing items: title and key fields, [Edit] / [Remove] beside each.
+2. [Add] button below the list → inline form appears.
+3. [Edit] on an item → inline form pre-filled, right under the item.
+4. [Remove] on an item → confirmation under the item, then remove.
 5. Changes are part of the current editing session — not saved to storage until the user clicks [Save Draft] or [Submit].
 
 ## 6. Caching Strategy

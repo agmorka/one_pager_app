@@ -5,6 +5,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+from streamlit.testing.v1 import AppTest
 
 from onepagerapp.config import AppConfig
 from onepagerapp.data_access import lakehouse
@@ -49,6 +50,12 @@ def cache(import_app_module: Callable[[str], ModuleType]) -> Iterator[ModuleType
 def calls(mock_data_access: MockDataAccess) -> dict[str, int]:
     """Count the list queries of the mock data access."""
     return _count_list_queries(mock_data_access)
+
+
+def _open_details(at: AppTest, use_case_id: str) -> None:
+    """Select a Use Case as a row click does (AppTest cannot click rows)."""
+    at.session_state["uc_selected_id"] = use_case_id
+    at.run()
 
 
 @pytest.mark.unit
@@ -249,7 +256,7 @@ def test__deprecated_use_case_shown__restore_and_hide_deprecated__listed_at_once
     active = mock_data_access.get_use_cases(UseCaseFilter(), 1, 100).total_rows
     assert any(f"of {active} Use Cases" in m.value for m in at.markdown)
     at.checkbox(key="uc_filter_show_deprecated").check().run()
-    at.button(key="uc_details_UC-005").click().run()
+    _open_details(at, "UC-005")
 
     # When
     at.button(key="uc_restore").click().run()

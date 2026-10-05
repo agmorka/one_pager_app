@@ -237,7 +237,7 @@ IMPLEMENTED_ACTIONS: frozenset[str] = frozenset(
 
 COMING_SOON = {
     "cancel": "Cancel coming soon",
-    "change_dp_status": "Change DP Status coming soon",
+    "change_dp_status": "Change Data Product status coming soon",
 }
 
 

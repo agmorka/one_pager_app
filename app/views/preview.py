@@ -82,6 +82,7 @@ from onepagerapp.export import (
     cell_text,
     resolve_use_cases,
 )
+from onepagerapp.help_content import TOPIC_PREVIEW
 from onepagerapp.locking import active_lock, release_lock
 from onepagerapp.models import (
     ChangeLogEntry,
@@ -205,7 +206,7 @@ def render_header(preview_data: PreviewData, op_colors: dict, dp_colors: dict) -
     col1, col2, col3 = st.columns([2, 1, 1])
 
     with col1:
-        page_header(header.product_name, PREVIEW_SUBTITLE)
+        page_header(header.product_name, PREVIEW_SUBTITLE, help_topic=TOPIC_PREVIEW)
         st.markdown(f"**ID:** {header.one_pager_id} | **Version:** {header.version}")
         st.markdown(
             f"**Owner:** {header.owner_name} ({header.owner_email}) | "
@@ -1037,7 +1038,7 @@ def render_action_bar(  # noqa: C901, PLR0912, PLR0913 - one branch per action
     """Render the action buttons (UI_Design.md §4.4).
 
     The main actions are buttons, the one the user most likely wants
-    (Approve, Edit or Update) highlighted; Change DP Status, Export PDF and
+    (Approve, Edit or Update) highlighted; Change Data Product status, Export PDF and
     the destructive Cancel One Pager sit in the **More** menu. Why a shown
     action is unavailable is written under the buttons, not only in a tooltip.
 

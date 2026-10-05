@@ -26,6 +26,8 @@ REVIEW_MODE_KEY = "preview_review_mode"
 REVIEW_FLASH_KEY = "review_flash"
 # The Use Case the Use Cases page shows in its details dialog.
 USE_CASE_SELECTED_KEY = "uc_selected_id"
+# The Help topic a page's "? Help" button asked for.
+HELP_TOPIC_KEY = "help_topic"
 # "create" or "edit": what the Editor page shows.
 EDITOR_MODE_KEY = "editor_mode"
 # One-time confirmation shown when the Editor opens (kept outside the
@@ -74,6 +76,12 @@ def back_to_review_queue(flash: str | None = None) -> None:
     if flash is not None:
         st.session_state[REVIEW_FLASH_KEY] = flash
     st.switch_page(REVIEW_PAGE)
+
+
+def open_help(topic: str) -> None:
+    """Switch to the Help page, showing the guide for ``topic`` first."""
+    st.session_state[HELP_TOPIC_KEY] = topic
+    st.switch_page(HELP_PAGE)
 
 
 def go_to_registry() -> None:

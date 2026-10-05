@@ -33,7 +33,7 @@ from adapters.tables import selected_value
 from adapters.theme import TOTAL_CARD_COLOR, section_gap
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.data_access.connection import user_error_message
-from onepagerapp.help_content import text_color
+from onepagerapp.help_content import TOPIC_REGISTRY, text_color
 from onepagerapp.locking import get_active_locks
 from onepagerapp.models import (
     LockInfo,
@@ -577,7 +577,11 @@ st.session_state.setdefault("registry_page_size", ROWS_PER_PAGE)
 # Page title and description, with [+ New One Pager] on the right
 title_col, new_col = st.columns([5, 1.2], vertical_alignment="bottom")
 with title_col:
-    page_header("One Pager Registry", "Browse, search, and filter all One Pagers.")
+    page_header(
+        "One Pager Registry",
+        "Browse, search, and filter all One Pagers.",
+        help_topic=TOPIC_REGISTRY,
+    )
 with new_col:
     _render_new_button("registry_new")
 

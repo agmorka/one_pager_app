@@ -62,6 +62,7 @@ from onepagerapp.editing import (
     submission_issues,
     working_copy,
 )
+from onepagerapp.help_content import TOPIC_EDITOR
 from onepagerapp.locking import (
     DEFAULT_LOCK_TTL,
     acquire_lock,
@@ -730,6 +731,7 @@ def render_header(doc: OnePagerDocument) -> None:
     page_header(
         f"Editing: {doc.product_name or row.product_name} ({row.one_pager_id})",
         "Update the sections, then save a new draft version or submit for review.",
+        help_topic=TOPIC_EDITOR,
     )
     st.markdown(
         f"**Status:** ● {row.one_pager_status} &nbsp;·&nbsp; "

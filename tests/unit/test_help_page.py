@@ -14,6 +14,7 @@ from onepagerapp.help_content import (
     ROLES,
     combinations_table,
     dp_legend,
+    guides_for,
     op_legend,
     state_diagram_dot,
     text_color,
@@ -215,16 +216,56 @@ def test__viewer__open_help_page__every_section_rendered(
     assert not at.warning
     assert at.title[0].value == "Help"
     assert [h.value for h in at.header] == [
+        "How do I…",
         "The two-status lifecycle",
         "Roles and responsibilities",
-        "Workflow quick reference",
+        "Glossary",
         "Status badges",
     ]
     expected = {"One Pager status", "Data Product status", "Valid status combinations"}
     assert expected <= {s.value for s in at.subheader}
     assert len(at.get("graphviz_chart")) == 2
-    assert len(at.expander) == 3 + len(QUICK_REFERENCE)
-    assert ROLE_REQUEST.title in [e.label for e in at.expander]
+    labels = [e.label for e in at.expander]
+    viewer_guides = guides_for([])
+    # One per guide for everyone, "other roles", 2 transition tables, role request
+    assert len(at.expander) == len(viewer_guides) + 4
+    assert (
+        f"Guides for other roles ({len(QUICK_REFERENCE) - len(viewer_guides)})"
+        in labels
+    )
+    assert ROLE_REQUEST.title in labels
+
+
+@pytest.mark.unit
+def test__approver__open_help_page__review_guide_listed(
+    mock_data_access: MockDataAccess, switched: list[str]
+) -> None:
+    """Approvers find the review guide among their guides."""
+    # When
+    at = page_app("help.py", mock_data_access, VIEWER, APPROVER_ROLES).run()
+
+    # Then
+    assert "Review (Approvers)" in [e.label for e in at.expander]
+
+
+@pytest.mark.unit
+def test__help_link_on_registry__open_help__registry_guide_first(
+    mock_data_access: MockDataAccess, switched: list[str]
+) -> None:
+    """The Help button of a page opens Help on that page's guide."""
+    # Given
+    at = page_app("registry.py", mock_data_access, roles=frozenset()).run()
+
+    # When
+    at.button(key="help_link_registry").click().run()
+
+    # Then
+    assert switched == ["views/help.py"]
+    help_page = page_app(
+        "help.py", mock_data_access, VIEWER, frozenset(), help_topic="registry"
+    ).run()
+    assert help_page.expander[0].label == "Find a One Pager"
+    assert "help_topic" not in help_page.session_state
 
 
 @pytest.mark.unit

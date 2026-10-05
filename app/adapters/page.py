@@ -10,6 +10,7 @@ from typing import NoReturn
 
 import streamlit as st
 
+from adapters.navigation import open_help
 from onepagerapp.auth import resolve_current_user
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.documents import OnePagerDocumentStore
@@ -68,9 +69,25 @@ def current_roles() -> frozenset[Actor]:
     return roles
 
 
-def page_header(title: str, subtitle: str) -> None:
-    """Page title with a one-line subtitle in gray underneath (as on Help)."""
-    st.title(title)
+def page_header(title: str, subtitle: str, help_topic: str | None = None) -> None:
+    """Page title with a one-line subtitle in gray underneath (as on Help).
+
+    With ``help_topic``, a **? Help** button next to the title opens the Help
+    page on the guide for this page.
+    """
+    if help_topic is None:
+        st.title(title)
+        st.caption(subtitle)
+        return
+    title_col, help_col = st.columns([8, 1], vertical_alignment="center")
+    title_col.title(title)
+    if help_col.button(
+        ":material/help: Help",
+        key=f"help_link_{help_topic}",
+        help="How this page works",
+        use_container_width=True,
+    ):
+        open_help(help_topic)
     st.caption(subtitle)
 
 

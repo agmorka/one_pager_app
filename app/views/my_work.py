@@ -31,6 +31,7 @@ from adapters.page import (
 )
 from adapters.theme import DEFAULT_BADGE_COLOR, section_gap, status_badge
 from onepagerapp.data_access.connection import user_error_message
+from onepagerapp.help_content import TOPIC_MY_WORK
 from onepagerapp.models import OnePagerStatusRow, RegistryRow
 from onepagerapp.my_work import MyWork, get_my_work
 from onepagerapp.permissions import can_create_one_pager, can_review
@@ -155,7 +156,11 @@ reviewer = can_review(roles)
 
 title_col, new_col = st.columns([5, 1], vertical_alignment="bottom")
 with title_col:
-    page_header(f"My work — {user.display_name or user.initials}", SUBTITLE)
+    page_header(
+        f"My work — {user.display_name or user.initials}",
+        SUBTITLE,
+        help_topic=TOPIC_MY_WORK,
+    )
 with new_col:
     if can_create_one_pager(user, roles) and st.button(
         ":material/add: New One Pager",
