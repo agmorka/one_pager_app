@@ -18,7 +18,13 @@ import streamlit as st
 
 from adapters.cache import writes_data
 from adapters.edit_mode import render_edit_mode
-from adapters.navigation import EDITOR_MODE_KEY, go_to_registry, open_preview
+from adapters.navigation import (
+    EDITOR_FLASH_KEY,
+    EDITOR_MODE_KEY,
+    go_to_registry,
+    open_in_editor,
+    open_preview,
+)
 from adapters.page import (
     ALERT_ICON,
     current_roles,
@@ -31,6 +37,7 @@ from adapters.page import (
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.data_access.connection import user_error_message
 from onepagerapp.documents import OnePagerDocumentStore
+from onepagerapp.help_content import TOPIC_CREATE
 from onepagerapp.models import CurrentUser, NewOnePagerInput, PersonRef, ValidationError
 from onepagerapp.permissions import PermissionDeniedError, can_create_one_pager
 from onepagerapp.validation import (
@@ -214,8 +221,14 @@ def _submit(
     document_store: OnePagerDocumentStore,
     user: CurrentUser,
     smes_df: pd.DataFrame,
+    *,
+    continue_editing: bool = False,
 ) -> None:
-    """Run the create action and route to Preview on success."""
+    """Run the create action; on success open Preview, or the Editor.
+
+    ``continue_editing`` (**Create and continue editing**) opens the new One
+    Pager in the Editor so the remaining sections can be filled at once.
+    """
     data = NewOnePagerInput(
         data_product=st.session_state.create_data_product,
         product_name=st.session_state.create_product_name,
@@ -258,10 +271,21 @@ def _submit(
     # Success: remember the ID first so a re-run can never create a second one.
     _clear_form_state()
     st.session_state.pop(EDITOR_MODE_KEY, None)
-    open_preview(
-        str(result.one_pager_id),
-        flash=f"One Pager {result.one_pager_id} created as Draft (v{result.version}).",
-    )
+    flash = f"One Pager {result.one_pager_id} created as Draft (v{result.version})."
+    if continue_editing:
+        st.session_state[EDITOR_FLASH_KEY] = flash
+        open_in_editor(str(result.one_pager_id))
+    else:
+        open_preview(str(result.one_pager_id), flash=flash)
+
+
+def add_me_to_smes(smes_df: pd.DataFrame, user: CurrentUser) -> pd.DataFrame:
+    """Return the SME grid with the user appended (keeps the rows typed so far)."""
+    me = {"name": user.display_name, "initials": user.initials, "email": ""}
+    me["email"] = _prefill_email(user)
+    me["team"] = ""
+    rows = smes_df.dropna(how="all")
+    return pd.concat([rows, pd.DataFrame([me])], ignore_index=True)[SME_COLUMNS]
 
 
 # ============================================================================
@@ -304,7 +328,7 @@ except Exception as e:
     st.stop()
 
 # Header
-page_header("New One Pager", NEW_SUBTITLE)
+page_header("New One Pager", NEW_SUBTITLE, help_topic=TOPIC_CREATE)
 st.markdown(
     "**Status:** ● Draft &nbsp;·&nbsp; **Data Product status:** ● In Definition "
     "&nbsp;·&nbsp; **Version:** v0.1.0"
@@ -315,8 +339,8 @@ if banner:
     st.error(banner)
 
 st.caption(
-    "The remaining sections are completed in the Editor after creation. "
-    "Fields marked * are required."
+    "Start with the basics; the other sections (Use Cases, requirements, data "
+    "sources, …) follow in the Editor. Fields marked * are required."
 )
 
 # ---------------------------------------------------------------------------
@@ -415,6 +439,17 @@ smes_df = st.data_editor(
     },
 )
 _show_sme_errors()
+_typed_initials = {
+    _cell(i).upper() for i in smes_df.get("initials", pd.Series(dtype="str"))
+} | {st.session_state.create_owner_initials.upper()}
+if (
+    user is not None
+    and user.initials not in _typed_initials
+    and st.button(":material/person_add: Add me as SME", key="create_sme_me")
+):
+    st.session_state["create_smes_initial"] = add_me_to_smes(smes_df, user)
+    st.session_state.pop("create_smes_editor", None)
+    st.rerun()
 
 # ---------------------------------------------------------------------------
 # Business problem
@@ -434,14 +469,31 @@ _show_errors("businessProblemStatement")
 st.divider()
 _render_error_summary(st.session_state.get(_ERRORS_KEY, []))
 
-col_create, col_cancel, _ = st.columns([1, 1, 4])
+col_continue, col_create, col_cancel, _ = st.columns([1.6, 1, 1, 2.4])
+with col_continue:
+    continue_clicked = st.button(
+        "Create and continue editing",
+        type="primary",
+        use_container_width=True,
+        help="Create the Draft and open it in the Editor to fill the other sections",
+    )
 with col_create:
-    create_clicked = st.button("Create Draft", type="primary", use_container_width=True)
+    create_clicked = st.button(
+        "Create Draft",
+        use_container_width=True,
+        help="Create the Draft and open it in Preview",
+    )
 with col_cancel:
     cancel_clicked = st.button("Cancel", use_container_width=True)
 
-if create_clicked and user is not None:
-    _submit(data_access, document_store, user, smes_df)
+if (create_clicked or continue_clicked) and user is not None:
+    _submit(
+        data_access,
+        document_store,
+        user,
+        smes_df,
+        continue_editing=continue_clicked,
+    )
     st.rerun()
 
 if cancel_clicked:

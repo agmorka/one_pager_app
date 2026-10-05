@@ -19,9 +19,12 @@ from onepagerapp.models import AuthorizedUser, CurrentUser, LockInfo
 from onepagerapp.state_machine import (
     APPROVED,
     DP_STATUS_FIELD,
+    DRAFT,
     DRAFT_UPDATE,
+    IN_REVIEW,
     OP_CANCELLED,
     OP_STATUS_FIELD,
+    READY_FOR_REVIEW,
     TRANSITIONS,
     Actor,
     TransitionRule,
@@ -234,7 +237,7 @@ IMPLEMENTED_ACTIONS: frozenset[str] = frozenset(
 
 COMING_SOON = {
     "cancel": "Cancel coming soon",
-    "change_dp_status": "Change DP Status coming soon",
+    "change_dp_status": "Change Data Product status coming soon",
 }
 
 
@@ -429,3 +432,59 @@ def get_status_timeline_stages() -> list[dict[str, Any]]:
         {"status": "Approved", "label": "Approved", "sort_order": 4},
         {"status": "Draft Update", "label": "Draft Update", "sort_order": 5},
     ]
+
+
+@dataclass(frozen=True)
+class PathStep:
+    """One step of the status path shown on the Preview page.
+
+    Attributes:
+        label: Step name, e.g. "In Review".
+        state: "done", "current", "next" or "cancelled".
+
+    """
+
+    label: str
+    state: str
+
+
+def get_status_path(one_pager_status: str, version: str) -> list[PathStep]:
+    """Return the path a One Pager takes and where it is now (Preview timeline).
+
+    A first version goes Draft → In Review → Approved; an update of approved
+    version N goes Approved vN → Draft Update → In Review → Approved. Ready for
+    Review is a step inside Submit and is shown as In Review. A cancelled One
+    Pager ends in Cancelled.
+    """
+    if one_pager_status == OP_CANCELLED:
+        # Cancelling raises MAJOR too, and is only possible before approval.
+        return [PathStep(DRAFT, "done"), PathStep(OP_CANCELLED, "cancelled")]
+    major = _major(version)
+    # The approved version an update started from (an approval itself raises
+    # MAJOR, so an Approved vN came from vN-1 when N > 1).
+    base = major - 1 if one_pager_status == APPROVED else major
+    if base >= 1:
+        labels = [f"Approved v{base}.0.0", DRAFT_UPDATE, IN_REVIEW, APPROVED]
+    else:
+        labels = [DRAFT, IN_REVIEW, APPROVED]
+    position = {
+        DRAFT: 0,
+        DRAFT_UPDATE: 1,
+        READY_FOR_REVIEW: len(labels) - 2,
+        IN_REVIEW: len(labels) - 2,
+        APPROVED: len(labels) - 1,
+    }.get(one_pager_status, 0)
+    return [
+        PathStep(
+            label,
+            "done" if i < position else "current" if i == position else "next",
+        )
+        for i, label in enumerate(labels)
+    ]
+
+
+def _major(version: str) -> int:
+    try:
+        return int(str(version).split(".", 1)[0])
+    except ValueError:
+        return 0

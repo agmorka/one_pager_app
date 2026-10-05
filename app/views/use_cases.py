@@ -2,9 +2,11 @@
 
 Use Cases are shared across One Pagers (Requirements_and_Scope.md §9). The view:
 1. Provides a filter bar (persona/goal search, priority, show deprecated)
-2. Renders a paginated table with the number of One Pagers using each Use Case
-3. Shows a detail panel for the selected Use Case, including which One Pagers
-   reference it, so editors can assess the impact of a change before saving
+2. Renders a paginated table with the number of One Pagers using each Use Case;
+   clicking a row selects it
+3. Shows a detail panel beside the table for the selected Use Case, including
+   the One Pagers that reference it (each opens in Preview), so editors can
+   assess the impact of a change before saving
 4. Lets Owners/SMEs create, edit, deprecate (with confirmation) and restore
 5. Handles all page states: Loading, Populated, Empty, Empty (after filter), Error
 
@@ -17,9 +19,11 @@ Filtering, pagination, validation and ID generation live in onepagerapp, not her
 import logging
 import re
 
+import pandas as pd
 import streamlit as st
 
 from adapters.cache import get_use_cases, writes_data
+from adapters.navigation import USE_CASE_SELECTED_KEY, open_preview
 from adapters.page import (
     current_initials,
     current_roles,
@@ -29,9 +33,13 @@ from adapters.page import (
     require_data_access,
     set_flash,
     show_flash,
+    timestamp_label,
 )
+from adapters.tables import selected_value
+from adapters.theme import section_gap
 from onepagerapp.data_access.base import DataAccess, NotFoundError
 from onepagerapp.data_access.connection import user_error_message
+from onepagerapp.help_content import TOPIC_USE_CASES
 from onepagerapp.models import (
     PRIORITY_OPTIONS,
     UseCase,
@@ -66,12 +74,13 @@ FILTER_DEFAULTS: dict[str, object] = {
     "uc_filter_show_deprecated": False,
 }
 
-# Table columns to display (plus a trailing column for the per-row button)
+# Table columns to display
 TABLE_COLUMNS = ["ID", "Persona", "Goal", "Priority", "Used by", "Status"]
-_ROW_COLUMN_RATIOS = [0.9, 1.8, 3.0, 1.0, 0.9, 1.0, 1.2]
 
 _PAGE_KEY = "use_cases_page"
-_SELECTED_KEY = "uc_selected_id"
+_SELECTED_KEY = USE_CASE_SELECTED_KEY
+# Bumped to give the table a fresh selection (after Close).
+_TABLE_VERSION_KEY = "uc_table_version"
 FLASH_KEY = "uc_flash"
 
 # Button labels are markdown: escape "+" so it isn't read as a list marker
@@ -93,7 +102,7 @@ def _md(text: str) -> str:
 
 
 def _used_by_label(count: int) -> str:
-    return f"{count} OP" if count == 1 else f"{count} OPs"
+    return f"{count} One Pager" if count == 1 else f"{count} One Pagers"
 
 
 def _reset_page() -> None:
@@ -109,6 +118,11 @@ def _clear_filters() -> None:
 
 def _select_use_case(use_case_id: str | None) -> None:
     st.session_state[_SELECTED_KEY] = use_case_id
+    if use_case_id is None:
+        # Forget the row selection, or the table would select it again.
+        st.session_state[_TABLE_VERSION_KEY] = (
+            st.session_state.get(_TABLE_VERSION_KEY, 0) + 1
+        )
 
 
 # ============================================================================
@@ -271,7 +285,9 @@ def _render_filter_bar() -> None:
     for key, default in FILTER_DEFAULTS.items():
         st.session_state.setdefault(key, default)
 
-    search_col, priority_col, deprecated_col, clear_col = st.columns([3, 1.5, 1.5, 1])
+    search_col, priority_col, deprecated_col, clear_col = st.columns(
+        [3, 1.5, 1.5, 1], vertical_alignment="bottom"
+    )
     search_col.text_input(
         "Search persona or goal", key="uc_filter_search", on_change=_reset_page
     )
@@ -281,68 +297,84 @@ def _render_filter_bar() -> None:
         key="uc_filter_priority",
         on_change=_reset_page,
     )
-    with deprecated_col:
-        st.markdown("")
-        st.markdown("")
-        st.checkbox(
-            "Show deprecated", key="uc_filter_show_deprecated", on_change=_reset_page
-        )
-    with clear_col:
-        st.markdown("")
-        st.markdown("")
-        st.button("Clear filters", on_click=_clear_filters)
+    deprecated_col.checkbox(
+        "Show deprecated", key="uc_filter_show_deprecated", on_change=_reset_page
+    )
+    clear_col.button("Clear filters", on_click=_clear_filters)
+
+
+def table_frame(use_case_page: UseCasePage) -> pd.DataFrame:
+    """Return the rows of the page as the table shows them."""
+    return pd.DataFrame(
+        [
+            [
+                use_case.use_case_id,
+                use_case.persona,
+                use_case.goal,
+                use_case.priority,
+                _used_by_label(use_case.reference_count),
+                "Deprecated" if use_case.deprecated else "Active",
+            ]
+            for use_case in use_case_page.rows
+        ],
+        columns=TABLE_COLUMNS,
+    )
 
 
 def _render_table(use_case_page: UseCasePage) -> None:
-    """Render Use Cases as a table with a "Details" button on each row."""
-    st.caption("Click Details on a row to see the full Use Case and its One Pagers.")
+    """Render Use Cases as a table; clicking a row shows its details."""
+    frame = table_frame(use_case_page)
+    event = st.dataframe(
+        frame,
+        key=f"uc_table_{st.session_state.get(_TABLE_VERSION_KEY, 0)}",
+        on_select="rerun",
+        selection_mode="single-row",
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "Goal": st.column_config.TextColumn(width="large"),
+            "Used by": st.column_config.TextColumn(
+                help="Number of One Pagers linked to the Use Case"
+            ),
+        },
+    )
+    clicked = selected_value(event, frame, "ID")
+    if clicked and clicked != st.session_state.get(_SELECTED_KEY):
+        st.session_state[_SELECTED_KEY] = clicked
 
-    header_cols = st.columns(_ROW_COLUMN_RATIOS)
-    for col, title in zip(header_cols, TABLE_COLUMNS, strict=False):
-        col.markdown(f"**{title}**")
-    st.divider()
 
-    for use_case in use_case_page.rows:
-        values = [
-            use_case.use_case_id,
-            _md(use_case.persona),
-            _md(use_case.goal),
-            use_case.priority,
-            _used_by_label(use_case.reference_count),
-            "Deprecated" if use_case.deprecated else "Active",
-        ]
-        row_cols = st.columns(_ROW_COLUMN_RATIOS)
-        for col, value in zip(row_cols[:-1], values, strict=False):
-            # Deprecated rows are muted AND labelled — color is never the only cue
-            col.markdown(f":gray[{value}]" if use_case.deprecated else value)
-        row_cols[-1].button(
-            "Details",
-            key=f"uc_details_{use_case.use_case_id}",
-            use_container_width=True,
-            help=f"Show details for {use_case.use_case_id}",
-            on_click=_select_use_case,
-            args=(use_case.use_case_id,),
-        )
+def page_range_label(use_case_page: UseCasePage) -> str:
+    """Return e.g. "Showing 21-40 of 57 Use Cases"."""
+    first = (use_case_page.page - 1) * use_case_page.page_size + 1
+    last = first + len(use_case_page.rows) - 1
+    return f"Showing {first}-{last} of {use_case_page.total_rows} Use Cases"
 
 
 def _render_pagination(current_page: int, total_pages: int) -> None:
     """Render pagination controls."""
-    st.markdown("---")
-    pag_cols = st.columns([4, 1, 1, 1, 4])
-    with pag_cols[1]:
-        if st.button("← Prev", disabled=current_page <= 1, key="uc_prev"):
-            st.session_state[_PAGE_KEY] = current_page - 1
-            st.rerun()
-    with pag_cols[2]:
-        st.markdown(
-            f"<div style='text-align:center;padding-top:6px;'>"
-            f"{current_page} / {total_pages}</div>",
-            unsafe_allow_html=True,
-        )
-    with pag_cols[3]:
-        if st.button("Next →", disabled=current_page >= total_pages, key="uc_next"):
-            st.session_state[_PAGE_KEY] = current_page + 1
-            st.rerun()
+    prev_col, page_col, next_col, _ = st.columns(
+        [1, 1.2, 1, 5], vertical_alignment="center"
+    )
+    if prev_col.button("← Prev", disabled=current_page <= 1, key="uc_prev"):
+        st.session_state[_PAGE_KEY] = current_page - 1
+        st.rerun()
+    page_col.markdown(f"Page {current_page} of {total_pages}")
+    if next_col.button("Next →", disabled=current_page >= total_pages, key="uc_next"):
+        st.session_state[_PAGE_KEY] = current_page + 1
+        st.rerun()
+
+
+def _render_reference_links(references: list[str]) -> None:
+    """Render a button per referencing One Pager that opens it in Preview."""
+    for column, one_pager_id in zip(
+        st.columns(min(max(len(references), 1), 4)), references, strict=False
+    ):
+        if column.button(
+            f"Open {one_pager_id}",
+            key=f"uc_open_{one_pager_id}",
+            help=f"Open {one_pager_id} in Preview",
+        ):
+            open_preview(one_pager_id)
 
 
 def _render_details(
@@ -365,7 +397,8 @@ def _render_details(
     title = f"{use_case.use_case_id} — {use_case.persona}"
     if use_case.deprecated:
         title += " (Deprecated)"
-    with st.expander(title, expanded=True):
+    with st.container(border=True):
+        st.markdown(f"#### {title}")
         for name, (label, _) in USE_CASE_FIELDS.items():
             st.markdown(f"**{label}:** {_md(getattr(use_case, name))}")
         st.markdown(f"**Priority:** {use_case.priority}")
@@ -374,14 +407,15 @@ def _render_details(
             if references
             else "**Referenced by:** no One Pagers yet"
         )
+        _render_reference_links(references)
         st.caption(
             f"Created by {_md(use_case.created_by)} on "
-            f"{use_case.created_at:%Y-%m-%d %H:%M} · Last updated by "
+            f"{timestamp_label(use_case.created_at)} · Last updated by "
             f"{_md(use_case.last_updated_by)} on "
-            f"{use_case.last_updated_at:%Y-%m-%d %H:%M}"
+            f"{timestamp_label(use_case.last_updated_at)}"
         )
 
-        action_cols = st.columns([1, 1, 1, 3])
+        action_cols = st.columns([1, 1.2, 1])
         if can_manage:
             if action_cols[0].button("Edit", key="uc_edit"):
                 _edit_dialog(data_access, use_case)
@@ -402,22 +436,21 @@ def _render_details(
 data_access = require_data_access()
 can_manage = can_manage_use_cases(current_initials(), current_roles())
 
-title_col, new_col = st.columns([5, 1])
+title_col, new_col = st.columns([5, 1], vertical_alignment="bottom")
 with title_col:
     page_header(
-        "Use Case Registry", "Browse the shared Use Cases referenced by One Pagers."
+        "Use Case Registry",
+        "Browse the shared Use Cases referenced by One Pagers.",
+        help_topic=TOPIC_USE_CASES,
     )
 with new_col:
-    st.markdown("")
-    st.markdown("")
     if can_manage and st.button(_NEW_BUTTON_LABEL, type="primary", key="uc_new"):
         _create_dialog(data_access)
 
 show_flash(FLASH_KEY)
 
-st.markdown("**Filters**")
 _render_filter_bar()
-st.markdown("")
+section_gap()
 
 search = st.session_state["uc_filter_search"].strip()
 priority = st.session_state["uc_filter_priority"]
@@ -445,23 +478,34 @@ except Exception as e:
     logger.exception("Failed to fetch use cases")
     render_error_state(user_error_message(e, LOAD_ERROR_MESSAGE), key="uc_retry")
 
-if use_case_page.rows:
-    st.markdown(
-        f"**Showing {len(use_case_page.rows)} of {use_case_page.total_rows} Use Cases**"
-    )
-    _render_table(use_case_page)
-    if use_case_page.total_pages > 1:
-        _render_pagination(use_case_page.page, use_case_page.total_pages)
-elif has_active_filter:
-    st.warning("**No Use Cases match your filters.** Try adjusting your criteria.")
-    st.button("Clear all filters", on_click=_clear_filters, key="uc_clear_empty")
-else:
-    st.info(
-        "**No Use Cases yet.**"
-        + (" Use **\\+ New Use Case** to create the first one." if can_manage else "")
-    )
+selected_id = st.session_state.get(_SELECTED_KEY)
+table_col, details_col = (
+    st.columns([3, 2], gap="medium") if selected_id else (st.container(), None)
+)
+with table_col:
+    if use_case_page.rows:
+        st.markdown(
+            f"**{page_range_label(use_case_page)}** · click a row to see its details"
+        )
+        _render_table(use_case_page)
+        if use_case_page.total_pages > 1:
+            _render_pagination(use_case_page.page, use_case_page.total_pages)
+    elif has_active_filter:
+        st.warning("**No Use Cases match your filters.** Try adjusting your criteria.")
+        st.button("Clear all filters", on_click=_clear_filters, key="uc_clear_empty")
+    else:
+        st.info(
+            "**No Use Cases yet.**"
+            + (
+                " Use **\\+ New Use Case** to create the first one."
+                if can_manage
+                else ""
+            )
+        )
 
 selected_id = st.session_state.get(_SELECTED_KEY)
 if selected_id:
-    st.markdown("")
-    _render_details(data_access, selected_id, can_manage=can_manage)
+    if details_col is None:
+        st.rerun()  # a row was just clicked: lay the page out with the panel
+    with details_col:
+        _render_details(data_access, selected_id, can_manage=can_manage)

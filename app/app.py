@@ -16,6 +16,7 @@ from adapters.navigation import (
     ADMIN_PAGE,
     EDITOR_PAGE,
     HELP_PAGE,
+    MY_WORK_PAGE,
     PREVIEW_PAGE,
     REGISTRY_PAGE,
     REVIEW_PAGE,
@@ -31,6 +32,7 @@ from onepagerapp.data_access.base import DataAccess
 from onepagerapp.data_access.factory import create_document_store
 from onepagerapp.directory import lookup_directory_user
 from onepagerapp.models import CurrentUser
+from onepagerapp.my_work import pending_review_count
 from onepagerapp.permissions import can_administer, can_review
 from onepagerapp.state_machine import Actor
 from onepagerapp.validation import set_initials_pattern
@@ -365,11 +367,14 @@ def role_names(roles: frozenset[Actor]) -> list[str]:
 
 
 def navigation_entries(roles: frozenset[Actor]) -> list[tuple[str, str]]:
-    """(script, title) of the sidebar pages (UI §2).
+    """(script, title) of the registered pages (UI §2), My work first.
 
-    Review only for Approvers, Admin only for Admins.
+    Review only for Approvers, Admin only for Admins. Preview and Editor are
+    registered (``st.switch_page`` needs them) but have no sidebar link: they
+    always show one One Pager, opened from another page (``SIDEBAR_HIDDEN``).
     """
     entries = [
+        (MY_WORK_PAGE, "My work"),
         (REGISTRY_PAGE, "Registry"),
         (PREVIEW_PAGE, "Preview"),
         (EDITOR_PAGE, "Editor"),
@@ -383,12 +388,57 @@ def navigation_entries(roles: frozenset[Actor]) -> list[tuple[str, str]]:
     return entries
 
 
+# Pages opened only from other pages, for one One Pager: no sidebar link.
+SIDEBAR_HIDDEN = frozenset({PREVIEW_PAGE, EDITOR_PAGE})
+
+PAGE_ICONS = {
+    MY_WORK_PAGE: ":material/home:",
+    REGISTRY_PAGE: ":material/list_alt:",
+    PREVIEW_PAGE: ":material/description:",
+    EDITOR_PAGE: ":material/edit:",
+    REVIEW_PAGE: ":material/rate_review:",
+    USE_CASES_PAGE: ":material/groups:",
+    HELP_PAGE: ":material/help:",
+    ADMIN_PAGE: ":material/settings:",
+}
+
+
 def build_pages(roles: frozenset[Actor]) -> list:
-    """Build the ``st.Page`` objects of ``navigation_entries`` (Registry default)."""
+    """Build the ``st.Page`` objects of ``navigation_entries`` (My work default)."""
     return [
-        st.Page(script, title=title, default=script == REGISTRY_PAGE)
+        st.Page(
+            script,
+            title=title,
+            icon=PAGE_ICONS.get(script),
+            default=script == MY_WORK_PAGE,
+        )
         for script, title in navigation_entries(roles)
     ]
+
+
+def review_link_label(pending: int | None) -> str:
+    """Sidebar label of the Review page, with the pending count when known."""
+    return f"Review ({pending})" if pending else "Review"
+
+
+def render_sidebar_links(pages: list, roles: frozenset[Actor]) -> None:
+    """Page links (no Preview/Editor); Review shows how many are waiting.
+
+    ``pages`` are ``build_pages(roles)``, in ``navigation_entries`` order.
+    """
+    pending = None
+    if can_review(roles):
+        try:
+            pending = pending_review_count(st.session_state.data_access, roles)
+        except Exception:
+            logger.exception("Failed to count the review queue for the sidebar")
+    for page, (script, _) in zip(pages, navigation_entries(roles), strict=True):
+        if script in SIDEBAR_HIDDEN:
+            continue
+        if script == REVIEW_PAGE:
+            st.page_link(page, label=review_link_label(pending))
+        else:
+            st.page_link(page)
 
 
 def _stop_on_service_error() -> NoReturn:
@@ -442,8 +492,7 @@ def main() -> None:
         render_sidebar_user(roles, group_roles)
         st.divider()
         with st.container():  # styled as a list without gaps (theme.py)
-            for page in pages:
-                st.page_link(page)
+            render_sidebar_links(pages, roles)
 
     navigation_guard(
         pg.title, st.session_state.data_access, st.session_state.current_user_info

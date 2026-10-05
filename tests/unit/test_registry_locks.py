@@ -36,10 +36,9 @@ def test__active_and_expired_locks__open_registry__holder_of_active_lock_only(
 
     # Then
     assert not at.exception
-    cells = [m.value for m in at.markdown]
-    assert "**Lock**" in cells
-    assert "MJO" in cells
-    assert "BSM" not in cells
+    locks = list(at.dataframe[0].value["Being edited by"])
+    assert any(cell.startswith("\N{LOCK} MJO since ") for cell in locks)
+    assert not any("BSM" in cell for cell in locks)
 
 
 @pytest.mark.unit
@@ -59,6 +58,6 @@ def test__locks_unreadable__open_registry__table_shown_with_unknown_lock(
     assert not at.exception
     assert not at.error
     assert any("Lock status is unavailable" in c.value for c in at.caption)
-    cells = [m.value for m in at.markdown]
-    assert APPROVED_ID in cells
-    assert "?" in cells
+    table = at.dataframe[0].value
+    assert APPROVED_ID in list(table["ID"])
+    assert "?" in list(table["Being edited by"])

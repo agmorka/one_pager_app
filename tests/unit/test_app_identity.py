@@ -28,7 +28,7 @@ from tests.helpers import (
 
 CORPORATE = "x0wadm@becoc001.onmicrosoft.com"
 SQL_USER = "dbuadm@becoc001.onmicrosoft.com"
-VIEWER_PAGES = ["Registry", "Preview", "Editor", "Use Cases", "Help"]
+VIEWER_PAGES = ["My work", "Registry", "Preview", "Editor", "Use Cases", "Help"]
 
 
 @pytest.fixture
@@ -594,7 +594,7 @@ def test__roles__view_as_options__admins_only_and_never_more_roles(
         (
             "Approver",
             APPROVER_ROLES,
-            ["Registry", "Preview", "Editor", "Review", "Use Cases", "Help"],
+            ["My work", "Registry", "Preview", "Editor", "Review", "Use Cases", "Help"],
         ),
         ("Owner/SME", frozenset({Actor.OWNER_SME_GROUP}), VIEWER_PAGES),
     ],

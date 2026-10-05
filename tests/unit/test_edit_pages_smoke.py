@@ -53,13 +53,22 @@ def _preview(data_access: MockDataAccess, one_pager_id: str = NEW_ID) -> AppTest
 
 
 def _action_keys(at: AppTest) -> set[str]:
-    """Return the keys of the Preview action buttons."""
-    return {b.key for b in at.button if b.key and b.key.startswith("preview_")}
+    """Return the keys of the Preview action buttons (not navigation/links)."""
+    return {
+        b.key
+        for b in at.button
+        if b.key
+        and b.key.startswith("preview_")
+        and b.key != "preview_back"
+        and not b.key.startswith("preview_open_uc_")
+    }
 
 
 def _needs_attention(at: AppTest) -> str:
-    """Return the Editor caption listing the tabs that need attention."""
-    return next(c.value for c in at.caption if "Needs attention" in c.value)
+    """Return the section-list entries that have issues to fix."""
+    return " | ".join(
+        o for o in at.radio(key="edit_active_tab").options if "to fix" in o
+    )
 
 
 def _complete_and_save(at: AppTest) -> None:
@@ -245,7 +254,11 @@ def test__open_editor__visit_every_tab__each_renders(
     """All tabs exist in order and render without errors."""
     # Given
     at = editor_page(alices_draft).run()
-    assert list(at.radio(key="edit_active_tab").options) == TAB_NAMES
+    labels = list(at.radio(key="edit_active_tab").options)
+    assert len(labels) == len(TAB_NAMES)
+    assert all(
+        label.startswith(name) for name, label in zip(TAB_NAMES, labels, strict=True)
+    )
 
     # When / Then
     for name in TAB_NAMES:
@@ -385,22 +398,21 @@ def test__incomplete_draft__open_editor__badges_list_tabs_with_issues(
 
     # Then
     badges = _needs_attention(at)
-    assert "Use Cases (1)" in badges
+    assert "Use Cases · 1 to fix" in badges
     assert "Basics" not in badges
+    assert "Basics ✓" in at.radio(key="edit_active_tab").options
 
 
 @pytest.mark.unit
-def test__issue_in_summary__click_it__its_tab_opened(
+def test__issue_in_review_checklist__click_it__its_tab_opened(
     alices_draft: MockDataAccess, switched: list[str]
 ) -> None:
-    """Each issue in the summary links to its tab."""
+    """Each section with issues in the Review checklist links to its tab."""
     # Given
-    at = editor_page(alices_draft).run()
-    issue = next(b for b in at.button if b.key.startswith("edit_issue_submit_Data S"))
-    assert issue.label == "This field is required."
+    at = switch_tab(editor_page(alices_draft).run(), "Review")
 
     # When
-    issue.click().run()
+    at.button(key="edit_review_check_Data Sources").click().run()
 
     # Then
     assert at.radio(key="edit_active_tab").value == "Data Sources"
@@ -445,7 +457,7 @@ def test__renamed_with_summary__click_save_draft__new_version_lock_kept(
 
     # Then
     assert not at.exception
-    assert "Saved as v0.2.0" in at.success[0].value
+    assert "Saved as v0.2.0" in at.toast[0].value
     assert at.text_input(key="edit_change_summary").value == ""
     row = alices_draft.get_one_pager_status_row(NEW_ID)
     assert (row.version, row.product_name) == ("0.2.0", "Customer Master v2")
@@ -487,21 +499,40 @@ def test__clean_editor__click_close__lock_released_preview_opened(
 
 
 @pytest.mark.unit
-def test__unsaved_complete_document__open_editor__submit_disabled_until_saved(
+def test__unsaved_complete_document__click_save_and_submit__saved_and_in_review(
     alices_draft: MockDataAccess, switched: list[str]
 ) -> None:
-    """Submit waits until the changes are saved."""
+    """With unsaved changes, one click saves the new version and submits it."""
     # Given
     at = editor_page(alices_draft).run()
     fill_all_sections(at.session_state["edit_document"])
-    at.text_input(key="edit_change_summary").input("Complete").run()
-    assert at.button(key="edit_submit").disabled
+    at.run()
+    submit = at.button(key="edit_submit")
+    assert submit.label == "Save & submit for review"
+    assert not submit.disabled
+    assert at.text_input(key="edit_change_summary").value.startswith("Updated ")
 
     # When
-    button_labelled(at, "Save Draft").click().run()
+    submit.click().run()
 
     # Then
-    assert not at.button(key="edit_submit").disabled
+    assert not at.exception
+    assert switched == ["views/preview.py"]
+    row = alices_draft.get_one_pager_status_row(NEW_ID)
+    assert (row.one_pager_status, row.version) == ("In Review", "0.2.0")
+
+
+@pytest.mark.unit
+def test__clean_editor__open__save_disabled(
+    alices_draft: MockDataAccess, switched: list[str]
+) -> None:
+    """Nothing to save: Save Draft is disabled."""
+    # When
+    at = editor_page(alices_draft).run()
+
+    # Then
+    assert at.button(key="edit_save").disabled
+    assert at.text_input(key="edit_change_summary").value == ""
 
 
 @pytest.mark.unit
@@ -526,20 +557,16 @@ def test__saved_complete_draft__click_submit__in_review_lock_released(
 
 
 @pytest.mark.unit
-def test__incomplete_draft__click_submit__blocked_with_error(
+def test__incomplete_draft__open_editor__submit_disabled_with_reason(
     alices_draft: MockDataAccess, switched: list[str]
 ) -> None:
-    """Strict validation errors block the submit."""
-    # Given
+    """Strict validation issues disable the submit and say why."""
+    # When
     at = editor_page(alices_draft).run()
 
-    # When
-    at.button(key="edit_submit").click().run()
-
     # Then
-    assert not at.exception
-    assert switched == []
-    assert "Submit for Review is blocked" in at.error[0].value
+    assert at.button(key="edit_submit").disabled
+    assert any("issue(s) marked in the section list" in c.value for c in at.caption)
 
 
 # ============================================================================
@@ -595,7 +622,7 @@ def test__rejected_with_comment__click_resolve_on_review_tab__resolved(
     assert not at.exception
     comment = alices_draft.get_review_comments(NEW_ID)[0]
     assert (comment.resolved, comment.resolved_by) == (True, "ABR")
-    assert "The comment was marked as resolved." in [s.value for s in at.success]
+    assert "The comment was marked as resolved." in [s.value for s in at.toast]
     assert f"edit_resolve_{comment_id}" not in {b.key for b in at.button}
 
 
@@ -609,8 +636,9 @@ def test__saved_complete_draft__submit_on_review_tab__in_review(
     fill_all_sections(at.session_state["edit_document"])
     at.text_input(key="edit_change_summary").input("Complete").run()
     switch_tab(at, "Review")
-    assert at.button(key="edit_review_submit").disabled
+    assert at.button(key="edit_review_submit").label == "Save & submit for review"
     button_labelled(at, "Save Draft").click().run()
+    assert at.button(key="edit_review_submit").label == "Submit for Review"
     assert not at.button(key="edit_review_submit").disabled
 
     # When

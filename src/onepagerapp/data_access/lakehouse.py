@@ -361,7 +361,7 @@ class LakehouseAccess(DataAccess):
         )
         return affected_rows(response) == 1
 
-    def _registry_where(self, filter: RegistryFilter) -> str:  # noqa: A002
+    def _registry_where(self, filter: RegistryFilter) -> str:  # noqa: A002, C901 - one branch per filter
         """WHERE clause of the Registry queries, with every value escaped."""
         where_clauses = []
 
@@ -398,6 +398,35 @@ class LakehouseAccess(DataAccess):
                 f"one_pager_id IN (SELECT one_pager_id "  # noqa: S608
                 f"FROM {self._fqn_prefix}.use_case_references "
                 f"WHERE use_case_id = '{escaped}')"
+            )
+
+        if filter.search:
+            escaped = escape_sql_string(filter.search)
+            matches = " OR ".join(
+                f"LOWER({column}) LIKE LOWER('%{escaped}%')"
+                for column in (
+                    "one_pager_id",
+                    "product_name",
+                    "owner_name",
+                    "owner_email",
+                )
+            )
+            where_clauses.append(f"({matches})")
+
+        if filter.authorized_initials:
+            escaped = escape_sql_string(filter.authorized_initials)
+            where_clauses.append(
+                f"one_pager_id IN (SELECT one_pager_id "  # noqa: S608
+                f"FROM {self._fqn_prefix}.one_pager_authorized_users "
+                f"WHERE user_initials = '{escaped}')"
+            )
+
+        if filter.op_statuses is not None:
+            statuses = ", ".join(
+                f"'{escape_sql_string(s)}'" for s in filter.op_statuses
+            )
+            where_clauses.append(
+                f"one_pager_status IN ({statuses})" if statuses else "1=0"
             )
 
         return " AND ".join(where_clauses) if where_clauses else "1=1"

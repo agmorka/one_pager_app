@@ -345,7 +345,7 @@ def test__own_lock__click_release__lock_removed(
     # Then
     assert not at.exception
     assert mock_data_access.get_lock(APPROVED_ID) is None
-    assert "Your lock was released." in [s.value for s in at.success]
+    assert "Your lock was released." in [s.value for s in at.toast]
     assert not any("Locked by you" in i.value for i in at.info)
 
 
@@ -506,7 +506,7 @@ def test__rejected_one_pager__owner_clicks_resolve__comment_resolved(
     # Then
     assert not at.exception
     assert mock_data_access.get_review_comments(IN_REVIEW_ID)[0].resolved_by == "BSM"
-    assert "The comment was marked as resolved." in [s.value for s in at.success]
+    assert "The comment was marked as resolved." in [s.value for s in at.toast]
     assert not [b for b in at.button if b.key == f"preview_resolve_{comment.id}"]
 
 

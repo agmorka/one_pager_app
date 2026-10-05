@@ -138,9 +138,9 @@ def _usage(data_access: DataAccess, kind: ReferenceKind, value: str) -> int | No
     """Count the One Pagers whose ``kind.usage_filter`` column is ``value``."""
     if kind.usage_filter is None:
         return None
-    counts = data_access.get_registry_status_counts(
-        RegistryFilter(**{kind.usage_filter: value})
-    )
+    registry_filter = RegistryFilter()
+    setattr(registry_filter, kind.usage_filter, value)
+    counts = data_access.get_registry_status_counts(registry_filter)
     return sum(counts.values())
 
 

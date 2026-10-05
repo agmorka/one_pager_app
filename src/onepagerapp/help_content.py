@@ -78,10 +78,19 @@ ROLES: tuple[RoleInfo, ...] = (
 )
 
 
+# Who a guide is for: Owner/SME, Approver, Admin, Viewer (everyone).
+OWNER_SME = "Owner / SME"
+APPROVER = "Approver"
+ADMIN = "Admin"
+EVERYONE = "Everyone"
+
+
 @dataclass(frozen=True)
 class QuickReference:
     title: str
     steps: tuple[str, ...]
+    roles: tuple[str, ...] = (EVERYONE,)
+    topic: str = ""
 
 
 # Roles come from Entra ID groups; the app has no role administration
@@ -102,50 +111,102 @@ ROLE_REQUEST = QuickReference(
 )
 
 
+# Help topics the pages link to ("? Help" next to a page title).
+TOPIC_MY_WORK = "my-work"
+TOPIC_REGISTRY = "registry"
+TOPIC_PREVIEW = "preview"
+TOPIC_EDITOR = "editor"
+TOPIC_REVIEW = "review"
+TOPIC_USE_CASES = "use-cases"
+TOPIC_CREATE = "create"
+
+
 QUICK_REFERENCE: tuple[QuickReference, ...] = (
+    QuickReference(
+        "Use My work",
+        (
+            "**My work** is the first page you see. It lists your drafts, the "
+            "review comments you still have to resolve, your One Pagers "
+            "waiting for review and, for Approvers, the One Pagers waiting "
+            "for your review.",
+            "**Edit** continues a draft; **Open** shows a One Pager in Preview; "
+            "**Review** opens it with the review actions.",
+            "You are on a One Pager's list when you are its Owner or an SME.",
+        ),
+        topic=TOPIC_MY_WORK,
+    ),
+    QuickReference(
+        "Find a One Pager",
+        (
+            "Open the **Registry**. Click a status card to see only that "
+            "status; click it again to see all.",
+            "Type an ID, product name or owner in **Search**, or pick **My "
+            "One Pagers** / **My drafts**. Domain, type and Use Case are under "
+            "**More filters**.",
+            "Click a row to open the One Pager in Preview. **Being edited by** "
+            "shows who holds the edit lock, and since when.",
+        ),
+        topic=TOPIC_REGISTRY,
+    ),
     QuickReference(
         "Create a One Pager",
         (
-            "Open the **Registry** and choose **New**.",
-            "Fill in the Basics (Data Product name, domain, type, Owner, SMEs) "
-            "and the Business Problem Statement, then create it.",
-            "It starts as **Draft** (version 0.1.0) with the Data Product "
-            "**In Definition**.",
+            "Choose **New One Pager** on My work or in the Registry.",
+            "Fill in the Basics (Data Product name, domain, type, Owner, SMEs; "
+            "**Add me as SME** adds you) and the Business Problem Statement.",
+            "**Create and continue editing** opens the new Draft in the Editor "
+            "for the other sections; **Create Draft** shows it in Preview. It "
+            "starts as **Draft** (version 0.1.0) with the Data Product **In "
+            "Definition**.",
         ),
+        roles=(OWNER_SME,),
+        topic=TOPIC_CREATE,
     ),
     QuickReference(
         "Edit and submit for review",
         (
             "In **Preview**, choose **Edit**: the Editor opens and locks the "
-            "One Pager for you (the lock expires after 30 minutes without "
-            "activity).",
-            "Work through the tabs and **Save Draft** with a short change "
-            "summary; each save is a new version.",
-            "On the **Review** tab, fix everything the checklist lists, then "
-            "**Submit for Review**. The One Pager moves to **In Review** and "
-            "your lock is released.",
+            "One Pager for you. Activity keeps the lock; after a long pause "
+            "the Editor warns you and **Keep editing** renews it.",
+            "The section list on the left shows ✓ for complete sections and "
+            "how many issues each other section has. Click a section to work "
+            "on it.",
+            "**Save Draft** saves a new version. The change summary is "
+            "suggested from the sections you changed; edit it as you like.",
+            "When nothing is left to fix, **Submit for Review** (or **Save & "
+            "submit for review** with unsaved changes). The One Pager moves "
+            "to **In Review** and your lock is released.",
         ),
+        roles=(OWNER_SME,),
+        topic=TOPIC_EDITOR,
     ),
     QuickReference(
         "Review (Approvers)",
         (
-            "Open the **Review** page: it lists everything In Review, oldest "
-            "first. Choose **Review** on a row.",
-            "Add section-level comments with **Add Comment** where something "
-            "must change.",
-            "**Approve** it (version becomes the next MAJOR, the Data Product "
-            "status changes automatically) or **Reject** it with a reason "
-            "(back to Draft for the Owner).",
+            "Open the **Review** page (or My work): it lists everything In "
+            "Review, oldest first, with how long it has waited. Choose "
+            "**Review** on a row.",
+            "**What changed** shows each section that differs from the last "
+            "approved version (or the version you rejected).",
+            "Open a section under **Content** and use **Comment on this "
+            "section** where something must change (or **Add Comment** for "
+            "the whole document).",
+            "**Approve** it (the version becomes the next MAJOR, the Data "
+            "Product status changes automatically) or **Reject** it with a "
+            "reason (back to Draft for the Owner). You return to the queue.",
         ),
+        roles=(APPROVER,),
+        topic=TOPIC_REVIEW,
     ),
     QuickReference(
         "Rework after a rejection",
         (
-            "Read the review comments in **Preview** or on the Editor's "
-            "**Review** tab.",
-            "Change the One Pager, **Save Draft**, mark each comment as "
-            "resolved and submit again.",
+            "My work counts the comments you have to resolve. Read them in "
+            "**Preview** (Review comments tab) or on the Editor's **Review** "
+            "section.",
+            "Change the One Pager, mark each comment as resolved and submit again.",
         ),
+        roles=(OWNER_SME,),
     ),
     QuickReference(
         "Update an approved One Pager",
@@ -155,29 +216,134 @@ QUICK_REFERENCE: tuple[QuickReference, ...] = (
             "Edit and submit as for a new One Pager. When it is approved "
             "again, the Data Product moves to **In Enhancement**.",
         ),
+        roles=(OWNER_SME,),
     ),
     QuickReference(
         "Move the Data Product on",
         (
-            "While the One Pager is **Approved**, choose **Change DP Status** "
-            "in Preview: Start development, Activate, or Deprecate (asks for "
-            "confirmation; Deprecated is final).",
+            "While the One Pager is **Approved**, open **More** in Preview "
+            "and choose **Change Data Product status**: Start development, "
+            "Activate, or Deprecate (asks for confirmation; Deprecated is "
+            "final).",
         ),
+        roles=(OWNER_SME,),
     ),
     QuickReference(
         "Cancel a One Pager",
         (
             "Only before the first approval (Data Product **In Definition**): "
-            "choose **Cancel One Pager** in Preview and confirm. Both statuses "
-            "become **Cancelled** for good.",
+            "open **More** in Preview, choose **Cancel One Pager** and "
+            "confirm. Both statuses become **Cancelled** for good.",
         ),
+        roles=(OWNER_SME, ADMIN),
+    ),
+    QuickReference(
+        "Read a One Pager",
+        (
+            "Preview shows where the One Pager is on its path, the actions "
+            "you can take (the main one highlighted; more under **More**) and, "
+            "when an action is unavailable, why.",
+            "The tabs hold the content (**Expand all sections** opens every "
+            "section; empty ones say so), what changed since the last "
+            "approval, the change log and the review comments.",
+        ),
+        topic=TOPIC_PREVIEW,
+    ),
+    QuickReference(
+        "Work with Use Cases",
+        (
+            "The **Use Cases** page lists the shared Use Cases. Click a row to "
+            "see its details beside the table, with the One Pagers that use "
+            "it (each opens in Preview).",
+            "Owners/SMEs create, edit, deprecate and restore Use Cases; in the "
+            "Editor's **Use Cases** section they link them to a One Pager.",
+        ),
+        topic=TOPIC_USE_CASES,
     ),
     QuickReference(
         "Export to PDF",
         (
-            "Choose **Export PDF** in Preview and download the file. Anyone "
-            "can export any One Pager.",
+            "Open **More** in Preview, choose **Export PDF** and download the "
+            "file. Anyone can export any One Pager.",
         ),
+    ),
+)
+
+
+def guides_for(roles: tuple[str, ...] | list[str]) -> list[QuickReference]:
+    """Return the guides for these roles (plus those for everyone), in order."""
+    wanted = {*roles, EVERYONE}
+    return [q for q in QUICK_REFERENCE if wanted & set(q.roles)]
+
+
+def guide_for_topic(topic: str) -> QuickReference | None:
+    """Return the guide a page's "? Help" link points to, if any."""
+    if not topic:
+        return None
+    return next((q for q in QUICK_REFERENCE if q.topic == topic), None)
+
+
+# Terms and abbreviations used in the app.
+GLOSSARY: tuple[tuple[str, str], ...] = (
+    (
+        "One Pager (OP)",
+        "The one-page description of a Data Product: what it is, why it is "
+        "needed, its sources, data elements, classification and governance.",
+    ),
+    (
+        "Data Product (DP)",
+        "The data asset a One Pager describes. Its status (In Definition, In "
+        "Development, Active, …) follows the product, not the document.",
+    ),
+    (
+        "One Pager status",
+        "Where the document is: Draft, In Review, Approved, Draft Update "
+        "(an approved One Pager being changed) or Cancelled.",
+    ),
+    (
+        "Draft Update",
+        "An approved One Pager that is being updated. The approved version "
+        "stays valid until the update is approved.",
+    ),
+    ("Owner", "The Data Product Owner, accountable for the Data Product."),
+    (
+        "SME",
+        "Subject Matter Expert. Owners and SMEs of a One Pager may edit it.",
+    ),
+    (
+        "Approver",
+        "A reviewer who approves or rejects One Pagers in review, never their own.",
+    ),
+    (
+        "Corporate initials",
+        "The 3-character code from your username (x0wadm@… → X0W). Edit "
+        "rights are matched on it.",
+    ),
+    (
+        "Use Case (UC)",
+        "A shared description of who uses data for which decision; One "
+        "Pagers link to them.",
+    ),
+    ("Business Requirement (BR)", "A numbered requirement (BR-001, …)."),
+    (
+        "CDE",
+        "Critical Data Element: a data element whose quality and lineage are "
+        "governed closely.",
+    ),
+    ("PII", "Personally Identifiable Information."),
+    (
+        "Edit lock",
+        "Only one person edits a One Pager at a time. Opening the Editor "
+        "takes the lock; it is released when you close the Editor or submit, "
+        "and expires after 30 minutes without activity.",
+    ),
+    (
+        "Version",
+        "MAJOR.MINOR.PATCH: each Save Draft raises MINOR, each approval MAJOR.",
+    ),
+    (
+        "Change summary",
+        "A short note saved with each version; it becomes the change-log entry.",
     ),
 )
 

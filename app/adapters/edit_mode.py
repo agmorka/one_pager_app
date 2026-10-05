@@ -15,7 +15,7 @@ fresh either way.
 import logging
 import re
 from collections.abc import Callable
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pandas as pd
 import streamlit as st
@@ -32,6 +32,7 @@ from adapters.edit_tabs import (
     render_use_cases_tab,
 )
 from adapters.navigation import (
+    EDITOR_FLASH_KEY,
     EDITOR_ID_KEY,
     EDITOR_MODE_KEY,
     open_in_editor,
@@ -47,6 +48,7 @@ from adapters.page import (
 )
 from adapters.session import current_session_id
 from adapters.workflow_actions import resolve_comment_and_report
+from onepagerapp.compare import suggested_summary
 from onepagerapp.data_access.base import DataAccess, NotFoundError
 from onepagerapp.data_access.connection import user_error_message
 from onepagerapp.documents import OnePagerDocumentStore
@@ -60,11 +62,13 @@ from onepagerapp.editing import (
     submission_issues,
     working_copy,
 )
+from onepagerapp.help_content import TOPIC_EDITOR
 from onepagerapp.locking import (
     DEFAULT_LOCK_TTL,
     acquire_lock,
     heartbeat_due,
     release_lock,
+    utc_now,
 )
 from onepagerapp.models import (
     CurrentUser,
@@ -75,6 +79,7 @@ from onepagerapp.models import (
 from onepagerapp.permissions import PermissionDeniedError
 from onepagerapp.review import section_label
 from onepagerapp.state_machine import InvalidTransitionError
+from onepagerapp.timeutils import as_utc
 from onepagerapp.validation import MAX_NAME_LENGTH, MAX_TEXT_LENGTH
 from onepagerapp.workflow import (
     TRANSITION_FAILED_MESSAGE,
@@ -200,6 +205,15 @@ def render_basics_tab(doc: OnePagerDocument, data_access: DataAccess) -> None:
     )
 
     st.subheader("Data Product Owner")
+    me = current_user()
+    if me is not None and doc.owner_initials != me.initials:
+        st.button(
+            ":material/person: Use my details",
+            key="edit_owner_me",
+            on_click=_fill_owner_with_me,
+            args=(me,),
+            help="Make yourself the Owner (name, initials and email).",
+        )
     col_name, col_initials = st.columns([3, 1])
     with col_name:
         doc.owner_name = st.text_input(
@@ -252,6 +266,32 @@ def render_basics_tab(doc: OnePagerDocument, data_access: DataAccess) -> None:
         },
     )
     doc.smes = _people_from_grid(smes_df)
+    known = {p.get("initials") for p in doc.smes} | {doc.owner_initials}
+    if (
+        me is not None
+        and me.initials not in known
+        and st.button(":material/person_add: Add me as SME", key="edit_sme_me")
+    ):
+        doc.smes.append(person_of(me))
+        # Rebuild the grid from the working copy, which holds every edit.
+        st.session_state.pop("edit_smes_grid", None)
+        st.rerun()
+
+
+def person_of(user: CurrentUser) -> dict[str, str]:
+    """Return the user as an SME entry (name, initials, email if known)."""
+    person = {"name": user.display_name, "initials": user.initials}
+    if user.email:
+        person["email"] = user.email
+    return person
+
+
+def _fill_owner_with_me(user: CurrentUser) -> None:
+    """**Use my details**: the Owner fields become the signed-in user's."""
+    st.session_state["edit_owner_name"] = user.display_name
+    st.session_state["edit_owner_initials"] = user.initials
+    if user.email:
+        st.session_state["edit_owner_email"] = user.email
 
 
 def render_problem_tab(doc: OnePagerDocument, data_access: DataAccess) -> None:  # noqa: ARG001
@@ -349,21 +389,21 @@ def render_review_tab(doc: OnePagerDocument, data_access: DataAccess) -> None:
     _render_open_comments(data_access, one_pager_id)
     st.divider()
     dirty = is_dirty()
-    if dirty:
-        reason = "Save your changes first."
-    elif issue_count:
-        reason = f"Fix the {issue_count} issue(s) of the checklist first."
-    else:
-        reason = "Sends the One Pager to review. Releases your lock."
+    label, can_submit, reason = submit_state(dirty, issue_count)
     user = current_user()
     if st.button(
-        "Submit for Review",
+        label,
         key="edit_review_submit",
         type="primary",
-        disabled=bool(dirty or issue_count or user is None),
+        disabled=not can_submit or user is None,
         help=reason,
     ):
-        _submit(data_access, one_pager_id, user)
+        if dirty:
+            _save_and_submit(
+                data_access, st.session_state.document_store, one_pager_id, user
+            )
+        else:
+            _submit(data_access, one_pager_id, user)
         st.rerun()
     st.caption(reason)
 
@@ -395,7 +435,81 @@ TABS: dict[str, TabRenderer] = {
 def _lock_expiry(lock: LockInfo | None) -> str:
     if lock is None:
         return ""
-    return f" (expires {timestamp_label(lock.expires_at, '%H:%M')})"
+    return f" until {timestamp_label(lock.expires_at, '%H:%M')}"
+
+
+# The lock warning shows when this little time is left (the heartbeat renews
+# the lock on activity, so it only appears after a long idle time).
+LOCK_WARNING_BEFORE = timedelta(minutes=5)
+
+
+def lock_minutes_left(lock: LockInfo | None, now: datetime | None = None) -> int | None:
+    """Whole minutes until the lock expires (0 when expired); None without one."""
+    if lock is None:
+        return None
+    left = as_utc(lock.expires_at) - (now or utc_now())
+    return max(0, int(left.total_seconds() // 60))
+
+
+def _keep_editing() -> None:
+    """**Keep editing**: renew the lock now."""
+    one_pager_id = st.session_state.get(ONE_PAGER_KEY)
+    user = current_user()
+    if one_pager_id is None or user is None:
+        return
+    try:
+        result = acquire_lock(
+            st.session_state.data_access,
+            one_pager_id,
+            user,
+            current_session_id(),
+            ttl=_lock_ttl(),
+        )
+    except Exception:
+        logger.exception(f"Failed to renew the lock on {one_pager_id}")
+        st.session_state[BANNER_KEY] = "Couldn't renew your edit lock. Please retry."
+        return
+    if result.acquired:
+        st.session_state["edit_lock"] = result.lock
+    else:
+        st.session_state[BANNER_KEY] = (
+            f"You no longer hold the edit lock. {result.message}"
+        )
+
+
+@st.fragment(run_every=60)
+def render_lock_status() -> None:
+    """Lock line, refreshed every minute; warns before the lock expires.
+
+    The lock is renewed by activity (the heartbeat), so the warning appears
+    only after a long idle time; **Keep editing** renews it at once.
+    """
+    lock = st.session_state.get("edit_lock")
+    left = lock_minutes_left(lock)
+    if left is None:
+        return
+    if left <= 0:
+        st.error(
+            "Your edit lock has expired. Save now to check whether you can "
+            "still save, or copy your changes.",
+            icon=":material/lock_open:",
+        )
+    elif timedelta(minutes=left) <= LOCK_WARNING_BEFORE:
+        col_text, col_button = st.columns([4, 1], vertical_alignment="center")
+        col_text.warning(
+            f"Your edit lock expires in {left} minute(s){_lock_expiry(lock)}. "
+            "Keep editing, or save your changes.",
+            icon=":material/timer:",
+        )
+        col_button.button(
+            "Keep editing",
+            key="edit_keep_lock",
+            on_click=_keep_editing,
+            type="primary",
+            use_container_width=True,
+        )
+    else:
+        st.caption(f":material/lock: Locked by you{_lock_expiry(lock)}")
 
 
 def _leave_editor(one_pager_id: str, flash: str | None = None) -> None:
@@ -617,13 +731,14 @@ def render_header(doc: OnePagerDocument) -> None:
     page_header(
         f"Editing: {doc.product_name or row.product_name} ({row.one_pager_id})",
         "Update the sections, then save a new draft version or submit for review.",
+        help_topic=TOPIC_EDITOR,
     )
     st.markdown(
         f"**Status:** ● {row.one_pager_status} &nbsp;·&nbsp; "
         f"**Data Product status:** ● {row.data_product_status} &nbsp;·&nbsp; "
         f"**Version:** v{row.version}"
     )
-    st.caption(f"Locked by you{_lock_expiry(st.session_state.get('edit_lock'))}")
+    render_lock_status()
 
 
 # Top-level document key → editor tab (UI_Design.md §4.2).
@@ -684,49 +799,67 @@ def issues_by_tab(errors: list[ValidationError]) -> dict[str, list[ValidationErr
 
 
 def tab_label(name: str, issue_count: int) -> str:
-    """Tab label with a red badge when the tab has issues."""
+    """Tab label with its issue count, e.g. "Data Sources (2)"."""
     return f"{name} ({issue_count})" if issue_count else name
 
 
+# The selected tab. The section list's own state (ACTIVE_TAB_KEY) is reset
+# by Streamlit whenever its labels (issue counts) change, so the selection is
+# kept here and copied into the widget on every run.
+SELECTED_TAB_KEY = "edit_selected_tab"
+
+
 def _go_to_tab(tab: str) -> None:
+    st.session_state[SELECTED_TAB_KEY] = tab
     st.session_state[ACTIVE_TAB_KEY] = tab
 
 
+def _tab_chosen() -> None:
+    st.session_state[SELECTED_TAB_KEY] = st.session_state[ACTIVE_TAB_KEY]
+
+
 def active_tab() -> str:
-    if st.session_state.get(ACTIVE_TAB_KEY) not in TABS:
-        st.session_state[ACTIVE_TAB_KEY] = next(iter(TABS))
-    return str(st.session_state[ACTIVE_TAB_KEY])
+    if st.session_state.get(SELECTED_TAB_KEY) not in TABS:
+        st.session_state[SELECTED_TAB_KEY] = next(iter(TABS))
+    return str(st.session_state[SELECTED_TAB_KEY])
+
+
+NAV_COUNTS_KEY = "edit_nav_counts"
+
+
+def nav_label(tab: str, counts: dict[str, int]) -> str:
+    """Section list entry: "Data Sources · 2 to fix", or a tick when complete."""
+    if tab == REVIEW_TAB:
+        total = sum(counts.values())
+        return f"{REVIEW_TAB} & submit" + (f" · {total} left" if total else " ✓")
+    count = counts.get(tab, 0)
+    return f"{tab} · {count} to fix" if count else f"{tab} ✓"
+
+
+def issue_counts(issues: dict[str, list[ValidationError]]) -> dict[str, int]:
+    """Count the issues per editor tab ("Form" issues count for Review)."""
+    return {tab: len(errors) for tab, errors in issues.items()}
 
 
 def render_tab_bar() -> str:
-    """Horizontal tab bar; returns the active tab.
+    """Vertical section list with issue counts; returns the active tab.
 
-    It is drawn before the tab content: a tab that re-runs the page must not
-    do so before the bar exists in that run, or the selection would be lost.
+    The counts are in ``format_func`` labels: changing the options would reset
+    the selection. They are those of the previous run; ``render_edit_mode``
+    re-runs once when the input of this run changed them.
     """
-    active_tab()
+    st.session_state[ACTIVE_TAB_KEY] = active_tab()
+    counts = st.session_state.get(NAV_COUNTS_KEY, {})
     return str(
         st.radio(
-            "Section",
+            "Sections",
             options=list(TABS),
             key=ACTIVE_TAB_KEY,
-            horizontal=True,
-            label_visibility="collapsed",
+            on_change=_tab_chosen,
+            format_func=lambda tab: nav_label(tab, counts),
+            help='✓ complete · "to fix": issues to fix before Submit for Review',
         )
     )
-
-
-def render_badges(issues: dict[str, list[ValidationError]]) -> None:
-    """Show a red badge per tab with issues.
-
-    The badges are not in the radio labels: changing a widget's options would
-    reset it and lose the selected tab.
-    """
-    badges = [
-        tab_label(tab, len(errors)) for tab, errors in issues.items() if tab in TABS
-    ]
-    if badges:
-        st.caption("Needs attention: " + " · ".join(badges))
 
 
 def render_issue_summary(
@@ -819,51 +952,112 @@ def _submit(data_access: DataAccess, one_pager_id: str, user: CurrentUser) -> No
     )
 
 
-def render_bottom_bar(
+SUMMARY_AUTO_KEY = "edit_summary_auto"
+
+
+def _suggest_summary() -> None:
+    """Keep the change summary filled with a suggestion until the user types.
+
+    The suggestion names the changed sections; a summary the user wrote is
+    never replaced.
+    """
+    current = st.session_state.get(SUMMARY_KEY, "")
+    previous = st.session_state.get(SUMMARY_AUTO_KEY, "")
+    if current and current != previous:
+        return  # the user's own words
+    saved = st.session_state.get(SAVED_KEY)
+    working = st.session_state.get(DOCUMENT_KEY)
+    suggestion = (
+        suggested_summary(saved, working) if saved and working and is_dirty() else ""
+    )
+    st.session_state[SUMMARY_KEY] = suggestion
+    st.session_state[SUMMARY_AUTO_KEY] = suggestion
+
+
+def _save_and_submit(
     data_access: DataAccess,
     document_store: OnePagerDocumentStore,
     one_pager_id: str,
     user: CurrentUser,
 ) -> None:
-    """Change summary, **Save Draft** and **Close editor** (UI_Design §4.2)."""
+    """**Save & submit for review**: save the changes, then submit."""
+    _save(data_access, document_store, one_pager_id, user)
+    if st.session_state.get(BANNER_KEY) or st.session_state.get(ERRORS_KEY):
+        st.session_state.pop(FLASH_KEY, None)
+        return
+    _submit(data_access, one_pager_id, user)
+
+
+def submit_state(dirty: bool, issue_count: int) -> tuple[str, bool, str]:  # noqa: FBT001
+    """Label, enabled and reason of the bottom bar's submit button."""
+    label = "Save & submit for review" if dirty else "Submit for Review"
+    if issue_count:
+        return (
+            label,
+            False,
+            f"Fix the {issue_count} issue(s) marked in the section list first.",
+        )
+    if dirty:
+        return label, True, "Saves your changes as a new version, then submits."
+    return label, True, "Sends the One Pager to review. Releases your lock."
+
+
+def render_bottom_bar(
+    data_access: DataAccess,
+    document_store: OnePagerDocumentStore,
+    one_pager_id: str,
+    user: CurrentUser,
+    submit_issue_count: int = 0,
+) -> None:
+    """Change summary, **Save Draft**, submit and **Close editor** (UI §4.2)."""
     st.divider()
     if st.session_state.pop(CLEAR_SUMMARY_KEY, False):
         st.session_state[SUMMARY_KEY] = ""
+        st.session_state[SUMMARY_AUTO_KEY] = ""
+    _suggest_summary()
+    dirty = is_dirty()
     st.text_input(
         "Change summary *",
         key=SUMMARY_KEY,
         max_chars=MAX_SUMMARY_LENGTH,
         placeholder="What did you change?",
-        help="Required to save. Becomes the change log entry for this version.",
+        help="Required to save. Suggested from the sections you changed; "
+        "edit it as you like. Becomes the change log entry for this version.",
     )
-    dirty = is_dirty()
-    col_save, col_submit, col_close, _ = st.columns([1, 1.3, 1, 2.7])
+    label, can_submit, reason = submit_state(dirty, submit_issue_count)
+    col_save, col_submit, col_close, _ = st.columns([1, 1.6, 1, 2.4])
     with col_save:
         save_clicked = st.button(
-            "Save Draft", key="edit_save", type="primary", use_container_width=True
+            "Save Draft",
+            key="edit_save",
+            type="primary",
+            disabled=not dirty,
+            help="Saves your changes as a new version."
+            if dirty
+            else "No unsaved changes.",
+            use_container_width=True,
         )
     with col_submit:
         submit_clicked = st.button(
-            "Submit for Review",
+            label,
             key="edit_submit",
-            disabled=dirty,
-            help="Save your changes first."
-            if dirty
-            else (
-                "Runs the full validation, then sends the One Pager to review. "
-                "Releases your lock."
-            ),
+            disabled=not can_submit,
+            help=reason,
             use_container_width=True,
         )
     with col_close:
         close_clicked = st.button(
             "Close editor", key="edit_close", use_container_width=True
         )
+    st.caption(("● Unsaved changes · " if dirty else "All changes saved · ") + reason)
     if save_clicked:
         _save(data_access, document_store, one_pager_id, user)
         st.rerun()
     if submit_clicked:
-        _submit(data_access, one_pager_id, user)
+        if dirty:
+            _save_and_submit(data_access, document_store, one_pager_id, user)
+        else:
+            _submit(data_access, one_pager_id, user)
         st.rerun()
     if close_clicked:
         if is_dirty():
@@ -877,7 +1071,11 @@ def render_edit_mode(
     document_store: OnePagerDocumentStore,
     user: CurrentUser | None,
 ) -> None:
-    """Render the Editor for the One Pager in ``editor_one_pager_id``."""
+    """Render the Editor for the One Pager in ``editor_one_pager_id``.
+
+    A section list on the left (with issue counts) and the active section on
+    the right; save errors and the bottom bar underneath.
+    """
     one_pager_id = st.session_state.get(EDITOR_ID_KEY)
     if not one_pager_id or user is None:
         page_header("Editor", "Create a new One Pager or edit an existing one.")
@@ -890,31 +1088,36 @@ def render_edit_mode(
         _heartbeat(data_access, one_pager_id, user)
 
     doc: OnePagerDocument = st.session_state[DOCUMENT_KEY]
+    if NAV_COUNTS_KEY not in st.session_state:
+        st.session_state[NAV_COUNTS_KEY] = issue_counts(
+            issues_by_tab(submission_issues(doc, st.session_state[STATUS_ROW_KEY]))
+        )
     render_header(doc)
 
     banner = st.session_state.get(BANNER_KEY)
     if banner:
         st.error(banner, icon=ALERT_ICON)
     show_flash(FLASH_KEY)
+    show_flash(EDITOR_FLASH_KEY)
 
-    active = render_tab_bar()
-    # Placed above the tab but filled after it, so the badges reflect the
-    # input of this run.
-    badge_line = st.container()
-    TABS[active](doc, data_access)
+    nav_col, body_col = st.columns([1, 3.4], gap="medium")
+    with nav_col:
+        active = render_tab_bar()
+    with body_col:
+        st.subheader(active if active != REVIEW_TAB else "Review & submit")
+        TABS[active](doc, data_access)
 
-    save_errors = issues_by_tab(st.session_state.get(ERRORS_KEY, []))
     submit_issues = issues_by_tab(
         submission_issues(doc, st.session_state[STATUS_ROW_KEY])
     )
-    with badge_line:
-        if is_dirty():
-            st.caption("● Unsaved changes")
-        render_badges(submit_issues)
+    counts = issue_counts(submit_issues)
+    if counts != st.session_state.get(NAV_COUNTS_KEY):
+        # The section list was drawn with the counts of the previous run.
+        st.session_state[NAV_COUNTS_KEY] = counts
+        st.rerun()
 
-    st.divider()
+    save_errors = issues_by_tab(st.session_state.get(ERRORS_KEY, []))
     render_issue_summary("issue(s) must be fixed before saving", save_errors, "save")
-    render_issue_summary(
-        "issue(s) remaining before Submit for Review", submit_issues, "submit"
+    render_bottom_bar(
+        data_access, document_store, one_pager_id, user, sum(counts.values())
     )
-    render_bottom_bar(data_access, document_store, one_pager_id, user)

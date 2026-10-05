@@ -194,4 +194,50 @@ def test__draft_just_created__open_preview__shown_with_flash(
     # Then
     assert not preview.exception
     assert preview.title[0].value == "Customer Master"
-    assert "OP-0003 created" in preview.success[0].value
+    assert "OP-0003 created" in preview.toast[0].value
+
+
+@pytest.mark.unit
+def test__filled_form__create_and_continue_editing__editor_opens_new_draft(
+    mock_data_access: MockDataAccess, switched: list[str]
+) -> None:
+    """Create and continue editing opens the new Draft in the Editor."""
+    # Given
+    at = _create_form(mock_data_access).run()
+    at.text_input(key="create_data_product").input("customer_master")
+    at.text_input(key="create_product_name").input("Customer Master")
+    at.selectbox(key="create_business_domain").select("Customer")
+    at.selectbox(key="create_data_product_type").select("Foundational")
+    at.text_area(key="create_description").input("Unified customer view")
+    at.text_area(key="create_problem").input("Customer data is scattered")
+    at.run()
+
+    # When
+    button_labelled(at, "Create and continue editing").click().run()
+
+    # Then
+    assert not at.exception
+    assert switched == ["views/editor.py"]
+    assert at.session_state["editor_mode"] == "edit"
+    assert at.session_state["editor_one_pager_id"] == NEW_ID
+    # The (recorded, not real) switch re-runs this page, now in edit mode.
+    assert any(f"{NEW_ID} created" in t.value for t in at.toast)
+
+
+@pytest.mark.unit
+def test__create_form__click_add_me_as_sme__row_with_my_details(
+    mock_data_access: MockDataAccess, switched: list[str]
+) -> None:
+    """Add me as SME adds the signed-in user to the SME grid."""
+    # Given (Alice is the pre-filled Owner; she makes Bob the Owner first)
+    at = _create_form(mock_data_access).run()
+    at.text_input(key="create_owner_initials").input("BSM").run()
+
+    # When
+    at.button(key="create_sme_me").click().run()
+
+    # Then
+    assert not at.exception
+    grid = at.session_state["create_smes_initial"]
+    assert list(grid["initials"]) == [ALICE.initials]
+    assert not [b for b in at.button if b.key == "create_sme_me"]
