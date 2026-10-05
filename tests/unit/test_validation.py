@@ -71,12 +71,12 @@ def test__valid_input__validate_create__no_errors(
 
 
 @pytest.mark.unit
-def test__no_sme_and_no_problem_statement__validate_create__no_errors(
+def test__no_sme__validate_create__no_errors(
     valid_input: NewOnePagerInput, creator: CurrentUser
 ) -> None:
-    """SMEs and the problem statement are optional at create."""
+    """SMEs are optional at create."""
     # Given
-    data = replace(valid_input, smes=[], business_problem_statement="")
+    data = replace(valid_input, smes=[])
 
     # When
     errors = _validate(data, creator)
@@ -94,6 +94,7 @@ def test__no_sme_and_no_problem_statement__validate_create__no_errors(
         ({"description": "  "}, "description"),
         ({"business_domain": ""}, "businessDomain"),
         ({"data_product_type": ""}, "dataProductType"),
+        ({"business_problem_statement": ""}, "businessProblemStatement"),
     ],
 )
 def test__missing_required_field__validate_create__error_on_that_field(

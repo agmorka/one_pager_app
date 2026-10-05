@@ -2,10 +2,12 @@
 
 import logging
 from collections.abc import Collection
-from datetime import datetime
+from dataclasses import replace
+from datetime import UTC, datetime
 
 from onepagerapp.audit import Outcome, log_event, log_permission_denied
 from onepagerapp.data_access.base import DataAccess, require_status_row
+from onepagerapp.documents import OnePagerDocumentStore, change_log_item
 from onepagerapp.models import CurrentUser, OnePagerStatusRow
 from onepagerapp.permissions import (
     PermissionDeniedError,
@@ -19,11 +21,19 @@ from onepagerapp.state_machine import (
     OP_STATUS_FIELD,
     Actor,
     InvalidTransitionError,
+    TransitionRule,
     get_rule,
     guard_failure,
 )
 from onepagerapp.validation import sanitize_text
-from onepagerapp.workflow.transitions import apply_transitions
+from onepagerapp.versioning import next_major
+from onepagerapp.workflow.transitions import (
+    TRANSITION_FAILED_MESSAGE,
+    TransitionError,
+    apply_transitions,
+    discard_if_unreferenced,
+    plan_transitions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +42,7 @@ MAX_REASON_LENGTH = 500
 
 def cancel_one_pager(  # noqa: PLR0913 - every argument is part of the action
     data_access: DataAccess,
+    document_store: OnePagerDocumentStore,
     one_pager_id: str,
     user: CurrentUser,
     *,
@@ -47,8 +58,14 @@ def cancel_one_pager(  # noqa: PLR0913 - every argument is part of the action
     one action. Any active edit lock is released, whoever holds it
     (Backend_Design.md §2). Cancellation is permanent.
 
+    Like an approval, cancelling closes the One Pager with the next MAJOR
+    version (0.2.0 -> 1.0.0): the cancelled version file is written first
+    (nothing references it yet), then the status row points to it; if that
+    fails the file is discarded again, so a failed cancel changes nothing.
+
     Args:
         data_access: Tabular data access.
+        document_store: Store of the YAML documents (the cancelled version).
         one_pager_id: The One Pager to cancel.
         user: The acting user.
         reason: Optional reason, appended to the change-log summaries.
@@ -81,13 +98,77 @@ def cancel_one_pager(  # noqa: PLR0913 - every argument is part of the action
     if failure:
         raise InvalidTransitionError(failure)
     dp_rule = get_rule(DP_STATUS_FIELD, row.data_product_status, DP_CANCELLED)
+    rules = [op_rule, dp_rule]
 
+    now = now or datetime.now(UTC)
     reason = sanitize_text(reason)[:MAX_REASON_LENGTH]
-    new_row = apply_transitions(
-        data_access, row, [op_rule, dp_rule], user, now=now, note=reason or None
-    )
+    version = next_major(row.version)
+    _write_cancelled_version(data_access, document_store, row, rules, version, user)
+    try:
+        new_row = apply_transitions(
+            data_access,
+            row,
+            rules,
+            user,
+            now=now,
+            note=reason or None,
+            version=version,
+        )
+    except Exception:
+        discard_if_unreferenced(data_access, document_store, one_pager_id, version)
+        raise
     _release_any_lock(data_access, one_pager_id, user)
     return new_row
+
+
+def _write_cancelled_version(  # noqa: PLR0913 - the parts of one version file
+    data_access: DataAccess,
+    document_store: OnePagerDocumentStore,
+    row: OnePagerStatusRow,
+    rules: list[TransitionRule],
+    version: str,
+    user: CurrentUser,
+) -> None:
+    """Write the cancelled version file: operational fields from Delta.
+
+    Raises:
+        TransitionError: The document could not be read or written.
+
+    """
+    one_pager_id = row.one_pager_id
+    document = data_access.read_document(one_pager_id, row.version)
+    if document is None:
+        msg = f"The document of {one_pager_id} v{row.version} could not be found."
+        raise TransitionError(msg)
+    cancelled_row = plan_transitions(row, rules)
+    cancelled = replace(
+        document,
+        structure_definition=row.structure_definition,
+        data_product=row.data_product,
+        one_pager_status=cancelled_row.one_pager_status,
+        data_product_status=cancelled_row.data_product_status,
+        version=version,
+        change_log=[
+            *document.change_log,
+            *(change_log_item(version, rule.summary) for rule in rules),
+        ],
+        raw_content="",
+    )
+    # A file for this version can only be left over from a cancel that failed
+    # before the status row pointed to it.
+    document_store.discard_unreferenced(one_pager_id, version)
+    try:
+        document_store.write(one_pager_id, cancelled, version)
+    except RuntimeError as e:
+        logger.exception(f"Writing the cancelled {one_pager_id} failed")
+        log_event(
+            "cancel",
+            Outcome.FAILED,
+            user=user.initials,
+            one_pager_id=one_pager_id,
+            step="write_document",
+        )
+        raise TransitionError(TRANSITION_FAILED_MESSAGE) from e
 
 
 def _release_any_lock(

@@ -13,7 +13,7 @@ import pandas as pd
 
 from onepagerapp.audit import Outcome, log_event, log_permission_denied
 from onepagerapp.data_access.base import DataAccess
-from onepagerapp.documents import OnePagerDocumentStore
+from onepagerapp.documents import OnePagerDocumentStore, change_log_item
 from onepagerapp.documents.serialization import document_to_dict
 from onepagerapp.id_generator import IdGenerationError, next_id
 from onepagerapp.models import (
@@ -78,11 +78,8 @@ def duplicate_error(existing_id: str) -> ValidationError:
     )
 
 
-def build_initial_document(
-    data: NewOnePagerInput, user: CurrentUser, now: datetime
-) -> OnePagerDocument:
+def build_initial_document(data: NewOnePagerInput) -> OnePagerDocument:
     """Build the v0.1.0 Draft document (New_One_Pager_Plan D9)."""
-    timestamp = now.isoformat(timespec="seconds")
     return OnePagerDocument(
         structure_definition=CURRENT_STRUCTURE_DEFINITION,
         data_product=data.data_product,
@@ -111,17 +108,7 @@ def build_initial_document(
             }
             for s in data.smes
         ],
-        created_by=user.display_name,
-        created_at=timestamp,
-        last_updated=timestamp,
-        change_log=[
-            {
-                "version": INITIAL_VERSION,
-                "date": timestamp,
-                "author": user.display_name,
-                "summary": CREATION_SUMMARY,
-            }
-        ],
+        change_log=[change_log_item(INITIAL_VERSION, CREATION_SUMMARY)],
     )
 
 
@@ -268,7 +255,7 @@ def create_one_pager(  # noqa: PLR0913 - every argument is part of the action
         raise CreateError(CREATE_FAILED_MESSAGE) from e
 
     now = now or datetime.now(UTC)
-    document = build_initial_document(data, user, now)
+    document = build_initial_document(data)
     # A new Draft only has to pass the lenient tier; the strict tier is the
     # guard on Submit for Review.
     schema_errors = validate_lenient(document_to_dict(document))

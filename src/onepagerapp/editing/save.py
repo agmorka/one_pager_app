@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 
 from onepagerapp.audit import Outcome, log_event
 from onepagerapp.data_access.base import DataAccess, require_status_row
-from onepagerapp.documents import OnePagerDocumentStore
+from onepagerapp.documents import OnePagerDocumentStore, change_log_item
 from onepagerapp.documents.serialization import document_to_dict
 from onepagerapp.editing.authorized_users import (
     authorized_users_from_document,
@@ -120,13 +120,11 @@ def require_lock(  # noqa: PLR0913 - the lock identity plus the audited action
         raise LockNotHeldError(LOCK_NOT_HELD_MESSAGE)
 
 
-def prepare_saved_document(  # noqa: PLR0913 - every argument ends up in the file
+def prepare_saved_document(
     document: OnePagerDocument,
     row: OnePagerStatusRow,
     version: str,
     summary: str,
-    user: CurrentUser,
-    now: datetime,
 ) -> OnePagerDocument:
     """Build the document as it is written for a content save.
 
@@ -135,7 +133,6 @@ def prepare_saved_document(  # noqa: PLR0913 - every argument ends up in the fil
     copied from the status row, never from the editor. The YAML change log is
     a denormalized copy and gets the new entry appended.
     """
-    timestamp = now.isoformat(timespec="seconds")
     return replace(
         document,
         structure_definition=row.structure_definition,
@@ -143,16 +140,7 @@ def prepare_saved_document(  # noqa: PLR0913 - every argument ends up in the fil
         one_pager_status=row.one_pager_status,
         data_product_status=row.data_product_status,
         version=version,
-        last_updated=timestamp,
-        change_log=[
-            *document.change_log,
-            {
-                "version": version,
-                "date": timestamp,
-                "author": user.display_name,
-                "summary": summary,
-            },
-        ],
+        change_log=[*document.change_log, change_log_item(version, summary)],
         raw_content="",
     )
 
@@ -353,7 +341,7 @@ def save_draft(  # noqa: PLR0913 - every argument is needed to save
         data_access, linked_before, document.use_case_ids
     )
     version = bump_minor(row.version)
-    saved = prepare_saved_document(document, row, version, summary, user, now)
+    saved = prepare_saved_document(document, row, version, summary)
     errors += validate_lenient(document_to_dict(saved))
     if errors:
         return SaveResult(errors=errors)

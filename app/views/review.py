@@ -12,7 +12,12 @@ import logging
 
 import streamlit as st
 
-from adapters.navigation import PREVIEW_ID_KEY, PREVIEW_PAGE, REVIEW_MODE_KEY
+from adapters.navigation import (
+    PREVIEW_ID_KEY,
+    PREVIEW_OPENED_KEY,
+    PREVIEW_PAGE,
+    REVIEW_MODE_KEY,
+)
 from adapters.page import (
     current_roles,
     page_header,
@@ -45,6 +50,7 @@ def open_in_review_mode(one_pager_id: str) -> None:
     """Open the One Pager in Preview with the review actions."""
     st.session_state[PREVIEW_ID_KEY] = one_pager_id
     st.session_state[REVIEW_MODE_KEY] = one_pager_id
+    st.session_state[PREVIEW_OPENED_KEY] = True
     st.switch_page(PREVIEW_PAGE)
 
 

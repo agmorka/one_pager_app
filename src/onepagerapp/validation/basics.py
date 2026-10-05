@@ -12,6 +12,7 @@ from onepagerapp.models import (
     ValidationError,
 )
 from onepagerapp.validation.rules import (
+    BUSINESS_PROBLEM_REQUIRED_MESSAGE,
     DATA_PRODUCT_PATTERN,
     DATA_PRODUCT_RULE,
     DATA_PRODUCT_TYPES,
@@ -119,6 +120,13 @@ def _validate_basics(
     if not data.description:
         errors.append(ValidationError("description", "Description is required."))
     check_length(errors, "description", data.description, MAX_TEXT_LENGTH)
+
+    if not data.business_problem_statement:
+        errors.append(
+            ValidationError(
+                "businessProblemStatement", BUSINESS_PROBLEM_REQUIRED_MESSAGE
+            )
+        )
     check_length(
         errors,
         "businessProblemStatement",

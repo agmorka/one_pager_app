@@ -31,7 +31,7 @@ REQUIRED = "This field is required."
 
 def _fixture(one_pager_id: str, version: str) -> dict[str, Any]:
     """Return a fixture document as a dict."""
-    path = FIXTURES_DIR / one_pager_id / f"{one_pager_id}_v{version}.yml"
+    path = FIXTURES_DIR / "one_pagers" / one_pager_id / f"{one_pager_id}_v{version}.yml"
     return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
@@ -41,6 +41,7 @@ def _minimal_draft(**fields: Any) -> dict[str, Any]:  # noqa: ANN401 - any field
         "structureDefinition": CURRENT_STRUCTURE_DEFINITION,
         "productName": "Customer Master",
         "description": "Unified customer view",
+        "businessProblemStatement": "Customer data is scattered.",
         **fields,
     }
 
@@ -62,8 +63,8 @@ def complete() -> dict[str, Any]:
 
 
 @pytest.mark.unit
-def test__name_and_description_only__validate_lenient__no_errors() -> None:
-    """A Draft needs only a product name and a description."""
+def test__name_description_and_problem_only__validate_lenient__no_errors() -> None:
+    """A Draft needs only a product name, a description and the problem."""
     # When
     errors = validate_lenient(_minimal_draft())
 
@@ -72,12 +73,14 @@ def test__name_and_description_only__validate_lenient__no_errors() -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("field", ["productName", "description"])
+@pytest.mark.parametrize(
+    "field", ["productName", "description", "businessProblemStatement"]
+)
 @pytest.mark.parametrize("value", [None, "", "   "])
-def test__blank_name_or_description__validate_lenient__field_error(
+def test__blank_name_description_or_problem__validate_lenient__field_error(
     field: str, value: str | None
 ) -> None:
-    """Product name and description must not be blank."""
+    """Product name, description and problem statement must not be blank."""
     # When
     errors = validate_lenient(_minimal_draft(**{field: value}))
 
@@ -171,8 +174,12 @@ def test__complete_document__validate_strict__no_errors(
 @pytest.mark.unit
 def test__minimal_draft__validate_strict__every_missing_section_required() -> None:
     """Each missing section is reported as required."""
+    # Given
+    draft = _minimal_draft()
+    del draft["businessProblemStatement"]
+
     # When
-    errors = validate_strict(_minimal_draft())
+    errors = validate_strict(draft)
 
     # Then
     assert {

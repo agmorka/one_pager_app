@@ -1,8 +1,8 @@
 """Help page — the lifecycle, roles and workflow in the app (UI_Design.md §4.6).
 
 Explains the two-status model with a diagram per status machine, lists every
-transition and the valid status combinations, the roles, a quick reference of
-the common workflows and the status badge legend.
+transition and the valid status combinations, the roles and a quick reference
+of the common workflows. The diagrams show the status badge colors.
 
 Diagrams and tables are built from the workflow service's serialized
 ``TRANSITIONS`` (``workflow.get_workflow_reference``), so they always match
@@ -18,7 +18,6 @@ import streamlit as st
 
 from adapters import cache
 from adapters.page import ALERT_ICON, page_header, require_data_access
-from adapters.theme import status_badge
 from onepagerapp.data_access.base import DataAccess
 from onepagerapp.data_access.connection import user_error_message
 from onepagerapp.help_content import (
@@ -66,17 +65,6 @@ def load_legends(data_access: DataAccess) -> tuple[list[BadgeInfo], list[BadgeIn
 # ============================================================================
 # Render Components
 # ============================================================================
-
-
-def render_legend(title: str, legend: list[BadgeInfo]) -> None:
-    """Status badges (dot + text, never color alone) with a terminal marker."""
-    st.markdown(f"**{title}**")
-    for badge in legend:
-        suffix = " — final status" if badge.is_terminal else ""
-        st.markdown(
-            f"{status_badge(badge.label, badge.color)}{suffix}",
-            unsafe_allow_html=True,
-        )
 
 
 def render_machine(
@@ -162,14 +150,3 @@ for item in QUICK_REFERENCE:
         st.markdown(
             "\n".join(f"{number}. {step}" for number, step in enumerate(item.steps, 1))
         )
-
-st.header("Status badges")
-col_op, col_dp = st.columns(2)
-with col_op:
-    render_legend("One Pager status", op_badges)
-with col_dp:
-    render_legend("Data Product status", dp_badges)
-st.caption(
-    "Lock column: initials of the person editing the One Pager; it is read-only "
-    "for others."
-)

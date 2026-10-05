@@ -44,7 +44,7 @@ from adapters.page import (
     signed_in_user,
     timestamp_label,
 )
-from adapters.theme import DEFAULT_BADGE_COLOR
+from adapters.theme import DEFAULT_BADGE_COLOR, download_link
 from adapters.workflow_actions import (
     add_comment_and_report,
     approve_and_report,
@@ -589,7 +589,9 @@ def confirm_cancel(
     )
     col_confirm, col_keep = st.columns(2)
     if col_confirm.button("Cancel One Pager", type="primary", use_container_width=True):
-        error = cancel_and_report(data_access, one_pager_id, user, reason)
+        error = cancel_and_report(
+            data_access, st.session_state.document_store, one_pager_id, user, reason
+        )
         if error:
             st.error(error, icon=ALERT_ICON)
             return
@@ -757,14 +759,14 @@ def export_pdf_dialog(
         "The PDF contains every section of the current version, with its Use "
         "Cases and change log."
     )
-    st.download_button(
-        f"Download {export.filename}",
-        data=export.content,
-        file_name=export.filename,
-        mime="application/pdf",
-        key="preview_download_pdf",
-        type="primary",
-        use_container_width=True,
+    st.markdown(
+        download_link(
+            f"Download {export.filename}",
+            export.content,
+            export.filename,
+            "application/pdf",
+        ),
+        unsafe_allow_html=True,
     )
 
 
@@ -925,7 +927,7 @@ else:
     st.info(
         "No One Pager selected. Open one from the Registry with the **View** button."
     )
-    if st.button("Go to Registry", key="preview_go_to_registry"):
+    if st.button("Go to the Registry", key="preview_go_to_registry", type="primary"):
         go_to_registry()
     st.stop()
 

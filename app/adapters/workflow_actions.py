@@ -42,12 +42,18 @@ REVIEW_MODE_KEY = "preview_review_mode"
 
 
 def cancel_and_report(
-    data_access: DataAccess, one_pager_id: str, user: CurrentUser, reason: str
+    data_access: DataAccess,
+    document_store: OnePagerDocumentStore,
+    one_pager_id: str,
+    user: CurrentUser,
+    reason: str,
 ) -> str | None:
     """Cancel the One Pager; return a user-facing error, or None on success."""
     try:
         with writes_data():
-            cancel_one_pager(data_access, one_pager_id, user, reason=reason)
+            cancel_one_pager(
+                data_access, document_store, one_pager_id, user, reason=reason
+            )
     except (PermissionDeniedError, InvalidTransitionError, TransitionError) as e:
         return str(e)
     except Exception:

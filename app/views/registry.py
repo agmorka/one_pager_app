@@ -327,7 +327,7 @@ def _can_create() -> bool:
 def _render_new_button(key: str) -> None:
     """Render [+ New] for users allowed to create One Pagers (UI_Design §4.1)."""
     if _can_create() and st.button(
-        "New",
+        "\\+ New",
         key=key,
         type="primary",
         help="Create a new One Pager",

@@ -27,6 +27,7 @@ _initials_pattern = re.compile(
     AppConfig.model_fields["ONE_PAGER_APP_INITIALS_PATTERN"].default
 )
 INITIALS_RULE = "Enter corporate initials: 3 letters or digits (e.g. X0W)."
+BUSINESS_PROBLEM_REQUIRED_MESSAGE = "Business Problem Statement is required."
 
 DATA_PRODUCT_RULE = (
     "Use 2-63 characters: lowercase letters, digits and underscores, "

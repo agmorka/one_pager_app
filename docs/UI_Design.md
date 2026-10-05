@@ -207,7 +207,7 @@ For sections with arrays (use cases, requirements, sources, data elements, etc.)
 | State | What the user sees |
 |---|---|
 | **Loading** | Spinner while fetching existing document (edit mode) |
-| **New (empty form)** | Blank form with helper placeholder text from schema descriptions. In the current release create mode shows only **Basics** (Data Product, Product Name, Business Domain, Product Type, Description, Owner, SMEs) plus an optional Business Problem Statement, and a bottom bar with **[Create Draft]** / **[Cancel]** (no change summary — creation is logged automatically as "Initial draft created"). The Owner is pre-filled with the current user. On success the user lands on Preview for the new `OP-####` (Draft, In Definition, v0.1.0). Other tabs arrive with the full Editor. |
+| **New (empty form)** | Blank form with helper placeholder text from schema descriptions. In the current release create mode shows only **Basics** (Data Product, Product Name, Business Domain, Product Type, Description, Owner, SMEs) plus the required Business Problem Statement, and a bottom bar with **[Create Draft]** / **[Cancel]** (no change summary — creation is logged automatically as "Initial draft created"). The Owner is pre-filled with the current user. On success the user lands on Preview for the new `OP-####` (Draft, In Definition, v0.1.0). Other tabs arrive with the full Editor. |
 | **Editing (populated)** | Pre-filled form with current content |
 | **Validation errors** | Red dot badge next to each tab label that has issues; validation summary panel at bottom listing all errors as clickable links (clicking scrolls to the relevant tab + field) |
 | **Save error** | Banner: "Save failed — your changes are preserved, please retry." Content stays in session. |
@@ -399,7 +399,7 @@ Same pattern: Loading / Populated / Empty / Error.
 - **Valid status combinations table** (from requirements doc §6).
 - **Roles & responsibilities** summary table.
 - **Workflow quick-reference:** step-by-step for common actions (create → submit → approve → update).
-- **Status badge legend** with all colors/labels.
+- No separate status badge legend: the state diagrams of the two-status lifecycle already show every status in its badge color.
 
 Data is read from `ref_op_status` / `ref_dp_status` tables for badge colors/labels, and the transition rules are rendered from the service layer's serialized `TRANSITIONS` dict (per backend design §13).
 

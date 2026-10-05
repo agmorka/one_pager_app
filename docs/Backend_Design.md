@@ -115,7 +115,7 @@ System-triggered transitions are called internally by the OP workflow's approval
 Implemented in `onepager_core/validation.py`. Two tiers, as defined in requirements doc §5:
 
 ### Lenient (Save as Draft)
-- Only `productName` and `description` must be non-empty.
+- Only `productName`, `description` and `businessProblemStatement` must be non-empty.
 - All other fields may be null/empty/missing.
 - Called on every content save while in `Draft` or `Draft Update`.
 
