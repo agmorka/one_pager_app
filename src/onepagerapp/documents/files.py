@@ -12,6 +12,9 @@ Both classes raise the built-in exceptions (``FileNotFoundError``,
 
 import io
 import logging
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Protocol
 
@@ -47,6 +50,23 @@ class FileAccess(Protocol):
 def _os_error(path: Path, error: DatabricksError) -> OSError:
     """Return the ``OSError`` the store handles for a failed Files API call."""
     return OSError(f"{path}: {error}")
+
+
+# Volume calls slower than this are logged at WARNING (shown by default in the
+# app logs), the others at DEBUG.
+SLOW_FILE_CALL_SECONDS = 2.0
+
+
+@contextmanager
+def _timed(operation: str, path: Path) -> Iterator[None]:
+    """Log how long a Files API call took, failed or not."""
+    started = time.perf_counter()
+    try:
+        yield
+    finally:
+        seconds = time.perf_counter() - started
+        level = logging.WARNING if seconds >= SLOW_FILE_CALL_SECONDS else logging.DEBUG
+        logger.log(level, "Files API %s %.2fs: %s", operation, seconds, path)
 
 
 class LocalFiles:
@@ -91,26 +111,28 @@ class VolumeFiles:
         self._client = client
 
     def read_text(self, path: Path) -> str:
-        try:
-            response = self._client.files.download(str(path))
-        except NotFound as e:
-            raise FileNotFoundError(str(path)) from e
-        except DatabricksError as e:
-            raise _os_error(path, e) from e
-        if response.contents is None:
-            msg = f"{path}: the download returned no content"
-            raise OSError(msg)
-        with response.contents as contents:
-            return contents.read().decode("utf-8")
+        with _timed("download", path):
+            try:
+                response = self._client.files.download(str(path))
+            except NotFound as e:
+                raise FileNotFoundError(str(path)) from e
+            except DatabricksError as e:
+                raise _os_error(path, e) from e
+            if response.contents is None:
+                msg = f"{path}: the download returned no content"
+                raise OSError(msg)
+            with response.contents as contents:
+                return contents.read().decode("utf-8")
 
     def exists(self, path: Path) -> bool:
-        try:
-            self._client.files.get_metadata(str(path))
-        except NotFound:
-            return False
-        except DatabricksError as e:
-            raise _os_error(path, e) from e
-        return True
+        with _timed("get_metadata", path):
+            try:
+                self._client.files.get_metadata(str(path))
+            except NotFound:
+                return False
+            except DatabricksError as e:
+                raise _os_error(path, e) from e
+            return True
 
     def create(self, path: Path, content: str) -> None:
         # The Files API creates missing parent folders on upload.

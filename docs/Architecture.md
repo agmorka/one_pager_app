@@ -43,7 +43,7 @@ Streamlit pages never talk to storage directly and never contain workflow/valida
 Streamlit re-runs the entire page script on every widget interaction. This has direct implications for form state, locking, and concurrency:
 
 - **In-progress form data**: all editor form state (the One Pager being edited, partial field entries, the active tab) is held in `st.session_state` so it survives re-runs. Content is never lost due to a re-run or a transient error — it stays in session until the user explicitly saves, cancels, or the session ends.
-- **Pessimistic lock heartbeat**: the app acquires a lock when the user enters edit mode (requirements doc §10). Because Streamlit has no server-side heartbeat, the lock is **refreshed on every re-run** (i.e., on every widget interaction) by updating the lock timestamp in Delta. If no re-run occurs for 30 minutes (the lock's expiry window), the lock expires and another user can take over. This is a natural fit for Streamlit's execution model — user activity = re-runs = heartbeats.
+- **Pessimistic lock heartbeat**: the app acquires a lock when the user enters edit mode (requirements doc §10). Because Streamlit has no server-side heartbeat, the lock is **refreshed on re-runs** (i.e., on widget interactions) by updating the lock timestamp in Delta, at most once per TTL/6 (every 5 minutes by default) so that not every interaction waits for a warehouse write. If no re-run occurs for 30 minutes (the lock's expiry window), the lock expires and another user can take over. This is a natural fit for Streamlit's execution model — user activity = re-runs = heartbeats.
 - **Multi-tab / duplicate-session handling**: if the same user opens the same One Pager in edit mode in two browser tabs, the second tab's attempt to acquire the lock will detect the existing lock (held by the same user) and either reuse it (same session) or warn the user that they already have it open elsewhere. The app does not silently allow two parallel editing sessions for the same document, even by the same user.
 - **Session loss**: if the user's browser tab is closed or the Streamlit session is otherwise lost, all unsaved content in `st.session_state` is lost. The lock expires after 30 minutes but content is not recovered. This is an accepted limitation of the current phase; periodic auto-save to a Delta-backed draft buffer may be added in a future release (requirements doc §16).
 
@@ -123,7 +123,7 @@ However, several tables have transactional access patterns (high-frequency row-l
 
 | Table | Why Lakebase is a better fit |
 |---|---|
-| `locks` | High-frequency heartbeat UPDATEs on every Streamlit re-run; Delta small-file accumulation requires periodic OPTIMIZE |
+| `locks` | Heartbeat UPDATEs while editing (at most every 5 minutes per editor); Delta small-file accumulation requires periodic OPTIMIZE |
 | `id_sequences` | Atomic increment with retry on `ConcurrentAppendException`; native `SERIAL` / `RETURNING` in Lakebase eliminates this |
 | `one_pager_status` | Frequent single-row UPDATEs (status, version, timestamps); physical UNIQUE constraint on `data_product` |
 | `one_pager_authorized_users` | Frequent permission lookups; FK integrity enforced by DB instead of app code |

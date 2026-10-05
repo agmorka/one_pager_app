@@ -210,6 +210,69 @@ def test__deployed_with_token__client_for_user__built_from_token(
 
 
 @pytest.mark.unit
+def test__deployed_with_token__client_for_user_twice__reused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The user's client is built once, not for every statement."""
+    # Given
+    conn = _connection(monkeypatch, "databricks", {USER_TOKEN_HEADER: "user-token"})
+
+    # When
+    first = conn._client(Identity.USER)
+    second = conn._client(Identity.USER)
+
+    # Then
+    assert second is first
+
+
+@pytest.mark.unit
+def test__token_changed__client_for_user__rebuilt_with_new_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A different forwarded token never reuses the client of the old one."""
+    # Given
+    conn = _connection(monkeypatch, "databricks", {USER_TOKEN_HEADER: "old-token"})
+    old = conn._client(Identity.USER)
+    monkeypatch.setattr(
+        st, "context", SimpleNamespace(headers={USER_TOKEN_HEADER: "new-token"})
+    )
+
+    # When
+    new = conn._client(Identity.USER)
+
+    # Then
+    assert new is not old
+    assert new.kwargs == {
+        "host": "https://adb.example",
+        "token": "new-token",
+        "auth_type": "pat",
+    }
+
+
+@pytest.mark.unit
+def test__slow_statement__execute__duration_logged_without_parameters(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A statement over the threshold is logged as a warning, SQL start only."""
+    # Given
+    conn, _ = _answering(monkeypatch, _status(StatementState.SUCCEEDED))
+    monkeypatch.setattr(connection_module, "SLOW_STATEMENT_SECONDS", 0.0)
+    caplog.set_level(logging.WARNING, logger=connection_module.__name__)
+
+    # When
+    conn.execute_statement(
+        "SELECT *\n  FROM t WHERE id = :id",
+        {"id": "secret-value"},
+        identity=Identity.APP,
+    )
+
+    # Then
+    message = next(r.getMessage() for r in caplog.records if "SQL " in r.getMessage())
+    assert "as app: SELECT * FROM t WHERE id = :id" in message
+    assert "secret-value" not in caplog.text
+
+
+@pytest.mark.unit
 def test__deployed_without_token__execute_as_user__raises_missing_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -96,6 +96,35 @@ def active_lock(lock: LockInfo | None, now: datetime | None = None) -> LockInfo 
     return lock
 
 
+# The editor writes a heartbeat at most once per this share of the TTL (every
+# 5 minutes with the default 30), not on every re-run: each heartbeat costs
+# three warehouse round-trips. Save and Submit still check the lock fresh.
+HEARTBEAT_TTL_FRACTION = 6
+
+
+def heartbeat_due(
+    lock: LockInfo | None,
+    one_pager_id: str,
+    session_id: str,
+    *,
+    ttl: timedelta = DEFAULT_LOCK_TTL,
+    now: datetime | None = None,
+) -> bool:
+    """Whether the editor must refresh its lock now instead of trusting ``lock``.
+
+    ``lock`` is the session's copy of its own lock from the last heartbeat.
+    The heartbeat is due when there is no copy, it is for another One Pager or
+    session, or ``ttl / HEARTBEAT_TTL_FRACTION`` has passed since it was
+    written.
+    """
+    if lock is None or lock.one_pager_id != one_pager_id:
+        return True
+    if lock.session_id != session_id:
+        return True
+    elapsed = as_utc(now or utc_now()) - as_utc(lock.last_heartbeat)
+    return not timedelta(0) <= elapsed < ttl / HEARTBEAT_TTL_FRACTION
+
+
 def get_active_lock(
     data_access: DataAccess, one_pager_id: str, now: datetime | None = None
 ) -> LockInfo | None:

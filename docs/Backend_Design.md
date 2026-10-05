@@ -200,7 +200,7 @@ Implemented in `onepager_core/locking.py` (dedicated module).
 6. If a lock exists **by a different user** but is expired → overwrite it (the previous session abandoned it). Log a security event (lock override).
 
 ### Heartbeat
-On every Streamlit re-run while the editor is active, `last_heartbeat` and `expires_at` are updated. This is called by the presentation layer (`state.py`) as part of the page re-run lifecycle.
+On Streamlit re-runs while the editor is active, `last_heartbeat` and `expires_at` are updated. This is called by the presentation layer (`state.py`) as part of the page re-run lifecycle. To keep re-runs fast, the heartbeat is written at most once per TTL/6 (every 5 minutes with the default 30-minute TTL; `locking.heartbeat_due`); re-runs in between trust the session's copy of the lock. **Save Draft** and **Submit for Review** still read the lock fresh (`require_lock`), so a lost lock is never written over.
 
 If the Streamlit process dies or the user closes the browser tab, no heartbeat occurs and the lock auto-expires after 30 minutes — no explicit cleanup is needed.
 
@@ -210,7 +210,7 @@ Lock is released (row deleted) on **session-ending actions only**:
 - Cancel (exit editor without saving, discarding changes)
 - Manual release from the Preview page (only the lock holder can release their own lock — permission check: `locked_by_initials == user.initials`)
 
-**Intermediate saves do not release the lock** — the user remains in the editor with their lock active. The heartbeat continues refreshing on each re-run.
+**Intermediate saves do not release the lock** — the user remains in the editor with their lock active. The heartbeat continues refreshing on re-runs (at most every TTL/6).
 
 ### Lock on `owner_update` (Approved → Draft Update)
 When the Owner triggers "Update," the system reads the approved YAML from Git, writes it to the volume, and transitions to `Draft Update`. A lock is **not** automatically acquired at this point — the lock is acquired when the user subsequently enters the editor page. This avoids orphaned locks if the Owner triggers "Update" but doesn't immediately start editing.

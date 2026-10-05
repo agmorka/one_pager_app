@@ -24,6 +24,7 @@ import logging
 import pandas as pd
 import streamlit as st
 
+from adapters import cache
 from adapters.navigation import (
     PREVIEW_FLASH_KEY,
     PREVIEW_ID_KEY,
@@ -43,11 +44,7 @@ from adapters.page import (
     signed_in_user,
     timestamp_label,
 )
-from adapters.theme import (
-    DEFAULT_BADGE_COLOR,
-    get_dp_status_colors,
-    get_op_status_colors,
-)
+from adapters.theme import DEFAULT_BADGE_COLOR
 from adapters.workflow_actions import (
     add_comment_and_report,
     approve_and_report,
@@ -957,8 +954,8 @@ if not preview_data:
 
 # Load status colors
 try:
-    op_colors = get_op_status_colors(data_access)
-    dp_colors = get_dp_status_colors(data_access)
+    op_colors = cache.op_status_colors(data_access)
+    dp_colors = cache.dp_status_colors(data_access)
 except Exception as e:
     logger.exception("Failed to load status colors")
     render_error_state(

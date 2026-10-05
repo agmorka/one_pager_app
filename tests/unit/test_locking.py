@@ -18,6 +18,7 @@ from onepagerapp.locking import (
     get_active_lock,
     get_active_locks,
     heartbeat,
+    heartbeat_due,
     is_expired,
     release_lock,
 )
@@ -533,3 +534,43 @@ def test__no_ids__get_active_locks__empty(mock_data_access: MockDataAccess) -> N
 
     # Then
     assert locks == {}
+
+
+# ============================================================================
+# Heartbeat throttling (editor re-runs)
+# ============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("lock", "elapsed", "due"),
+    [
+        (None, timedelta(0), True),
+        (make_lock(OP_ID), timedelta(0), False),
+        (make_lock(OP_ID), timedelta(minutes=4, seconds=59), False),
+        (make_lock(OP_ID), timedelta(minutes=5), True),
+        (make_lock(OP_ID), timedelta(minutes=-1), True),
+        (make_lock(IN_REVIEW_ID), timedelta(0), True),
+        (make_lock(OP_ID, session_id="other-tab"), timedelta(0), True),
+    ],
+    ids=[
+        "no-lock",
+        "just-written",
+        "before-interval",
+        "interval-passed",
+        "clock-went-back",
+        "other-one-pager",
+        "other-session",
+    ],
+)
+def test__session_lock__heartbeat_due__only_after_a_sixth_of_the_ttl(
+    lock: LockInfo | None, elapsed: timedelta, due: bool
+) -> None:
+    """With the 30-minute TTL the heartbeat is written at most every 5 minutes."""
+    # When
+    result = heartbeat_due(
+        lock, OP_ID, SESSION_ID, ttl=DEFAULT_LOCK_TTL, now=NOW + elapsed
+    )
+
+    # Then
+    assert result is due

@@ -113,6 +113,33 @@ def test__id__open_preview__one_pager_rendered(
 
 
 @pytest.mark.unit
+def test__preview_opened_twice__status_colors__read_once(
+    mock_data_access: MockDataAccess,
+    switched: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The badge colours are cached, not read from the tables on every run."""
+    # Given
+    reads: list[str] = []
+    for name in ("get_ref_op_status", "get_ref_dp_status"):
+        read = getattr(mock_data_access, name)
+        monkeypatch.setattr(
+            mock_data_access,
+            name,
+            lambda read=read, name=name: reads.append(name) or read(),
+        )
+
+    # When
+    first = _preview(mock_data_access).run()
+    second = _preview(mock_data_access).run()
+
+    # Then
+    assert not first.exception
+    assert not second.exception
+    assert sorted(reads) == ["get_ref_dp_status", "get_ref_op_status"]
+
+
+@pytest.mark.unit
 def test__load_fails__open_preview_and_retry__friendly_error_each_time(
     mock_data_access: MockDataAccess,
     switched: list[str],

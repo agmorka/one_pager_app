@@ -16,6 +16,7 @@ import logging
 import pandas as pd
 import streamlit as st
 
+from adapters import cache
 from adapters.page import ALERT_ICON, page_header, require_data_access
 from adapters.theme import status_badge
 from onepagerapp.data_access.base import DataAccess
@@ -51,8 +52,8 @@ def load_legends(data_access: DataAccess) -> tuple[list[BadgeInfo], list[BadgeIn
     """One Pager and Data Product badges; gray defaults if they cannot be read."""
     try:
         return (
-            op_legend(data_access.get_ref_op_status()),
-            dp_legend(data_access.get_ref_dp_status()),
+            op_legend(cache.get_ref_op_status(data_access)),
+            dp_legend(cache.get_ref_dp_status(data_access)),
         )
     except Exception as e:
         logger.exception("Failed to load the status reference tables")
