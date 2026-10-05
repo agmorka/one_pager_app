@@ -9,6 +9,7 @@ import streamlit as st
 from onepagerapp.data_access.mock import MockDataAccess
 from onepagerapp.documents import OnePagerDocumentStore
 from tests.helpers import (
+    ADMIN_ROLES,
     ALICE,
     APPROVED_ID,
     APPROVER,
@@ -47,6 +48,24 @@ def test__owners_draft__cancel_and_report__cancelled_with_flash(
     row = alices_draft.get_one_pager_status_row(NEW_ID)
     assert row.one_pager_status == "Cancelled"
     assert st.session_state["preview_flash"] == "OP-0003 was cancelled."
+
+
+@pytest.mark.unit
+def test__admin_not_owner_or_sme__cancel_and_report__cancelled(
+    actions: ModuleType,
+    alices_draft: MockDataAccess,
+    document_store: OnePagerDocumentStore,
+) -> None:
+    """An Admin may cancel any One Pager, not only their own."""
+    # When
+    error = actions.cancel_and_report(
+        alices_draft, document_store, NEW_ID, make_user("ADM"), "", ADMIN_ROLES
+    )
+
+    # Then
+    assert error is None
+    row = alices_draft.get_one_pager_status_row(NEW_ID)
+    assert row.one_pager_status == "Cancelled"
 
 
 @pytest.mark.unit

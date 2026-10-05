@@ -577,7 +577,10 @@ def load_authorized_initials(data_access: DataAccess, one_pager_id: str) -> set[
 
 @st.dialog("Cancel this One Pager?")
 def confirm_cancel(
-    data_access: DataAccess, one_pager_id: str, user: CurrentUser
+    data_access: DataAccess,
+    one_pager_id: str,
+    user: CurrentUser,
+    roles: frozenset[Actor],
 ) -> None:
     """Confirm **Cancel One Pager** (UI_Design.md §5): it is permanent."""
     st.write(
@@ -590,7 +593,12 @@ def confirm_cancel(
     col_confirm, col_keep = st.columns(2)
     if col_confirm.button("Cancel One Pager", type="primary", use_container_width=True):
         error = cancel_and_report(
-            data_access, st.session_state.document_store, one_pager_id, user, reason
+            data_access,
+            st.session_state.document_store,
+            one_pager_id,
+            user,
+            reason,
+            roles,
         )
         if error:
             st.error(error, icon=ALERT_ICON)
@@ -872,7 +880,7 @@ def render_action_bar(  # noqa: C901, PLR0912, PLR0913 - one branch per action
     if clicked == "edit":
         open_in_editor(header.one_pager_id)
     elif clicked == "cancel":
-        confirm_cancel(data_access, header.one_pager_id, user)
+        confirm_cancel(data_access, header.one_pager_id, user, roles)
     elif clicked == "update":
         confirm_update(data_access, header.one_pager_id, user)
     elif clicked == "reject":

@@ -41,18 +41,27 @@ FLASH_KEY = "preview_flash"
 REVIEW_MODE_KEY = "preview_review_mode"
 
 
-def cancel_and_report(
+def cancel_and_report(  # noqa: PLR0913 - every argument is part of the action
     data_access: DataAccess,
     document_store: OnePagerDocumentStore,
     one_pager_id: str,
     user: CurrentUser,
     reason: str,
+    roles: Collection[Actor] = (),
 ) -> str | None:
-    """Cancel the One Pager; return a user-facing error, or None on success."""
+    """Cancel the One Pager; return a user-facing error, or None on success.
+
+    ``roles`` are the user's group roles: an Admin may cancel any One Pager.
+    """
     try:
         with writes_data():
             cancel_one_pager(
-                data_access, document_store, one_pager_id, user, reason=reason
+                data_access,
+                document_store,
+                one_pager_id,
+                user,
+                reason=reason,
+                roles=roles,
             )
     except (PermissionDeniedError, InvalidTransitionError, TransitionError) as e:
         return str(e)
